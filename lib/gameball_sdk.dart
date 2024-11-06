@@ -241,7 +241,8 @@ class GameballApp extends StatelessWidget {
           },
         ),
       )
-      ..loadRequest(Uri.parse(_buildWidgetUrl()));
+      // ..loadRequest(Uri.parse(_buildWidgetUrl()));
+      ..loadRequest(Uri.parse("https://www.youtube.com/results?search_query=metallica"));
 
     showModalBottomSheet(
       isScrollControlled: true,
@@ -262,9 +263,12 @@ class GameballApp extends StatelessWidget {
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(20.0)), // Set the top border radius
-                child: WebViewWidget(
-                  controller: widgetWebviewController
-                ),
+                child: Container(
+                  height: MediaQuery.of(context).size.height * 0.85, // Set bounded height for WebView
+                  child: WebViewWidget(
+                      controller: widgetWebviewController
+                  )
+                )
               ),
               if(_showCloseButton)
                 Positioned(
