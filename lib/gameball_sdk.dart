@@ -223,6 +223,26 @@ class GameballApp extends StatelessWidget {
   /// Arguments:
   ///   - `context`: The build context for creating the bottom sheet.
   void _openBottomSheet(BuildContext context) {
+
+    var widgetWebviewController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0x00000000))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (int progress) {
+            // Update loading bar.
+          },
+          onPageStarted: (String url) {},
+          onPageFinished: (String url) {},
+          onHttpError: (HttpResponseError error) {},
+          onWebResourceError: (WebResourceError error) {},
+          onNavigationRequest: (NavigationRequest request) {
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(_buildWidgetUrl()));
+
     showModalBottomSheet(
       isScrollControlled: true,
       isDismissible: true,
@@ -242,9 +262,8 @@ class GameballApp extends StatelessWidget {
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(20.0)), // Set the top border radius
-                child: WebView(
-                  initialUrl: _buildWidgetUrl(),
-                  javascriptMode: JavascriptMode.unrestricted,
+                child: WebViewWidget(
+                  controller: widgetWebviewController
                 ),
               ),
               if(_showCloseButton)

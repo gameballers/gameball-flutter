@@ -5,7 +5,7 @@ homepage: https://gameball.co
 repository: https://github.com/gameballers/gameball-flutter
 
 environment:
-  sdk: ^3.5.0
+  sdk: ">=3.4.4 <4.0.0"
   flutter: ">=1.17.0"
 
 dependencies:
@@ -20,8 +20,8 @@ dependencies:
   json_serializable: ^6.8.0
   package_info_plus: ^8.0.2
   platform_info: ^5.0.0
-  webview_flutter: ^3.0.4
-  build_runner: ^2.4.12
+  webview_flutter: ^4.8.0
+  build_runner: ^2.4.11
 
 dev_dependencies:
   flutter_test:
