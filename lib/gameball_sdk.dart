@@ -200,7 +200,7 @@ class GameballApp extends StatelessWidget {
   /// This method initiates the process of showing the Gameball profile within a bottom sheet.
   ///
   /// Arguments:
-  ///   - `context`: The build context for creating the bottom sheet.
+  ///   - `context`: The build context for creating the customer profile widget.
   ///   - `playerUniqueId`: The unique ID of the player.
   ///   - `openDetail`: An optional URL to open within the profile.
   ///   - `hideNavigation`: An optional flag to indicate if the navigation bar should be hidden.
@@ -213,7 +213,7 @@ class GameballApp extends StatelessWidget {
     if(showCloseButton != null){
       _showCloseButton = showCloseButton;
     }
-    _openBottomSheet(context);
+    _openCustomerProfileWidget(context);
   }
 
   /// Opens a bottom sheet to display the Gameball profile.
@@ -221,17 +221,14 @@ class GameballApp extends StatelessWidget {
   /// Creates a bottom sheet with a WebView displaying the Gameball profile based on the provided parameters.
   ///
   /// Arguments:
-  ///   - `context`: The build context for creating the bottom sheet.
-  void _openBottomSheet(BuildContext context) {
-
+  ///   - `context`: The build context for creating the customer profile widget.
+  void _openCustomerProfileWidget(BuildContext context) {
     var widgetWebviewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (int progress) {
-            // Update loading bar.
-          },
+          onProgress: (int progress) {},
           onPageStarted: (String url) {},
           onPageFinished: (String url) {},
           onHttpError: (HttpResponseError error) {},
@@ -243,42 +240,44 @@ class GameballApp extends StatelessWidget {
       )
       ..loadRequest(Uri.parse(_buildWidgetUrl()));
 
-    showModalBottomSheet(
-      isScrollControlled: true,
-      isDismissible: true,
+    showDialog(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-            top: Radius.circular(20.0)), // Set the top border radius
-      ),
+      barrierDismissible: true,
       builder: (BuildContext context) {
         String language = handleLanguage(_lang, _playerPreferredLanguage);
 
-        return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.93,
-          // Adjust the height as desired (e.g., 95% of the screen height)
-          child: Stack(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20.0)), // Set the top border radius
-                child: WebViewWidget(
-                  controller: widgetWebviewController
-                ),
-              ),
-              if(_showCloseButton)
-                Positioned(
-                  top: 10.0,
-                  left: isRtl(language) ? 10.0 : null,
-                  right: isLtr(language) ? 10.0 : null,
-                  child: IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
+          ),
+          insetPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.95,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20.0)),
+                  child: Container(
+                    height: MediaQuery.of(context).size.height, // Set bounded height for WebView
+                    child: WebViewWidget(
+                      controller: widgetWebviewController,
+                    ),
                   ),
                 ),
-            ],
+                if (_showCloseButton)
+                  Positioned(
+                    top: 10.0,
+                    left: isRtl(language) ? 10.0 : null,
+                    right: isLtr(language) ? 10.0 : null,
+                    child: IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
