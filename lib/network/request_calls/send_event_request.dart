@@ -24,7 +24,7 @@ import 'package:http/http.dart' as http;
 ///   An `Exception` with an error message if the request fails.
 Future<http.Response> sendEventRequest(
     Event requestBody, String apiKey, String lang) async {
-  const url = '$baseUrl$eventEndpoint';
+  const url = '$baseUrl$sendEventEndpoint';
 
   final response = await http.post(
     Uri.parse(url),
@@ -34,7 +34,7 @@ Future<http.Response> sendEventRequest(
 
   // Check for successful response
   // Send event returns an empty body
-  if (response.statusCode == 200) {
+  if (response.statusCode >= 200 && response.statusCode <= 299) {
     return response;
   } else {
     // Handle error based on status code or throw an exception

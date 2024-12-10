@@ -1,14 +1,14 @@
-import '../../models/responses/player_register_response.dart';
+import '../../models/responses/initialize_customer_response.dart';
 
-/// Callback function type for player registration responses.
+/// Callback function type for customer registration responses.
 ///
-/// Defines the signature for a callback function that handles the result of a player registration request.
+/// Defines the signature for a callback function that handles the result of a customer registration request.
 ///
 /// Arguments:
-///   - `response`: The `PlayerRegisterResponse` object if the registration was successful.
+///   - `response`: The `InitializeCustomerResponse` object if the registration was successful.
 ///   - `error`: An `Exception` object if an error occurred.
 typedef RegisterCallback = void Function(
-    PlayerRegisterResponse? response, Exception? error);
+    InitializeCustomerResponse? response, Exception? error);
 
 /// Callback function type for referral code retrieval.
 ///

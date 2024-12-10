@@ -2,7 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
-import 'package:gameball_sdk/models/requests/player_attributes.dart';
+import 'package:gameball_sdk/models/requests/customer_attributes.dart';
 
 void main() {
   runApp(const MyApp());
@@ -69,7 +69,7 @@ class _MyHomePageState extends State<MyHomePage> {
         }
       }
 
-      PlayerAttributes playerAttributes = PlayerAttributes(
+      CustomerAttributes playerAttributes = CustomerAttributes(
           displayName: "John Doe",
           firstName: "John",
           lastName: "Doe",
@@ -97,7 +97,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
 
       Event eventBody = Event(
-          playerUniqueId: "{playerUniqueId}",
+          customerId: "{playerUniqueId}",
           events: {
             "{eventName}": {
               "{prop1}": "{value1}"

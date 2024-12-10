@@ -14,14 +14,14 @@ Event _$EventFromJson(Map<String, dynamic> json) => Event(
               (k, e) => MapEntry(k, e as Object),
             )),
       ),
-      playerUniqueId: json['playerUniqueId'] as String,
+      customerId: json['customerId'] as String,
       mobileNumber: json['mobile'] as String?,
       email: json['email'] as String?,
     );
 
 Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
       'events': instance.events,
-      'playerUniqueId': instance.playerUniqueId,
+      'customerId': instance.customerId,
       'mobile': instance.mobileNumber,
       'email': instance.email,
     };

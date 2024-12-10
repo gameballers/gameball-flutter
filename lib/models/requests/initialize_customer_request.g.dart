@@ -1,34 +1,36 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'player_register_request.dart';
+part of 'initialize_customer_request.dart';
 
 // **************************************************************************
 // JsonSerializableGenerator
 // **************************************************************************
 
-PlayerRegisterRequest _$PlayerRegisterRequestFromJson(
+InitializeCustomerRequest _$InitializeCustomerRequestFromJson(
         Map<String, dynamic> json) =>
-    PlayerRegisterRequest(
-      playerUniqueID: json['playerUniqueId'] as String,
+    InitializeCustomerRequest(
+      customerId: json['customerId'] as String,
       deviceToken: json['deviceToken'] as String,
       osType: json['osType'] as String?,
-      playerAttributes: json['playerAttributes'] == null
+      customerAttributes: json['customerAttributes'] == null
           ? null
-          : PlayerAttributes.fromJson(
-              json['playerAttributes'] as Map<String, dynamic>),
+          : CustomerAttributes.fromJson(
+              json['customerAttributes'] as Map<String, dynamic>),
       referrerCode: json['referrerCode'] as String?,
       email: json['email'] as String?,
       mobileNumber: json['mobile'] as String?,
+      isGuest: json['guest'] as bool?,
     );
 
-Map<String, dynamic> _$PlayerRegisterRequestToJson(
-        PlayerRegisterRequest instance) =>
+Map<String, dynamic> _$InitializeCustomerRequestToJson(
+        InitializeCustomerRequest instance) =>
     <String, dynamic>{
-      'playerUniqueId': instance.playerUniqueID,
+      'customerId': instance.customerId,
       'deviceToken': instance.deviceToken,
       'osType': instance.osType,
-      'playerAttributes': instance.playerAttributes,
+      'customerAttributes': instance.customerAttributes,
       'referrerCode': instance.referrerCode,
       'email': instance.email,
       'mobile': instance.mobileNumber,
+      'guest': instance.isGuest,
     };

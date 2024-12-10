@@ -1,19 +1,19 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'player_register_response.dart';
+part of 'initialize_customer_response.dart';
 
 // **************************************************************************
 // JsonSerializableGenerator
 // **************************************************************************
 
-PlayerRegisterResponse _$PlayerRegisterResponseFromJson(
+InitializeCustomerResponse _$InitializeCustomerResponseFromJson(
         Map<String, dynamic> json) =>
-    PlayerRegisterResponse(
+    InitializeCustomerResponse(
       (json['gameballId'] as num).toInt(),
     );
 
-Map<String, dynamic> _$PlayerRegisterResponseToJson(
-        PlayerRegisterResponse instance) =>
+Map<String, dynamic> _$InitializeCustomerResponseToJson(
+        InitializeCustomerResponse instance) =>
     <String, dynamic>{
       'gameballId': instance.gameballId,
     };

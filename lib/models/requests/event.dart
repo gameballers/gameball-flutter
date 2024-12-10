@@ -5,7 +5,7 @@ part 'event.g.dart';
 /// Represents an event to be sent to the Gameball API.
 ///
 /// This class defines the structure of an event object with properties
-/// for event data, player unique ID, optional mobile number, and optional email.
+/// for event data, customer Id, optional mobile number, and optional email.
 @JsonSerializable()
 class Event {
   /// A map containing the actual event data.
@@ -13,15 +13,15 @@ class Event {
   @JsonKey(name: "events")
   Map<String, Map<String, Object>> events;
 
-  /// The unique identifier of the player associated with the event.
-  @JsonKey(name: "playerUniqueId")
-  String playerUniqueId;
+  /// The unique identifier of the customer associated with the event.
+  @JsonKey(name: "customerId")
+  String customerId;
 
-  /// The player's mobile number (optional).
+  /// The customer's mobile number (optional).
   @JsonKey(name: "mobile")
   String? mobileNumber;
 
-  /// The player's email address (optional).
+  /// The customer's email address (optional).
   @JsonKey(name: "email")
   String? email;
 
@@ -29,12 +29,12 @@ class Event {
   ///
   /// Arguments:
   ///   - `events`: The event data map (required).
-  ///   - `playerUniqueId`: The player's unique ID (required).
-  ///   - `mobileNumber`: The player's mobile number (optional).
-  ///   - `email`: The player's email address (optional).
+  ///   - `customerId`: The customer's unique identifier (required).
+  ///   - `mobileNumber`: The customer's mobile number (optional).
+  ///   - `email`: The customer's email address (optional).
   Event({
     required this.events,
-    required this.playerUniqueId,
+    required this.customerId,
     this.mobileNumber,
     this.email,
   });

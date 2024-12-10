@@ -1,13 +1,13 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'player_attributes.dart';
+part of 'customer_attributes.dart';
 
 // **************************************************************************
 // JsonSerializableGenerator
 // **************************************************************************
 
-PlayerAttributes _$PlayerAttributesFromJson(Map<String, dynamic> json) =>
-    PlayerAttributes(
+CustomerAttributes _$CustomerAttributesFromJson(Map<String, dynamic> json) =>
+    CustomerAttributes(
       displayName: json['displayName'] as String?,
       firstName: json['firstName'] as String?,
       lastName: json['lastName'] as String?,
@@ -23,7 +23,7 @@ PlayerAttributes _$PlayerAttributesFromJson(Map<String, dynamic> json) =>
       ),
     );
 
-Map<String, dynamic> _$PlayerAttributesToJson(PlayerAttributes instance) =>
+Map<String, dynamic> _$CustomerAttributesToJson(CustomerAttributes instance) =>
     <String, dynamic>{
       'displayName': instance.displayName,
       'firstName': instance.firstName,
