@@ -23,5 +23,5 @@ PackageInfo? getPckageInfo() {
 
 /// A function that returns the SDK version as a string.
 String getSdkVersion() {
-  return "1.0.3";
+  return "2.0.0";
 }

@@ -1,7 +1,7 @@
 # Gameball Flutter SDK
 ## `Gameball Flutter SDK` is a library that allows you to integrate the Gameball platform's features into your Flutter applications. It enables you to:
 
-* Register players and track their activities.
+  * Register customers and track their activities.
 * Send personalized events to trigger Gameball campaigns.
 * Display the Gameball user interface within your app.
 
@@ -52,12 +52,12 @@ Future<void> main() async {
   // ... rest of your app
 }
 ```
-3. Player Registration:
-* Register a player with their unique ID, email (optional), mobile number (optional), and custom attributes:
+3. Customer Registration:
+* Register a customer with their unique identifier, email (optional), mobile number (optional), and custom attributes:
 ```
 Dart
 
-PlayerAttributes playerAttributes = PlayerAttributes(
+CustomerAttributes customerAttributes = CustomerAttributes(
   displayName: "John Doe",
   firstName: "John",
   lastName: "Doe",
@@ -68,23 +68,24 @@ PlayerAttributes playerAttributes = PlayerAttributes(
   },
 );
 
-gameballApp.registerPlayer(
-  "{playerUniqueId}",
-  "{playerEmail}",
-  "{playerMobile}",
-  playerAttributes,
+gameballApp.registerCustomer(
+  "{customerId}",
+  "{customerEmail}",
+  "{customerMobile}",
+  false, //isGuest = false
+  CustomerAttributes,
   (response, error) {
     // Handle registration response
   },
 );
 ```
 4. Sending Events:
-* Define an `Event` object with the player's unique ID and event details:
+* Define an `Event` object with the customer's unique identifier and event details:
 ```
 Dart
 
 Event eventBody = Event(
-  playerUniqueId: "{playerUniqueId}",
+  customerId: "{customerId}",
   events: {
     "{eventName}": {
       "{prop1}": "{value1}",
@@ -101,10 +102,10 @@ gameballApp.sendEvent(eventBody, (success, error) {
 ```
 Dart
 
-gameballApp.showProfile(context, "{playerUniqueId}", "{openDetail}", "{hideNavigation}", "{showCloseButton}");
+gameballApp.showProfile(context, "{customerId}", "{openDetail}", "{hideNavigation}", "{showCloseButton}");
 ```
 * Replace `context` with the current build context.
-* Use placeholders for `playerUniqueId`, `openDetail` (optional URL to open within the profile), `hideNavigation` (optional boolean to hide/show navigation arrow), `showCloseButton` (optional boolean to hide/show close button).
+* Use placeholders for `customerId`, `openDetail` (optional URL to open within the profile), `hideNavigation` (optional boolean to hide/show navigation arrow), `showCloseButton` (optional boolean to hide/show close button).
   Note: Replace all instances of `"{...}"` placeholders with your actual values.
 
 # Additional Resources

@@ -1,3 +1,10 @@
+## 2.0.0
+
+* Exit Player, Enter Customer. Gameball's SDK now runs on Integrations APIs V4. ✌🔥
+* Changed customer profile widget implementation to improve the scrolling of the WebView content
+* Added backwards compatibility for dart v3.4.4, webview_flutter v4.8.0, build_runner v2.4.11
+* Upgraded firebase dependencies to the lastest version
+
 ## 1.0.3
 
 * Added the option to show/hide the widget close button

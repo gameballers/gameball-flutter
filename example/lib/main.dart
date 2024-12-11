@@ -60,16 +60,16 @@ class _MyHomePageState extends State<MyHomePage> {
     gameballApp.init("{api_key}", "{lang}", "{platform}", "{shop}");
     setState(() {
 
-      playerRegistrationCallback(response, error) {
+      customerRegistrationCallback(response, error) {
         if(error == null && response != null){
-          gameballApp.showProfile(context, "{playerUniqueId}", "{openDetail}", false);
+          gameballApp.showProfile(context, "{customerId}", "{openDetail}", false);
         }
         else{
           // TODO
         }
       }
 
-      CustomerAttributes playerAttributes = CustomerAttributes(
+      CustomerAttributes customerAttributes = CustomerAttributes(
           displayName: "John Doe",
           firstName: "John",
           lastName: "Doe",
@@ -80,12 +80,13 @@ class _MyHomePageState extends State<MyHomePage> {
           }
       );
 
-      gameballApp.registerPlayer(
-          "{playerUniqueId}",
-          "{playerEmail}",
-          "{playerMobile}",
-          playerAttributes,
-          playerRegistrationCallback);
+      gameballApp.registerCustomer(
+          "{customerId}",
+          "{customerEmail}",
+          "{customerMobile}",
+          false, // isGuest = false, not a guest
+          customerAttributes,
+          customerRegistrationCallback);
 
       sendEventCallback(response, error){
         if(error == null && response != null){
@@ -97,7 +98,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
 
       Event eventBody = Event(
-          customerId: "{playerUniqueId}",
+          customerId: "{customerId}",
           events: {
             "{eventName}": {
               "{prop1}": "{value1}"

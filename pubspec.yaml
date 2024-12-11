@@ -1,6 +1,6 @@
 name: gameball_sdk
 description: "Gameball Integration SDK allowing direct communication with multiple Gameball services like Customer creation, sending Events, and showing Gameball Profile"
-version: 1.0.3
+version: 2.0.0
 homepage: https://gameball.co
 repository: https://github.com/gameballers/gameball-flutter
 
