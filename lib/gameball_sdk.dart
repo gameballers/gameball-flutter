@@ -215,15 +215,20 @@ class GameballApp extends StatelessWidget {
   ///   - `openDetail`: An optional URL to open within the profile.
   ///   - `hideNavigation`: An optional flag to indicate if the navigation bar should be hidden.
   ///   - `showCloseButton`: An optional flag to control the visibility of a close button, Defaulted to always show.
-  void showProfile(BuildContext context, String customerId,
-      String? openDetail, bool? hideNavigation, bool? showCloseButton) {
+  void showProfile(BuildContext context, String customerId, String? openDetail,
+      bool? hideNavigation, bool? showCloseButton, double? height) {
     _customerId = customerId;
     _openDetail = openDetail;
     _hideNavigation = hideNavigation;
     if(showCloseButton != null){
       _showCloseButton = showCloseButton;
     }
-    _openCustomerProfileWidget(context);
+
+    if (height == null || height > 1 || height < 0.1) {
+      height = 0.95;
+    }
+
+    _openCustomerProfileWidget(context, height);
   }
 
   /// Opens a bottom sheet to display the Gameball profile.
@@ -232,7 +237,7 @@ class GameballApp extends StatelessWidget {
   ///
   /// Arguments:
   ///   - `context`: The build context for creating the customer profile widget.
-  void _openCustomerProfileWidget(BuildContext context) {
+  void _openCustomerProfileWidget(BuildContext context, double height) {
     var widgetWebviewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
@@ -261,8 +266,9 @@ class GameballApp extends StatelessWidget {
             borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
           ),
           insetPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+          alignment: Alignment.bottomCenter, // Ensures bottom alignment
           child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.95,
+            height: MediaQuery.of(context).size.height * height,
             child: Stack(
               children: [
                 ClipRRect(
