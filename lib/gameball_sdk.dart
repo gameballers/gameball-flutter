@@ -286,7 +286,10 @@ class GameballApp extends StatelessWidget {
                     left: isRtl(language) ? 10.0 : null,
                     right: isLtr(language) ? 10.0 : null,
                     child: IconButton(
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(
+                        Icons.close,
+                        color: Color(0xFFCECECE)
+                      ),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
