@@ -24,10 +24,10 @@ import 'package:http/http.dart' as http;
 ///
 /// Throws:
 ///   An `Exception` with an error message if the request fails.
-Future<InitializeCustomerResponse> registerCustomerRequest(
-    InitializeCustomerRequest requestBody, String apiKey, String lang) async {
-  const url = '$baseUrl$initializeCustomerEndpoint';
-
+Future<InitializeCustomerResponse> initializeCustomerRequest(
+    InitializeCustomerRequest requestBody, String apiKey, String lang, {String? customApiPrefix}) async {
+  final apiBaseUrl = customApiPrefix ?? baseUrl;
+  final url = '$apiBaseUrl$integrationsUrl$initializeCustomerEndpoint';
   final response = await http.post(
     Uri.parse(url),
     headers: getRequestHeaders(apiKey, lang),
