@@ -89,11 +89,11 @@ class _MyHomePageState extends State<MyHomePage> {
           displayName: "John Doe",
           firstName: "John",
           lastName: "Doe",
-          mobileNumber: "0123456789",
+          mobile: "0123456789",
           preferredLanguage: "en",
           customAttributes: {"{key}": "{value}"});
 
-      gameballApp.registerCustomer(
+      gameballApp.initializeCustomer(
           "{customerId}",
           "{customerEmail}",
           "{customerMobile}",

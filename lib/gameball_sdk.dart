@@ -1,9 +1,8 @@
 library gameball_sdk;
 
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:gameball_sdk/network/request_calls/register_customer_request.dart';
+import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
 import 'package:gameball_sdk/utils/platform_utils.dart';
@@ -17,12 +16,16 @@ import 'package:flutter/material.dart';
 import 'models/requests/event.dart';
 import 'models/requests/customer_attributes.dart';
 import 'models/requests/initialize_customer_request.dart';
+import 'models/requests/show_profile_request.dart';
+import 'models/requests/gameball_config.dart';
 import 'network/models/callbacks.dart';
 import 'network/request_calls/send_event_request.dart';
 
 import 'network/utils/constants.dart';
 
 class GameballApp extends StatelessWidget {
+  const GameballApp({super.key});
+  
   static GameballApp? _instance;
   static String _apiKey = "";
   static String _customerId = "";
@@ -32,6 +35,7 @@ class GameballApp extends StatelessWidget {
   static String? _platform;
   static String? _shop;
   static String? _customerPreferredLanguage;
+  static String? _apiPrefix;
   static String? _customerEmail;
   static String? _customerMobile;
   static bool? _isGuest;
@@ -39,23 +43,28 @@ class GameballApp extends StatelessWidget {
   static String? _openDetail;
   static bool? _hideNavigation;
   static bool _showCloseButton = true;
+  static String? _widgetUrlPrefix;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
   /// Creates a new instance if it doesn't exist and returns it.
   static GameballApp getInstance() {
-    _instance ??= GameballApp();
+    _instance ??= const GameballApp();
     return _instance!;
   }
 
   /// Initializes the Gameball SDK with required parameters.
   ///
   /// Sets the API key, language, platform, and shop information for subsequent SDK operations.
-  void init(String apiKey, String lang, String? platform, String? shop) {
-    _lang = lang;
-    _platform = platform;
-    _shop = shop;
-    _apiKey = apiKey;
+  ///
+  /// Arguments:
+  ///   - `config`: The GameballConfig containing all initialization parameters.
+  void init(GameballConfig config) {
+    _lang = config.lang;
+    _platform = config.platform;
+    _shop = config.shop;
+    _apiKey = config.apiKey;
+    _apiPrefix = config.apiPrefix;
   }
 
   /// Initializes Firebase Messaging and retrieves the device token.
@@ -101,36 +110,33 @@ class GameballApp extends StatelessWidget {
     }
   }
 
-  /// Registers a customer with Gameball.
+  /// Initializes a customer using a pre-built [InitializeCustomerRequest].
   ///
-  /// This method initiates the customer registration process, handling referral codes, and sending the registration request.
+  /// This provides a builder-pattern friendly API where the caller
+  /// constructs an [InitializeCustomerRequest] using
+  /// [InitializeCustomerRequestBuilder] and passes it here.
   ///
   /// Arguments:
-  ///   - `customerId`: The unique identifier for the customer.
-  ///   - `customerEmail`: The customer's email address (optional).
-  ///   - `customerMobile`: The customer's mobile number (optional).
-  ///   - `referralCode`: The referral code of the customer who referred this customer (optional).
-  ///   - `isGuest`: The customer's state whether a guest or not (optional).
-  ///   - `customerAttributes`: Additional customer attributes.
+  ///   - `request`: The InitializeCustomerRequest containing all customer initialization parameters.
   ///   - `responseCallback`: A callback function to handle the registration response.
-  Future<void> registerCustomer(
-    String customerId,
-    String? customerEmail,
-    String? customerMobile,
-    String? referralCode,
-    bool? isGuest,
-    CustomerAttributes? customerAttributes,
+  Future<void> initializeCustomer(
+    InitializeCustomerRequest request,
     RegisterCallback? responseCallback,
   ) async {
-    _customerId = customerId.trim();
+    _customerId = request.customerId.trim();
 
     if (isNullOrEmpty(_customerId) || isNullOrEmpty(_apiKey)) {
       responseCallback!(null, null);
       return;
     }
 
-    final email = customerEmail?.trim();
-    final mobile = customerMobile?.trim();
+    _deviceToken = request.deviceToken ?? '';
+    if (request.pushProvider != null) {
+      _pushProvider = request.pushProvider!;
+    }
+
+    final email = request.email?.trim();
+    final mobile = request.mobile?.trim();
 
     if (!isNullOrEmpty(email)) {
       _customerEmail = email;
@@ -140,22 +146,22 @@ class GameballApp extends StatelessWidget {
       _customerMobile = mobile;
     }
 
-    if (!isNullOrEmpty(referralCode)) {
-      _referralCode = referralCode;
+    if (!isNullOrEmpty(request.referralCode)) {
+      _referralCode = request.referralCode;
     }
 
-    if (customerAttributes?.preferredLanguage != null &&
-        customerAttributes?.preferredLanguage?.length == 2) {
-      _customerPreferredLanguage = customerAttributes?.preferredLanguage;
+    if (request.customerAttributes?.preferredLanguage != null &&
+        request.customerAttributes?.preferredLanguage?.length == 2) {
+      _customerPreferredLanguage = request.customerAttributes?.preferredLanguage;
     }
 
-    if(isGuest == null){
+    if(request.isGuest == null){
       _isGuest = false;
     }else{
-      _isGuest = isGuest;
+      _isGuest = request.isGuest;
     }
     
-    _registerDevice(customerAttributes, responseCallback);
+    _registerDevice(request.customerAttributes, responseCallback);
   }
 
   /// Registers the device with Gameball using the provided customer attributes.
@@ -169,18 +175,19 @@ class GameballApp extends StatelessWidget {
   void _registerDevice(
       CustomerAttributes? customerAttributes, RegisterCallback? callback) {
     InitializeCustomerRequest customerRegisterRequest =
-        InitializeCustomerRequest(
-            customerId: _customerId,
-            deviceToken: _deviceToken,
-            email: _customerEmail,
-            mobileNumber: _customerMobile,
-            customerAttributes: customerAttributes,
-            referrerCode: _referralCode,
-            isGuest: _isGuest,
-            pushProvider: _pushProvider);
+        InitializeCustomerRequestBuilder()
+            .customerId(_customerId)
+            .deviceToken(_deviceToken.isEmpty ? null : _deviceToken)
+            .email(_customerEmail)
+            .mobile(_customerMobile)
+            .customerAttributes(customerAttributes)
+            .referralCode(_referralCode)
+            .isGuest(_isGuest)
+            .pushProvider(_pushProvider)
+            .build();
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      registerCustomerRequest(customerRegisterRequest, _apiKey, language)
+      initializeCustomerRequest(customerRegisterRequest, _apiKey, language, customApiPrefix: _apiPrefix)
           .then((response) {
         if (response != null) {
           callback!(response, null);
@@ -199,12 +206,12 @@ class GameballApp extends StatelessWidget {
   /// The callback is invoked with a success/failure indicator and any encountered error.
   ///
   /// Arguments:
-  ///   - `eventBody`: The event data to be sent.
+  ///   - `event`: The event data to be sent.
   ///   - `callback`: The callback function to handle the event sending result.s
-  void sendEvent(Event eventBody, SendEventCallback? callback) {
+  void sendEvent(Event event, SendEventCallback? callback) {
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      sendEventRequest(eventBody, _apiKey, language).then((response) {
+      sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix).then((response) {
         if (response.statusCode == 200) {
           callback!(true, null);
         } else {
@@ -222,17 +229,14 @@ class GameballApp extends StatelessWidget {
   ///
   /// Arguments:
   ///   - `context`: The build context for creating the customer profile widget.
-  ///   - `customerId`: The unique identifier of the customer.
-  ///   - `openDetail`: An optional URL to open within the profile.
-  ///   - `hideNavigation`: An optional flag to indicate if the navigation bar should be hidden.
-  ///   - `showCloseButton`: An optional flag to control the visibility of a close button, Defaulted to always show.
-  void showProfile(BuildContext context, String customerId,
-      String? openDetail, bool? hideNavigation, bool? showCloseButton) {
-    _customerId = customerId;
-    _openDetail = openDetail;
-    _hideNavigation = hideNavigation;
-    if(showCloseButton != null){
-      _showCloseButton = showCloseButton;
+  ///   - `request`: The ShowProfileRequest containing all profile display parameters.
+  void showProfile(BuildContext context, ShowProfileRequest request) {
+    _customerId = request.customerId;
+    _openDetail = request.openDetail;
+    _hideNavigation = request.hideNavigation;
+    _widgetUrlPrefix = request.widgetUrlPrefix;
+    if(request.showCloseButton != null){
+      _showCloseButton = request.showCloseButton!;
     }
     _openCustomerProfileWidget(context);
   }
@@ -354,10 +358,10 @@ class GameballApp extends StatelessWidget {
         String language = handleLanguage(_lang, _customerPreferredLanguage);
 
         return Dialog(
-          shape: RoundedRectangleBorder(
+          shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
           ),
-          insetPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
           child: SizedBox(
             height: MediaQuery.of(context).size.height * 0.95,
             child: Stack(
@@ -400,9 +404,9 @@ class GameballApp extends StatelessWidget {
   String _buildWidgetUrl() {
     String language = handleLanguage(_lang, _customerPreferredLanguage);
 
-    String widgetUrl = widgetBaseUrl;
+    String widgetUrl = '${_widgetUrlPrefix ?? widgetBaseUrl}?';
 
-    widgetUrl += '&playerid=$_customerId';
+    widgetUrl += 'playerid=$_customerId';
 
     widgetUrl += '&lang=$language';
 
