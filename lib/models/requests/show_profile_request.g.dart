@@ -13,4 +13,5 @@ Map<String, dynamic> _$ShowProfileRequestToJson(ShowProfileRequest instance) =>
       'hideNavigation': instance.hideNavigation,
       'showCloseButton': instance.showCloseButton,
       'widgetUrlPrefix': instance.widgetUrlPrefix,
+      'closeButtonColor': instance.closeButtonColor,
     };
