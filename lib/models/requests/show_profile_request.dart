@@ -28,6 +28,10 @@ class ShowProfileRequest {
   @JsonKey(name: "widgetUrlPrefix")
   final String? widgetUrlPrefix;
 
+  /// An optional color for the close button.
+  @JsonKey(name: "closeButtonColor")
+  final String? closeButtonColor;
+
   /// Private constructor for creating ShowProfileRequest instances.
   /// Use [ShowProfileRequestBuilder] to create instances of this class.
   const ShowProfileRequest._({
@@ -36,6 +40,7 @@ class ShowProfileRequest {
     this.hideNavigation,
     this.showCloseButton,
     this.widgetUrlPrefix,
+    this.closeButtonColor,
   });
 
 
@@ -51,6 +56,7 @@ class ShowProfileRequest {
         hideNavigation: json['hideNavigation'] as bool?,
         showCloseButton: json['showCloseButton'] as bool?,
         widgetUrlPrefix: json['widgetUrlPrefix'] as String?,
+        closeButtonColor: json['closeButtonColor'] as String?,
       );
 }
 
@@ -63,6 +69,7 @@ class ShowProfileRequestBuilder {
   bool? _hideNavigation;
   bool? _showCloseButton;
   String? _widgetUrlPrefix;
+  String? _closeButtonColor;
 
   /// Set the required customer id.
   ShowProfileRequestBuilder customerId(String customerId) {
@@ -94,6 +101,12 @@ class ShowProfileRequestBuilder {
     return this;
   }
 
+  /// Set the optional close button color.
+  ShowProfileRequestBuilder closeButtonColor(String? closeButtonColor) {
+    _closeButtonColor = closeButtonColor;
+    return this;
+  }
+
   /// Build the final immutable [ShowProfileRequest] instance.
   ShowProfileRequest build() {
     if (_customerId == null || _customerId!.isEmpty) {
@@ -105,6 +118,7 @@ class ShowProfileRequestBuilder {
       hideNavigation: _hideNavigation,
       showCloseButton: _showCloseButton,
       widgetUrlPrefix: _widgetUrlPrefix,
+      closeButtonColor: _closeButtonColor,
     );
   }
 }

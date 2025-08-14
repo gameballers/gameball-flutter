@@ -44,6 +44,7 @@ class GameballApp extends StatelessWidget {
   static bool? _hideNavigation;
   static bool _showCloseButton = true;
   static String? _widgetUrlPrefix;
+  static String? _closeButtonColor;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -235,6 +236,7 @@ class GameballApp extends StatelessWidget {
     _openDetail = request.openDetail;
     _hideNavigation = request.hideNavigation;
     _widgetUrlPrefix = request.widgetUrlPrefix;
+    _closeButtonColor = request.closeButtonColor;
     if(request.showCloseButton != null){
       _showCloseButton = request.showCloseButton!;
     }
@@ -381,9 +383,11 @@ class GameballApp extends StatelessWidget {
                     left: isRtl(language) ? 10.0 : null,
                     right: isLtr(language) ? 10.0 : null,
                     child: IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                           Icons.close,
-                          color: Color(0xFFCECECE)
+                          color: _closeButtonColor != null 
+                              ? Color(int.parse(_closeButtonColor!.replaceFirst('#', '0xFF')))
+                              : const Color(0xFFCECECE)
                       ),
                       onPressed: () {
                         Navigator.of(context).pop();
