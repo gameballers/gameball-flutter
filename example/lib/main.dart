@@ -66,15 +66,6 @@ class _MyHomePageState extends State<MyHomePage> {
       String deviceToken = "{deviceToken}";
       gameballApp.initializeHuawei(deviceToken);
 
-      customerReferralCodeCallback(response, error) {
-        if (error == null && response != null) {
-          // TODO
-        } else {
-          // TODO
-        }
-      }
-
-      gameballApp.handleFirebaseDynamicLink(customerReferralCodeCallback);
 
       customerRegistrationCallback(response, error) {
         if (error == null && response != null) {

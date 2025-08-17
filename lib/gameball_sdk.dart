@@ -9,7 +9,6 @@ import 'package:gameball_sdk/utils/platform_utils.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
@@ -89,27 +88,6 @@ class GameballApp extends StatelessWidget {
     _pushProvider = "Huawei";
   }
 
-  /// Handles incoming Firebase Dynamic Links containing potential referral codes.
-  ///
-  /// This method retrieves any pending dynamic link upon app launch and checks
-  /// if it contains a `GBReferral` query parameter. If a referral code is found,
-  /// it invokes the provided callback function with the extracted code. Otherwise,
-  /// the callback is called with `null` for both the referral code and any error.
-  ///
-  /// This method is typically used in conjunction with registering a listener
-  /// for dynamic links to handle referrals throughout the app's lifecycle.
-  Future<void> handleFirebaseDynamicLink(ReferralCodeCallback callback) async {
-    final PendingDynamicLinkData? data =
-        await FirebaseDynamicLinks.instance.getInitialLink();
-
-    if (data != null) {
-      final Uri deepLink = data.link;
-      final referralCode = deepLink.queryParameters['GBReferral'];
-      callback(referralCode, null);
-    } else {
-      callback(null, null);
-    }
-  }
 
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
   ///
