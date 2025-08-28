@@ -9,11 +9,9 @@ import 'package:gameball_sdk/utils/platform_utils.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import 'models/requests/event.dart';
-import 'models/requests/customer_attributes.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
 import 'models/requests/gameball_config.dart';
@@ -67,28 +65,6 @@ class GameballApp extends StatelessWidget {
     _apiPrefix = config.apiPrefix;
   }
 
-  /// Initializes Firebase Messaging and retrieves the device token.
-  ///
-  /// This method fetches the device token from Firebase Messaging and stores it
-  /// in the `_deviceToken` property for later use with the `_pushProvider` variable.
-  initializeFirebase() {
-    FirebaseMessaging.instance.getToken().then((token) {
-      if (token != null) {
-        _deviceToken = token;
-        _pushProvider = "Firebase";
-      }
-    });
-  }
-  /// Initializes Huawei push kit device token
-  ///
-  /// This method sets the device token and stores it
-  /// in the `_deviceToken` property for later use with the `_pushProvider` variable.
-  initializeHuawei(String deviceToken) {
-    _deviceToken = deviceToken;
-    _pushProvider = "Huawei";
-  }
-
-
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
   ///
   /// This provides a builder-pattern friendly API where the caller
@@ -140,33 +116,21 @@ class GameballApp extends StatelessWidget {
       _isGuest = request.isGuest;
     }
     
-    _registerDevice(request.customerAttributes, responseCallback);
+    _registerDevice(request, responseCallback);
   }
 
-  /// Registers the device with Gameball using the provided customer attributes.
+  /// Registers the device with Gameball using the provided request.
   ///
-  /// This method constructs a `customerRegisterRequest` object and sends it to the Gameball API.
+  /// This method sends the customer registration request to the Gameball API.
   /// The callback is invoked with the response or any encountered error.
   ///
   /// Arguments:
-  ///   - `customerAttributes`: Optional customer attributes to include in the request.
+  ///   - `request`: The InitializeCustomerRequest to send to the API.
   ///   - `callback`: The callback function to handle the registration result.
-  void _registerDevice(
-      CustomerAttributes? customerAttributes, RegisterCallback? callback) {
-    InitializeCustomerRequest customerRegisterRequest =
-        InitializeCustomerRequestBuilder()
-            .customerId(_customerId)
-            .deviceToken(_deviceToken.isEmpty ? null : _deviceToken)
-            .email(_customerEmail)
-            .mobile(_customerMobile)
-            .customerAttributes(customerAttributes)
-            .referralCode(_referralCode)
-            .isGuest(_isGuest)
-            .pushProvider(_pushProvider)
-            .build();
+  void _registerDevice(InitializeCustomerRequest request, RegisterCallback? callback) {
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      initializeCustomerRequest(customerRegisterRequest, _apiKey, language, customApiPrefix: _apiPrefix)
+      initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix)
           .then((response) {
         if (response != null) {
           callback!(response, null);

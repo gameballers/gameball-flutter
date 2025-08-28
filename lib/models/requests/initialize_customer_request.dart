@@ -2,6 +2,7 @@ import 'package:json_annotation/json_annotation.dart'
     show JsonKey, JsonSerializable;
 
 import '../../utils/platform_utils.dart';
+import '../enums/push_provider.dart';
 import 'customer_attributes.dart';
 
 part 'initialize_customer_request.g.dart';
@@ -122,7 +123,7 @@ class InitializeCustomerRequestBuilder {
   String? _email;
   String? _mobile;
   bool? _isGuest;
-  String? _pushProvider;
+  PushProvider? _pushProvider;
 
   /// Set the required customer id.
   InitializeCustomerRequestBuilder customerId(String customerId) {
@@ -169,7 +170,7 @@ class InitializeCustomerRequestBuilder {
   }
 
   /// Specify the push provider used to obtain the device token.
-  InitializeCustomerRequestBuilder pushProvider(String? provider) {
+  InitializeCustomerRequestBuilder pushProvider(PushProvider? provider) {
     _pushProvider = provider;
     return this;
   }
@@ -179,6 +180,15 @@ class InitializeCustomerRequestBuilder {
     if (_customerId == null || _customerId!.isEmpty) {
       throw ArgumentError('Customer ID cannot be empty');
     }
+
+    // Validate push provider and device token relationship
+    if (_pushProvider != null && (_deviceToken == null || _deviceToken!.isEmpty)) {
+      throw ArgumentError('Device token is required when push provider is set');
+    }
+    if (_pushProvider == null && _deviceToken != null && _deviceToken!.isNotEmpty) {
+      throw ArgumentError('Push provider is required when device token is set');
+    }
+
     return InitializeCustomerRequest._(
       customerId: _customerId!,
       deviceToken: _deviceToken,
@@ -187,7 +197,7 @@ class InitializeCustomerRequestBuilder {
       email: _email,
       mobile: _mobile,
       isGuest: _isGuest ?? false,
-      pushProvider: _pushProvider,
+      pushProvider: _pushProvider?.value,
     );
   }
 }
