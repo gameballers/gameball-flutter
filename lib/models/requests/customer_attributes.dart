@@ -50,6 +50,14 @@ class CustomerAttributes {
   @JsonKey(name: "channel", defaultValue: "mobile")
   String? channel;
 
+  /// The city through which the customer is from
+  @JsonKey(name: "city", defaultValue: "mobile")
+  String? city;
+
+  /// The country through which the customer is from
+  @JsonKey(name: "country", defaultValue: "mobile")
+  String? country;
+
   /// A map containing additional custom customer attributes (optional).
   @JsonKey(name: "custom")
   Map<String, String>? customAttributes;
@@ -79,6 +87,8 @@ class CustomerAttributes {
     this.joinDate,
     this.preferredLanguage,
     this.channel,
+    this.city,
+    this.country,
     this.customAttributes,
   });
 

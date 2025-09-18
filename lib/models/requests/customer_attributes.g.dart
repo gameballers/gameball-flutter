@@ -18,6 +18,8 @@ CustomerAttributes _$CustomerAttributesFromJson(Map<String, dynamic> json) =>
       joinDate: json['joinDate'] as String?,
       preferredLanguage: json['preferredLanguage'] as String?,
       channel: json['channel'] as String? ?? 'mobile',
+      city: json['city'] as String? ?? 'mobile',
+      country: json['country'] as String? ?? 'mobile',
       customAttributes: (json['custom'] as Map<String, dynamic>?)?.map(
         (k, e) => MapEntry(k, e as String),
       ),
@@ -35,5 +37,7 @@ Map<String, dynamic> _$CustomerAttributesToJson(CustomerAttributes instance) =>
       'joinDate': instance.joinDate,
       'preferredLanguage': instance.preferredLanguage,
       'channel': instance.channel,
+      'city': instance.city,
+      'country': instance.country,
       'custom': instance.customAttributes,
     };
