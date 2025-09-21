@@ -54,6 +54,11 @@ class CustomerAttributes {
   @JsonKey(name: "custom")
   final Map<String, String>? customAttributes;
 
+  /// A map containing additional attributes that are not serialized to JSON.
+  /// These attributes can be used for internal processing.
+  @JsonKey(includeToJson: false, includeFromJson: false)
+  final Map<String, String>? additionalAttributes;
+
   /// Private constructor for creating CustomerAttributes instances.
   /// Use [CustomerAttributesBuilder] to create instances of this class.
   const CustomerAttributes._({
@@ -68,6 +73,7 @@ class CustomerAttributes {
     this.preferredLanguage,
     this.channel,
     this.customAttributes,
+    this.additionalAttributes,
   });
 
   /// Creates a copy with updated values.
@@ -83,6 +89,7 @@ class CustomerAttributes {
     String? preferredLanguage,
     String? channel,
     Map<String, String>? customAttributes,
+    Map<String, String>? additionalAttributes,
   }) {
     return CustomerAttributes._(
       displayName: displayName ?? this.displayName,
@@ -96,30 +103,70 @@ class CustomerAttributes {
       preferredLanguage: preferredLanguage ?? this.preferredLanguage,
       channel: channel ?? this.channel,
       customAttributes: customAttributes ?? this.customAttributes,
+      additionalAttributes: additionalAttributes ?? this.additionalAttributes,
     );
   }
 
   /// Converts the `CustomerAttributes` object to a JSON map.
   ///
-  /// This method is typically used internally by the `json_serializable` package.
-  Map<String, dynamic> toJson() => _$CustomerAttributesToJson(this);
+  /// This method merges additionalAttributes at the top level of the JSON,
+  /// similar to the Android implementation's MapFromCustomerAttributes.
+  Map<String, dynamic> toJson() {
+    // Start with the standard serialized fields
+    final json = _$CustomerAttributesToJson(this);
+
+    // Merge additionalAttributes at the top level
+    if (additionalAttributes != null) {
+      json.addAll(additionalAttributes!);
+    }
+    return json;
+  }
 
   /// Create from JSON map.
-  factory CustomerAttributes.fromJson(Map<String, dynamic> json) => CustomerAttributes._(
-        displayName: json['displayName'] as String?,
-        firstName: json['firstName'] as String?,
-        lastName: json['lastName'] as String?,
-        email: json['email'] as String?,
-        gender: json['gender'] as String?,
-        mobile: json['mobile'] as String?,
-        dateOfBirth: json['dateOfBirth'] as String?,
-        joinDate: json['joinDate'] as String?,
-        preferredLanguage: json['preferredLanguage'] as String?,
-        channel: json['channel'] as String? ?? 'mobile',
-        customAttributes: (json['custom'] as Map<String, dynamic>?)?.map(
-          (k, e) => MapEntry(k, e as String),
-        ),
-      );
+  ///
+  /// This method extracts standard fields and treats any remaining
+  /// top-level fields as additionalAttributes, similar to Android's
+  /// MapToCustomerAtrributes method.
+  factory CustomerAttributes.fromJson(Map<String, dynamic> json) {
+    final tempJson = Map<String, dynamic>.from(json);
+
+    // Extract standard fields
+    final displayName = tempJson.remove('displayName') as String?;
+    final firstName = tempJson.remove('firstName') as String?;
+    final lastName = tempJson.remove('lastName') as String?;
+    final email = tempJson.remove('email') as String?;
+    final gender = tempJson.remove('gender') as String?;
+    final mobile = tempJson.remove('mobile') as String?;
+    final dateOfBirth = tempJson.remove('dateOfBirth') as String?;
+    final joinDate = tempJson.remove('joinDate') as String?;
+    final preferredLanguage = tempJson.remove('preferredLanguage') as String?;
+    final channel = tempJson.remove('channel') as String? ?? 'mobile';
+
+    // Extract custom attributes
+    final customAttributes = (tempJson.remove('custom') as Map<String, dynamic>?)?.map(
+      (k, e) => MapEntry(k, e as String),
+    );
+
+    // Any remaining fields become additionalAttributes
+    final additionalAttributes = tempJson.isNotEmpty
+        ? tempJson.map((k, e) => MapEntry(k, e.toString()))
+        : null;
+
+    return CustomerAttributes._(
+      displayName: displayName,
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      gender: gender,
+      mobile: mobile,
+      dateOfBirth: dateOfBirth,
+      joinDate: joinDate,
+      preferredLanguage: preferredLanguage,
+      channel: channel,
+      customAttributes: customAttributes,
+      additionalAttributes: additionalAttributes,
+    );
+  }
 }
 
 /// Builder for [CustomerAttributes].
@@ -136,6 +183,7 @@ class CustomerAttributesBuilder {
   String? _joinDate;
   String? _preferredLanguage;
   Map<String, String>? _customAttributes;
+  Map<String, String>? _additionalAttributes;
 
   CustomerAttributesBuilder displayName(String? displayName) {
     _displayName = displayName;
@@ -193,6 +241,17 @@ class CustomerAttributesBuilder {
     return this;
   }
 
+  CustomerAttributesBuilder addAdditionalAttribute(String key, String value) {
+    _additionalAttributes ??= <String, String>{};
+    _additionalAttributes![key.toLowerCase()] = value;
+    return this;
+  }
+
+  CustomerAttributesBuilder additionalAttributes(Map<String, String>? attrs) {
+    _additionalAttributes = attrs;
+    return this;
+  }
+
   CustomerAttributes build() {
     return CustomerAttributes._(
       displayName: _displayName,
@@ -205,6 +264,7 @@ class CustomerAttributesBuilder {
       joinDate: _joinDate,
       preferredLanguage: _preferredLanguage,
       customAttributes: _customAttributes,
+      additionalAttributes: _additionalAttributes,
     );
   }
 }
