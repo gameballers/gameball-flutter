@@ -140,7 +140,7 @@ class CustomerAttributes {
     final dateOfBirth = tempJson.remove('dateOfBirth') as String?;
     final joinDate = tempJson.remove('joinDate') as String?;
     final preferredLanguage = tempJson.remove('preferredLanguage') as String?;
-    final channel = tempJson.remove('channel') as String? ?? 'mobile';
+    tempJson.remove('channel'); // Remove channel from JSON to prevent it from going into additionalAttributes
 
     // Extract custom attributes
     final customAttributes = (tempJson.remove('custom') as Map<String, dynamic>?)?.map(
