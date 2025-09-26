@@ -38,7 +38,13 @@ class Event {
   /// Converts the `Event` object to a JSON map.
   ///
   /// This method is typically used internally by the `json_serializable` package.
-  Map<String, dynamic> toJson() => _$EventToJson(this);
+  /// Null values are automatically removed from the final JSON output.
+  Map<String, dynamic> toJson() {
+    final json = _$EventToJson(this);
+    // Remove null values before sending
+    json.removeWhere((key, value) => value == null);
+    return json;
+  }
 
   /// Create from JSON map.
   factory Event.fromJson(Map<String, dynamic> json) => Event._(
