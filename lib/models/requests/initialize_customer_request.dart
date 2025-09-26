@@ -94,7 +94,13 @@ class InitializeCustomerRequest {
   ///
   /// This method is typically used internally by the `json_serializable` package
   /// to serialize the object before sending it to the Gameball API.
-  Map<String, dynamic> toJson() => _$InitializeCustomerRequestToJson(this);
+  /// Null values are automatically removed from the final JSON output.
+  Map<String, dynamic> toJson() {
+    final json = _$InitializeCustomerRequestToJson(this);
+    // Remove null values before sending
+    json.removeWhere((key, value) => value == null);
+    return json;
+  }
 
   /// Create from JSON map.
   factory InitializeCustomerRequest.fromJson(Map<String, dynamic> json) => InitializeCustomerRequest._(
@@ -188,6 +194,8 @@ class InitializeCustomerRequestBuilder {
     if (_pushProvider == null && _deviceToken != null && _deviceToken!.isNotEmpty) {
       throw ArgumentError('Push provider is required when device token is set');
     }
+
+    _customerAttributes ??= CustomerAttributesBuilder().build();
 
     return InitializeCustomerRequest._(
       customerId: _customerId!,

@@ -47,8 +47,8 @@ class CustomerAttributes {
   final String? preferredLanguage;
 
   /// The channel through which the customer joined (defaults to "mobile").
-  @JsonKey(name: "channel", defaultValue: "mobile")
-  final String? channel;
+  @JsonKey(name: "channel")
+  final String channel;
 
   /// A map containing additional custom customer attributes (optional).
   @JsonKey(name: "custom")
@@ -71,10 +71,9 @@ class CustomerAttributes {
     this.dateOfBirth,
     this.joinDate,
     this.preferredLanguage,
-    this.channel,
     this.customAttributes,
     this.additionalAttributes,
-  });
+  }) : channel = "mobile";
 
   /// Creates a copy with updated values.
   CustomerAttributes copyWith({
@@ -87,7 +86,6 @@ class CustomerAttributes {
     String? dateOfBirth,
     String? joinDate,
     String? preferredLanguage,
-    String? channel,
     Map<String, String>? customAttributes,
     Map<String, String>? additionalAttributes,
   }) {
@@ -101,7 +99,6 @@ class CustomerAttributes {
       dateOfBirth: dateOfBirth ?? this.dateOfBirth,
       joinDate: joinDate ?? this.joinDate,
       preferredLanguage: preferredLanguage ?? this.preferredLanguage,
-      channel: channel ?? this.channel,
       customAttributes: customAttributes ?? this.customAttributes,
       additionalAttributes: additionalAttributes ?? this.additionalAttributes,
     );
@@ -111,6 +108,7 @@ class CustomerAttributes {
   ///
   /// This method merges additionalAttributes at the top level of the JSON,
   /// similar to the Android implementation's MapFromCustomerAttributes.
+  /// Null values are automatically removed from the final JSON output.
   Map<String, dynamic> toJson() {
     // Start with the standard serialized fields
     final json = _$CustomerAttributesToJson(this);
@@ -119,6 +117,8 @@ class CustomerAttributes {
     if (additionalAttributes != null) {
       json.addAll(additionalAttributes!);
     }
+    // Remove null values before sending
+    json.removeWhere((key, value) => value == null);
     return json;
   }
 
@@ -162,7 +162,6 @@ class CustomerAttributes {
       dateOfBirth: dateOfBirth,
       joinDate: joinDate,
       preferredLanguage: preferredLanguage,
-      channel: channel,
       customAttributes: customAttributes,
       additionalAttributes: additionalAttributes,
     );
