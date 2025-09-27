@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/customer_attributes.dart';
+import 'package:gameball_sdk/models/requests/initialize_customer_request.dart';
+import 'package:gameball_sdk/models/requests/show_profile_request.dart';
+import 'package:gameball_sdk/models/requests/gameball_config.dart';
+import 'package:gameball_sdk/models/enums/push_provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -53,59 +57,95 @@ class _MyHomePageState extends State<MyHomePage> {
   GameballApp gameballApp = GameballApp.getInstance();
 
   void _testGameball() {
-    Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-        .then((response) {});
+    // Initialize Firebase (optional, only if using Firebase features)
+    // Note: For production apps, add firebase_options.dart with your project configuration
+    Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform).then((response) {
+      print('Firebase initialized successfully');
+    }).catchError((error) {
+      print('Firebase initialization error: $error');
+    });
 
-    // TODO Replace the values between the braces with the actual values
+    // TODO Replace the values between the braces with your actual values
 
-    gameballApp.init("{api_key}", "{lang}", "{platform}", "{shop}");
+    // 1. Initialize SDK with GameballConfig builder
+    final config = GameballConfigBuilder()
+        .apiKey("{your_api_key}")
+        .lang("en")
+        .platform("{your_platform}")
+        .shop("{your_shop}")
+        .build();
+
+    gameballApp.init(config);
+
     setState(() {
-      gameballApp.initializeFirebase();
-
-      // For Huawei services, retireve the device token and call the following method
-      String deviceToken = "{deviceToken}";
-      gameballApp.initializeHuawei(deviceToken);
-
-
+      // 2. Initialize Customer with builder pattern
       customerRegistrationCallback(response, error) {
         if (error == null && response != null) {
-          gameballApp.showProfile(
-              context, "{customerId}", "{openDetail}", false, true);
+          print('Customer initialized successfully: $response');
+
+          // 4. Show Profile Widget with builder pattern
+          final profileRequest = ShowProfileRequestBuilder()
+              .customerId("demo_customer_123")
+              .openDetail("rewards") // Optional: specific section to open
+              .hideNavigation(false)
+              .showCloseButton(true)
+              .closeButtonColor("#FF6B6B") // Custom close button color
+              .build();
+
+          gameballApp.showProfile(context, profileRequest);
         } else {
-          // TODO
+          print('Customer initialization error: $error');
         }
       }
 
-      CustomerAttributes customerAttributes = CustomerAttributes(
-          displayName: "John Doe",
-          firstName: "John",
-          lastName: "Doe",
-          mobile: "0123456789",
-          preferredLanguage: "en",
-          customAttributes: {"{key}": "{value}"});
+      // Build CustomerAttributes with builder pattern
+      final customerAttributes = CustomerAttributesBuilder()
+          .displayName("John Doe")
+          .firstName("John")
+          .lastName("Doe")
+          .email("john.doe@example.com")
+          .mobile("1234567890")
+          .preferredLanguage("en")
+          .addCustomAttribute("tier", "premium")
+          .addCustomAttribute("city", "New York")
+          .addAdditionalAttribute("segment", "vip")
+          .build();
 
-      gameballApp.initializeCustomer(
-          "{customerId}",
-          "{customerEmail}",
-          "{customerMobile}",
-          "{referralCode}",
-          false, // isGuest = false, not a guest
-          customerAttributes,
-          customerRegistrationCallback);
+      // Build InitializeCustomerRequest with builder pattern
+      final customerRequest = InitializeCustomerRequestBuilder()
+          .customerId("demo_customer_123")
+          .email("john.doe@example.com")
+          .mobile("1234567890")
+          .referralCode("DEMO123") // Optional referral code
+          .isGuest(false)
+          .customerAttributes(customerAttributes)
+          // Uncomment below for push notifications
+          // .deviceToken("{your_device_token}")
+          // .pushProvider(PushProvider.Firebase) // or PushProvider.Huawei
+          .build();
 
-      sendEventCallback(response, error) {
-        if (error == null && response != null) {
-          // TODO
+      gameballApp.initializeCustomer(customerRequest, customerRegistrationCallback);
+
+      // 3. Send Event with builder pattern
+      sendEventCallback(success, error) {
+        if (success == true) {
+          print('Event sent successfully');
         } else {
-          // TODO
+          print('Event sending error: $error');
         }
       }
 
-      Event eventBody = Event(customerId: "{customerId}", events: {
-        "{eventName}": {"{prop1}": "{value1}"}
-      });
+      final event = EventBuilder()
+          .customerId("demo_customer_123")
+          .email("john.doe@example.com")
+          .mobile("1234567890")
+          .eventName("app_demo_action")
+          .eventMetaData("action_type", "button_click")
+          .eventMetaData("screen", "home")
+          .eventMetaData("timestamp", DateTime.now().millisecondsSinceEpoch.toString())
+          .build();
 
-      gameballApp.sendEvent(eventBody, sendEventCallback);
+      gameballApp.sendEvent(event, sendEventCallback);
     });
   }
 
@@ -147,12 +187,24 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Demo',
+              'Gameball Flutter SDK v3.0.0',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
+            const SizedBox(height: 16),
             Text(
-              'Click the FAB below',
+              'Builder Pattern Demo',
               style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Click the play button to test:',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '• SDK Initialization\n• Customer Registration\n• Event Tracking\n• Profile Widget',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
             ),
           ],
         ),

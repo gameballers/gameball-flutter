@@ -34,8 +34,8 @@ dependencies:
   gameball_sdk:
     path: ../
 
-  firebase_core: ^2.24.2
-  firebase_messaging: ^14.7.10
+  firebase_core: ^3.8.1
+  firebase_messaging: ^15.1.6
 
 
   # The following adds the Cupertino Icons font to your application.
