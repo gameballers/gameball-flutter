@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.0.0
+  gameball_sdk: ^3.1.0
 ```
 
 ### Flutter CLI
@@ -122,9 +122,45 @@ gameballApp.showProfile(context, profileRequest);
 
 The SDK provides the following public methods:
 - `init(config)` - Initialize the SDK with GameballConfig
-- `initializeCustomer(request, callback)` - Register/initialize customer with builder pattern
-- `sendEvent(event, callback)` - Track events with Event builder
-- `showProfile(context, request)` - Show profile widget with ShowProfileRequest
+- `initializeCustomer(request, callback, {sessionToken})` - Register/initialize customer with builder pattern
+- `sendEvent(event, callback, {sessionToken})` - Track events with Event builder
+- `showProfile(context, request, {sessionToken})` - Show profile widget with ShowProfileRequest
+
+### Session Token Per-Request Override
+
+All SDK methods (`initializeCustomer`, `sendEvent`, `showProfile`) support an optional `sessionToken` parameter that allows you to override or nullify the global sessionToken on a per-request basis:
+
+**Behavior:**
+- **If provided**: The provided sessionToken overrides the global sessionToken set in `init()` for that specific request
+- **If not provided (null)**: Nullifies the global sessionToken for that specific request
+- **If omitted entirely**: Uses the global sessionToken from `init()`
+
+**Example:**
+```dart
+// Set global sessionToken via init
+final config = GameballConfigBuilder()
+    .apiKey("your_api_key")
+    .lang("en")
+    .sessionToken("global-token")
+    .build();
+gameballApp.init(config);
+
+// Use global sessionToken (from init)
+await gameballApp.initializeCustomer(request, callback);
+
+// Override with a different sessionToken for this request only
+await gameballApp.initializeCustomer(request, callback, sessionToken: "specific-token");
+
+// Nullify sessionToken for this request only
+await gameballApp.initializeCustomer(request, callback, sessionToken: null);
+
+// The next request will use whatever sessionToken was last set
+await gameballApp.sendEvent(event, callback); // Uses "specific-token" from previous override
+```
+
+**Important Notes:**
+- Each method call updates the global `_sessionToken` value. Subsequent calls will use the most recently set value unless explicitly overridden again.
+- The `sessionToken` parameter must be explicitly passed to **every method call** where you want to use a specific token. If you want to use the same custom token across multiple calls, you must pass it to each call individually or set it globally via `init()`.
 
 ## ⚠️ Migration from v2.x
 
@@ -147,6 +183,7 @@ Configuration object for initializing the Gameball SDK.
 | `lang` | String | ✅ | Language code (e.g., "en", "ar") |
 | `platform` | String | ❌ | Platform identifier |
 | `shop` | String | ❌ | Shop identifier |
+| `sessionToken` | String | ❌ | Session Token for secure authentication (enables automatic v4.1 endpoint routing) |
 | `apiPrefix` | String | ❌ | Custom API prefix |
 
 **Validation Rules:**
@@ -158,6 +195,7 @@ Configuration object for initializing the Gameball SDK.
 - `lang(String lang)` - Sets the language
 - `platform(String platform)` - Sets the platform identifier
 - `shop(String shop)` - Sets the shop identifier
+- `sessionToken(String sessionToken)` - Sets Session Token for secure authentication
 - `apiPrefix(String apiPrefix)` - Sets custom API prefix
 
 **Example:**
@@ -461,7 +499,7 @@ flutter run --verbose
 ## Support
 
 - 📧 **Email**: support@gameball.co
-- 📖 **Documentation**: [https://docs.gameball.co](https://docs.gameball.co)
+- 📖 **Documentation**: [https://developer.gameball.co/](https://developer.gameball.co/)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/gameballers/gameball-flutter/issues)
 
 ## License

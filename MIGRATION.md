@@ -1,4 +1,104 @@
-# Migration Guide: Gameball Flutter SDK v2.x → v3.0.0
+# Migration Guide: Gameball Flutter SDK
+
+This guide provides migration instructions for upgrading between major versions of the Gameball Flutter SDK.
+
+---
+
+## Table of Contents
+
+- [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
+- [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.0.0 → v3.1.0
+
+Version 3.1.0 introduces security enhancements. This is a **minor update** with no breaking changes.
+
+### Overview of Changes
+
+#### 🔒 What's New
+- **Optional Session Token authentication** for enhanced API security
+- **Automatic secure endpoint routing** when Session Token is provided
+
+### Update Dependencies
+
+Update your dependency to v3.1.0:
+
+```yaml
+dependencies:
+  gameball_sdk: ^3.1.0
+```
+
+### Optional: Enable Session Token Authentication
+
+If you want to use Session Token authentication, simply add it to your configuration:
+
+```dart
+final config = GameballConfigBuilder()
+    .apiKey("your_api_key")
+    .lang("en")
+    .sessionToken("your-secure-session-token")  // Optional: Add for secure authentication
+    .build();
+```
+
+When Session Token is provided:
+- API requests automatically route to secure v4.1 endpoints
+- `X-GB-TOKEN` header is included in authenticated requests
+- Enhanced security for customer data
+
+### Per-Request Session Token Override
+
+All SDK methods now support an optional `sessionToken` parameter:
+
+```dart
+// Use global sessionToken from init()
+await gameballApp.initializeCustomer(request, callback);
+
+// Override with a specific token for this request
+await gameballApp.initializeCustomer(request, callback, sessionToken: "session-token");
+
+// Nullify sessionToken for this request
+await gameballApp.sendEvent(event, callback, sessionToken: null);
+
+// Show profile with custom token
+gameballApp.showProfile(context, request, sessionToken: "session-token");
+```
+
+**Behavior:**
+- **If provided (non-null)**: Overrides and updates the global sessionToken for this and subsequent requests
+- **If provided (null)**: Clears the global sessionToken for this and subsequent requests
+- **If omitted entirely**: Uses the current global sessionToken from `init()` or last override
+
+**Important Note:** The `sessionToken` parameter must be explicitly passed to **every method call** where you want to use a specific token. If you want consistent authentication across multiple calls, either set it globally via `init()` or pass it to each individual call.
+
+**Use Cases:**
+- **Multi-user scenarios**: Switch authentication tokens when users change
+- **Anonymous actions**: Clear tokens temporarily for unauthenticated operations
+- **Temporary authentication overrides**: Use different tokens for specific operations
+
+### Migration Checklist
+
+- [ ] Update pubspec.yaml dependency to ^3.1.0
+- [ ] Run `flutter pub get`
+- [ ] (Optional) Add `sessionToken` to your GameballConfig if needed
+- [ ] Verify all SDK functionality works correctly
+- [ ] Test event tracking
+- [ ] Test profile widget displays correctly
+
+### Benefits After Migration
+
+After upgrading to v3.1.0, you'll benefit from:
+
+✅ **Optional Enhanced Security**: GB Token authentication when needed
+
+✅ **Automatic Secure Routing**: SDK automatically uses secure endpoints when token is provided
+
+✅ **Backward Compatible**: Existing code continues to work without changes
+
+---
+
+## Migration Guide: v2.x → v3.0.0
 
 This guide helps you migrate from v2.x to v3.0.0 with modern Flutter architecture, builder patterns, and enhanced type safety.
 
@@ -326,7 +426,7 @@ try {
    **Solution**: Replace `mobileNumber()` with `mobile()` in builder calls.
 
 ### Getting Help
-For additional migration support, contact support@gameball.co or visit our documentation at https://docs.gameball.co
+For additional migration support, contact support@gameball.co or visit our documentation at https://developer.gameball.co/
 
 ---
 

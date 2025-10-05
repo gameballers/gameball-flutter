@@ -73,6 +73,7 @@ class _MyHomePageState extends State<MyHomePage> {
         .lang("en")
         .platform("{your_platform}")
         .shop("{your_shop}")
+        // .sessionToken("your-session-token") // Optional: Enable secure authentication (v3.1.0+)
         .build();
 
     gameballApp.init(config);
@@ -187,7 +188,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.0.0',
+              'Gameball Flutter SDK v3.1.0',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),
