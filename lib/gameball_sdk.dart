@@ -30,6 +30,7 @@ class GameballApp extends StatelessWidget {
   static String? _shop;
   static String? _customerPreferredLanguage;
   static String? _apiPrefix;
+  static String? _sessionToken;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -51,6 +52,7 @@ class GameballApp extends StatelessWidget {
     _shop = config.shop;
     _apiKey = config.apiKey;
     _apiPrefix = config.apiPrefix;
+    _sessionToken = config.sessionToken;
   }
 
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
@@ -61,16 +63,22 @@ class GameballApp extends StatelessWidget {
   /// Arguments:
   ///   - `request`: The InitializeCustomerRequest containing all customer initialization parameters.
   ///   - `responseCallback`: A callback function to handle the registration response.
+  ///   - `sessionToken`: Optional session token for this request.
+  ///                     If provided, overrides the global sessionToken.
+  ///                     If not provided, nullifies the global sessionToken.
   Future<void> initializeCustomer(
     InitializeCustomerRequest request,
-    RegisterCallback? responseCallback,
-  ) async {
+    RegisterCallback? responseCallback, {
+    String? sessionToken,
+  }) async {
     // Validate API key
     if (isNullOrEmpty(_apiKey)) {
       responseCallback!(null, Exception('API key is not initialized. Call init() first'));
       return;
     }
 
+    // Override or nullify sessionToken based on parameter
+    _sessionToken = sessionToken;
 
     // Store customer preferred language for widget display
     if (request.customerAttributes?.preferredLanguage != null &&
@@ -81,7 +89,7 @@ class GameballApp extends StatelessWidget {
     // Send request to Gameball API
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix)
+      initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
         responseCallback!(response, null);
       });
@@ -97,17 +105,23 @@ class GameballApp extends StatelessWidget {
   ///
   /// Arguments:
   ///   - `event`: The event data to be sent.
-  ///   - `callback`: The callback function to handle the event sending result.s
-  void sendEvent(Event event, SendEventCallback? callback) {
+  ///   - `callback`: The callback function to handle the event sending result.
+  ///   - `sessionToken`: Optional session token for this request.
+  ///                     If provided, overrides the global sessionToken.
+  ///                     If not provided, nullifies the global sessionToken.
+  void sendEvent(Event event, SendEventCallback? callback, {String? sessionToken}) {
     // Validate API key
     if (isNullOrEmpty(_apiKey)) {
       callback!(null, Exception('API key is not initialized. Call init() first'));
       return;
     }
 
+    // Override or nullify sessionToken based on parameter
+    _sessionToken = sessionToken;
+
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix).then((response) {
+      sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
         if (response.statusCode == 200) {
           callback!(true, null);
         } else {
@@ -127,11 +141,17 @@ class GameballApp extends StatelessWidget {
   /// Arguments:
   ///   - `context`: The build context for creating the customer profile widget.
   ///   - `request`: The ShowProfileRequest containing all profile display parameters.
-  void showProfile(BuildContext context, ShowProfileRequest request) {
+  ///   - `sessionToken`: Optional session token for this request.
+  ///                     If provided, overrides the global sessionToken.
+  ///                     If not provided, nullifies the global sessionToken.
+  void showProfile(BuildContext context, ShowProfileRequest request, {String? sessionToken}) {
     // Validate API key
     if (isNullOrEmpty(_apiKey)) {
       throw Exception('API key is not initialized. Call init() first');
     }
+
+    // Override or nullify sessionToken based on parameter
+    _sessionToken = sessionToken;
 
     _openCustomerProfileWidget(context, request);
   }
@@ -331,6 +351,10 @@ class GameballApp extends StatelessWidget {
 
     if (request.hideNavigation != null) {
       widgetUrl += '&hideNavigation=${request.hideNavigation}';
+    }
+
+    if (!isNullOrEmpty(_sessionToken)) {
+      widgetUrl += '&sessionToken=$_sessionToken';
     }
 
     return widgetUrl;

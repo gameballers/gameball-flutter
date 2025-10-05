@@ -13,4 +13,5 @@ Map<String, dynamic> _$GameballConfigToJson(GameballConfig instance) =>
       'platform': instance.platform,
       'shop': instance.shop,
       'apiPrefix': instance.apiPrefix,
+      'sessionToken': instance.sessionToken,
     };

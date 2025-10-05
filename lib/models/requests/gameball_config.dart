@@ -28,6 +28,10 @@ class GameballConfig {
   @JsonKey(name: "apiPrefix")
   final String? apiPrefix;
 
+  /// The Session Token for secure API endpoints (optional).
+  @JsonKey(name: "sessionToken")
+  final String? sessionToken;
+
   /// Private constructor for creating GameballConfig instances.
   /// Use [GameballConfigBuilder] to create instances of this class.
   const GameballConfig._({
@@ -36,6 +40,7 @@ class GameballConfig {
     this.platform,
     this.shop,
     this.apiPrefix,
+    this.sessionToken,
   });
 
 
@@ -51,6 +56,7 @@ class GameballConfig {
         platform: json['platform'] as String?,
         shop: json['shop'] as String?,
         apiPrefix: json['apiPrefix'] as String?,
+        sessionToken: json['sessionToken'] as String?,
       );
 }
 
@@ -63,6 +69,7 @@ class GameballConfigBuilder {
   String? _platform;
   String? _shop;
   String? _apiPrefix;
+  String? _sessionToken;
 
   /// Set the required API key.
   GameballConfigBuilder apiKey(String apiKey) {
@@ -94,6 +101,12 @@ class GameballConfigBuilder {
     return this;
   }
 
+  /// Set the optional Session Token for secure endpoints.
+  GameballConfigBuilder sessionToken(String? sessionToken) {
+    _sessionToken = sessionToken;
+    return this;
+  }
+
   /// Build the final immutable [GameballConfig] instance.
   GameballConfig build() {
     if (_apiKey == null || _apiKey!.isEmpty) {
@@ -108,6 +121,7 @@ class GameballConfigBuilder {
       platform: _platform,
       shop: _shop,
       apiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
     );
   }
 }

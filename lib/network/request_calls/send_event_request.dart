@@ -14,6 +14,9 @@ import 'package:http/http.dart' as http;
 /// Arguments:
 ///   - `requestBody`: The `Event` object representing the event data to be sent.
 ///   - `apiKey`: The API key for authentication.
+///   - `lang`: The language code.
+///   - `customApiPrefix`: Optional custom API base URL.
+///   - `sessionToken`: Optional Session Token for secure endpoints.
 ///
 /// Returns:
 ///   A `Future<http.Response>` object containing the server response.
@@ -23,13 +26,14 @@ import 'package:http/http.dart' as http;
 /// Throws:
 ///   An `Exception` with an error message if the request fails.
 Future<http.Response> sendEventRequest(
-    Event requestBody, String apiKey, String lang, {String? customApiPrefix}) async {
+    Event requestBody, String apiKey, String lang, {String? customApiPrefix, String? sessionToken}) async {
   final apiBaseUrl = customApiPrefix ?? baseUrl;
+  final integrationsUrl = getIntegrationsUrl(sessionToken);
   final url = '$apiBaseUrl$integrationsUrl$sendEventEndpoint';
 
   final response = await http.post(
     Uri.parse(url),
-    headers: getRequestHeaders(apiKey, lang),
+    headers: getRequestHeaders(apiKey, lang, sessionToken: sessionToken),
     body: jsonEncode(requestBody),
   );
 
