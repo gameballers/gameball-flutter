@@ -121,7 +121,7 @@ class _MyHomePageState extends State<MyHomePage> {
           .customerAttributes(customerAttributes)
           // Uncomment below for push notifications
           // .deviceToken("{your_device_token}")
-          // .pushProvider(PushProvider.Firebase) // or PushProvider.Huawei
+          // .pushProvider(PushProvider.firebase) // or PushProvider.huawei
           .build();
 
       gameballApp.initializeCustomer(customerRequest, customerRegistrationCallback);
