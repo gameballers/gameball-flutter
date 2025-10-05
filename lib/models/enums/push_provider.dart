@@ -6,24 +6,24 @@ enum PushProvider {
   /// Firebase Cloud Messaging (FCM) for push notifications.
   ///
   /// Used for Android and iOS devices that support Google Play Services.
-  Firebase,
+  firebase,
 
   /// Huawei Push Kit (HMS) for push notifications.
   ///
   /// Used for Huawei devices that don't have Google Play Services,
   /// particularly in regions where Google services are not available.
-  Huawei;
+  huawei;
 
   /// Returns the string representation of the push provider.
   ///
   /// This method provides the exact string values expected by the Gameball API:
-  /// - [PushProvider.Firebase] returns "Firebase"
-  /// - [PushProvider.Huawei] returns "Huawei"
+  /// - [PushProvider.firebase] returns "Firebase"
+  /// - [PushProvider.huawei] returns "Huawei"
   String get value {
     switch (this) {
-      case PushProvider.Firebase:
+      case PushProvider.firebase:
         return 'Firebase';
-      case PushProvider.Huawei:
+      case PushProvider.huawei:
         return 'Huawei';
     }
   }
