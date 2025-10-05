@@ -1,5 +1,6 @@
 const baseUrl = "https://api.gameball.co";
-const integrationsUrl = "/api/v4.0/integrations";
+const integrationsUrlV4_0 = "/api/v4.0/integrations";
+const integrationsUrlV4_1 = "/api/v4.1/integrations";
 const initializeCustomerEndpoint = "/customers";
 const sendEventEndpoint = "/events";
 const widgetBaseUrl = "https://m.gameball.app";

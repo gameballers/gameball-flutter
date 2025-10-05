@@ -16,6 +16,9 @@ import 'package:http/http.dart' as http;
 /// Arguments:
 ///   - `requestBody`: The `InitializeCustomerRequest` object containing customer data.
 ///   - `apiKey`: The API key for authentication.
+///   - `lang`: The language code.
+///   - `customApiPrefix`: Optional custom API base URL.
+///   - `sessionToken`: Optional Session Token for secure endpoints.
 ///
 /// Returns:
 ///   A `Future<InitializeCustomerResponse>` object containing the server response.
@@ -25,12 +28,13 @@ import 'package:http/http.dart' as http;
 /// Throws:
 ///   An `Exception` with an error message if the request fails.
 Future<InitializeCustomerResponse> initializeCustomerRequest(
-    InitializeCustomerRequest requestBody, String apiKey, String lang, {String? customApiPrefix}) async {
+    InitializeCustomerRequest requestBody, String apiKey, String lang, {String? customApiPrefix, String? sessionToken}) async {
   final apiBaseUrl = customApiPrefix ?? baseUrl;
+  final integrationsUrl = getIntegrationsUrl(sessionToken);
   final url = '$apiBaseUrl$integrationsUrl$initializeCustomerEndpoint';
   final response = await http.post(
     Uri.parse(url),
-    headers: getRequestHeaders(apiKey, lang),
+    headers: getRequestHeaders(apiKey, lang, sessionToken: sessionToken),
     body: jsonEncode(requestBody),
   );
 
