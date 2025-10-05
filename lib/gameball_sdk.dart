@@ -327,7 +327,7 @@ class GameballApp extends StatelessWidget {
 
     String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?';
 
-    widgetUrl += 'playerid=${request.customerId}';
+    widgetUrl += 'customerId=${request.customerId}';
 
     widgetUrl += '&lang=$language';
 
