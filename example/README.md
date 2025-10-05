@@ -1,16 +1,80 @@
-# example
+# Gameball Flutter SDK Example
 
-A new Flutter project.
+This is a demo application showcasing the Gameball Flutter SDK v3.1.0 with builder pattern architecture.
+
+## Features Demonstrated
+
+- **SDK Initialization** with GameballConfig builder
+- **Customer Registration** with InitializeCustomerRequest builder
+- **Event Tracking** with Event builder
+- **Profile Widget** display with ShowProfileRequest builder
+- **Session Token Authentication** (optional, v3.1.0+)
+- **Push Notifications** setup (Firebase & Huawei)
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+### 1. Configure Your API Key
 
-A few resources to get you started if this is your first Flutter project:
+Open `lib/main.dart` and replace the placeholder values:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```dart
+final config = GameballConfigBuilder()
+    .apiKey("{your_api_key}")        // Replace with your API key
+    .lang("en")
+    .platform("{your_platform}")      // Replace with your platform
+    .shop("{your_shop}")              // Replace with your shop
+    .build();
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 2. (Optional) Enable Session Token Authentication
+
+Uncomment and configure the session token for enhanced security:
+
+```dart
+final config = GameballConfigBuilder()
+    .apiKey("{your_api_key}")
+    .lang("en")
+    .sessionToken("your-session-token")  // Enable secure authentication
+    .build();
+```
+
+### 3. Run the Example
+
+```bash
+flutter pub get
+flutter run
+```
+
+### 4. Test the SDK
+
+Click the play button (▶) in the app to test:
+- Customer initialization
+- Event tracking
+- Profile widget display
+
+## Firebase Setup (Optional)
+
+To test push notifications:
+
+1. Add your Firebase configuration to the project
+2. Uncomment the Firebase initialization code in `main.dart`
+3. Add your device token and push provider to the customer request
+
+## Requirements
+
+- Flutter 1.17.0+ (Recommended: 3.0+)
+- Dart 3.4.4+
+- Android API level 21+
+- iOS 12.0+
+
+## Documentation
+
+For complete documentation, visit:
+- [Main README](../README.md)
+- [API Documentation](https://developer.gameball.co/)
+- [Migration Guide](../MIGRATION.md)
+
+## Support
+
+- Email: support@gameball.co
+- Issues: [GitHub Issues](https://github.com/gameballers/gameball-flutter/issues)

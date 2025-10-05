@@ -4,6 +4,31 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.1.0] - 2025-10-14 🔒
+
+> **Security Release**: Token-based authentication for enhanced API security
+
+### 🔒 Security
+- 🛡️ Added Session Token authentication mechanism for secure API communication
+- 🔐 Optional `sessionToken` parameter in `GameballConfig` for token-based authentication
+- 🔄 Automatic secure endpoint routing (API v4.0 → v4.1) when Session Token is provided
+- 📡 `X-GB-TOKEN` header added to requests when using Session Token authentication
+- ⚡ **Per-Request Session Token Override**: All SDK methods (`initializeCustomer`, `sendEvent`, `showProfile`) now accept an optional `sessionToken` parameter to override or nullify the global session token on a per-request basis
+
+### 🔧 Internal Changes
+- 🔧 Added `getIntegrationsUrl()` function for conditional endpoint routing
+- 📊 Added API version constants for version management
+
+### 📝 API Changes
+- `initializeCustomer(request, callback, {sessionToken})` - Added optional sessionToken parameter
+- `sendEvent(event, callback, {sessionToken})` - Added optional sessionToken parameter
+- `showProfile(context, request, {sessionToken})` - Added optional sessionToken parameter
+
+### 🐛 Fixed
+- 🔧 Updated `PushProvider` enum to follow Dart lowerCamelCase convention (`firebase`, `huawei`)
+
+---
+
 ## [3.0.0] - 2025-09-27 🎉
 
 **Big changes are here!** 🚀 We've completely redesigned the SDK architecture with modern Flutter patterns, builder APIs, and enhanced type safety. This major release brings significant improvements to developer experience while maintaining all the features you love.
