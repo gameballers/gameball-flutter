@@ -94,6 +94,13 @@ class _MyHomePageState extends State<MyHomePage> {
               .build();
 
           gameballApp.showProfile(context, profileRequest);
+
+          // Guest Mode Example (v3.1.1+) - Show widget without customer ID
+          // final guestRequest = ShowProfileRequestBuilder()
+          //     .showCloseButton(true)
+          //     .closeButtonColor("#4CAF50")
+          //     .build();
+          // gameballApp.showProfile(context, guestRequest);
         } else {
           print('Customer initialization error: $error');
         }
@@ -188,7 +195,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.1.0',
+              'Gameball Flutter SDK v3.1.1',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),

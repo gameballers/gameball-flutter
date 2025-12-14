@@ -6,8 +6,77 @@ This guide provides migration instructions for upgrading between major versions 
 
 ## Table of Contents
 
+- [v3.1.0 → v3.1.1](#migration-guide-v310--v311)
 - [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
 - [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.1.0 → v3.1.1
+
+Version 3.1.1 adds guest mode support for the profile widget. This is a **patch update** with no breaking changes.
+
+### Overview of Changes
+
+#### 🐛 What's Fixed
+- **Guest mode support** - Profile widget can now be displayed without customer authentication
+- **Optional customer ID** - `ShowProfileRequest` builder no longer requires customer ID
+
+### Update Dependencies
+
+Update your dependency to v3.1.1:
+
+```yaml
+dependencies:
+  gameball_sdk: ^3.1.1
+```
+
+Run `flutter pub get` to update.
+
+### No Migration Required
+
+Your existing v3.1.0 and v3.0.0 code continues to work without any changes.
+
+### Guest Mode Enhancement (Optional)
+
+#### Before (v3.1.0)
+```dart
+// Customer ID was required
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")  // Required
+    .build();
+```
+
+#### After (v3.1.1)
+```dart
+// Customer ID is now optional
+
+// Authenticated mode
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")  // Optional
+    .build();
+
+// Guest mode - no customer ID
+final guestRequest = ShowProfileRequestBuilder().build();
+```
+
+#### Conditional Widget Display
+
+Show guest mode for unauthenticated users:
+
+```dart
+void showLoyaltyWidget(BuildContext context) {
+  final customerId = getCustomerId(); // Your method to get customer ID
+
+  final profileRequest = customerId != null
+      ? ShowProfileRequestBuilder()
+          .customerId(customerId)
+          .build()
+      : ShowProfileRequestBuilder().build(); // Guest mode
+
+  gameballApp.showProfile(context, profileRequest);
+}
+```
 
 ---
 
