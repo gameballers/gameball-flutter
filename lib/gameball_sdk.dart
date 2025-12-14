@@ -325,13 +325,11 @@ class GameballApp extends StatelessWidget {
   String _buildWidgetUrl(ShowProfileRequest request) {
     String language = handleLanguage(_lang, _customerPreferredLanguage);
 
-    String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?';
-
-    widgetUrl += 'customerId=${request.customerId}';
-
-    widgetUrl += '&lang=$language';
+    String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
 
     widgetUrl += '&apiKey=$_apiKey';
+
+    widgetUrl += '&customerId=${request.customerId ?? ""}';
 
     if (!isNullOrEmpty(_platform)) {
       widgetUrl += '&platform=$_platform';
