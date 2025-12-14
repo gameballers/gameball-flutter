@@ -8,9 +8,9 @@ part 'show_profile_request.g.dart';
 /// widget with customizable options for navigation and detail views.
 @JsonSerializable(createFactory: false)
 class ShowProfileRequest {
-  /// The unique identifier for the customer (required).
+  /// The unique identifier for the customer (optional for guest view).
   @JsonKey(name: "customerId")
-  final String customerId;
+  final String? customerId;
 
   /// An optional URL to open within the profile.
   @JsonKey(name: "openDetail")
@@ -35,7 +35,7 @@ class ShowProfileRequest {
   /// Private constructor for creating ShowProfileRequest instances.
   /// Use [ShowProfileRequestBuilder] to create instances of this class.
   const ShowProfileRequest._({
-    required this.customerId,
+    this.customerId,
     this.openDetail,
     this.hideNavigation,
     this.showCloseButton,
@@ -51,7 +51,7 @@ class ShowProfileRequest {
 
   /// Create from JSON map.
   factory ShowProfileRequest.fromJson(Map<String, dynamic> json) => ShowProfileRequest._(
-        customerId: json['customerId'] as String,
+        customerId: json['customerId'] as String?,
         openDetail: json['openDetail'] as String?,
         hideNavigation: json['hideNavigation'] as bool?,
         showCloseButton: json['showCloseButton'] as bool?,
@@ -71,8 +71,8 @@ class ShowProfileRequestBuilder {
   String? _widgetUrlPrefix;
   String? _closeButtonColor;
 
-  /// Set the required customer id.
-  ShowProfileRequestBuilder customerId(String customerId) {
+  /// Set the optional customer id.
+  ShowProfileRequestBuilder customerId(String? customerId) {
     _customerId = customerId;
     return this;
   }
@@ -109,11 +109,8 @@ class ShowProfileRequestBuilder {
 
   /// Build the final immutable [ShowProfileRequest] instance.
   ShowProfileRequest build() {
-    if (_customerId == null || _customerId!.isEmpty) {
-      throw ArgumentError('Customer ID cannot be empty');
-    }
     return ShowProfileRequest._(
-      customerId: _customerId!,
+      customerId: _customerId,
       openDetail: _openDetail,
       hideNavigation: _hideNavigation,
       showCloseButton: _showCloseButton,
