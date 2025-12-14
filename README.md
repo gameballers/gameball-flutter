@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.1.0
+  gameball_sdk: ^3.1.1
 ```
 
 ### Flutter CLI
@@ -106,9 +106,11 @@ gameballApp.sendEvent(event, (success, error) {
 ```
 
 ### 4. Show Profile Widget
+
 ```dart
 import 'package:gameball_sdk/models/requests/show_profile_request.dart';
 
+// Authenticated mode
 final profileRequest = ShowProfileRequestBuilder()
     .customerId("unique_customer_id")
     .showCloseButton(true)
@@ -116,6 +118,20 @@ final profileRequest = ShowProfileRequestBuilder()
     .build();
 
 gameballApp.showProfile(context, profileRequest);
+```
+
+#### Guest Mode (v3.1.1+)
+
+Display the profile widget without customer authentication:
+
+```dart
+// Guest mode - no customer ID required
+final guestRequest = ShowProfileRequestBuilder()
+    .showCloseButton(true)
+    .closeButtonColor("#4CAF50")
+    .build();
+
+gameballApp.showProfile(context, guestRequest);
 ```
 
 ## API Methods
