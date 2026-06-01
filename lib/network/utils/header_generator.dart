@@ -1,5 +1,3 @@
-import 'package:platform_info/platform_info.dart';
-
 import '../../utils/gameball_utils.dart';
 import 'constants.dart';
 
@@ -19,8 +17,7 @@ Map<String, String> getRequestHeaders(String apiKey, String lang, {String? sessi
     'Content-Type': 'application/json; charset=UTF-8',
     'ApiKey': apiKey,
     'Lang': lang,
-    'x-gb-agent':
-        'Flutter/${getSdkVersion()}/${Platform.I.operatingSystem}/${Platform.I.version}'
+    'x-gb-agent': 'GB/flutter/${getSdkVersion()}'
   };
 
   // Add Session Token header if present
