@@ -32,6 +32,14 @@ class ShowProfileRequest {
   @JsonKey(name: "closeButtonColor")
   final String? closeButtonColor;
 
+  /// An optional customer mobile number.
+  @JsonKey(name: "mobile")
+  final String? mobile;
+
+  /// An optional customer email address.
+  @JsonKey(name: "email")
+  final String? email;
+
   /// Private constructor for creating ShowProfileRequest instances.
   /// Use [ShowProfileRequestBuilder] to create instances of this class.
   const ShowProfileRequest._({
@@ -41,6 +49,8 @@ class ShowProfileRequest {
     this.showCloseButton,
     this.widgetUrlPrefix,
     this.closeButtonColor,
+    this.mobile,
+    this.email,
   });
 
 
@@ -57,6 +67,8 @@ class ShowProfileRequest {
         showCloseButton: json['showCloseButton'] as bool?,
         widgetUrlPrefix: json['widgetUrlPrefix'] as String?,
         closeButtonColor: json['closeButtonColor'] as String?,
+        mobile: json['mobile'] as String?,
+        email: json['email'] as String?,
       );
 }
 
@@ -70,6 +82,8 @@ class ShowProfileRequestBuilder {
   bool? _showCloseButton;
   String? _widgetUrlPrefix;
   String? _closeButtonColor;
+  String? _mobile;
+  String? _email;
 
   /// Set the optional customer id.
   ShowProfileRequestBuilder customerId(String? customerId) {
@@ -107,6 +121,18 @@ class ShowProfileRequestBuilder {
     return this;
   }
 
+  /// Set the optional customer mobile number.
+  ShowProfileRequestBuilder mobile(String? mobile) {
+    _mobile = mobile;
+    return this;
+  }
+
+  /// Set the optional customer email address.
+  ShowProfileRequestBuilder email(String? email) {
+    _email = email;
+    return this;
+  }
+
   /// Build the final immutable [ShowProfileRequest] instance.
   ShowProfileRequest build() {
     return ShowProfileRequest._(
@@ -116,6 +142,8 @@ class ShowProfileRequestBuilder {
       showCloseButton: _showCloseButton,
       widgetUrlPrefix: _widgetUrlPrefix,
       closeButtonColor: _closeButtonColor,
+      mobile: _mobile,
+      email: _email,
     );
   }
 }
