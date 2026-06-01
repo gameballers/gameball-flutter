@@ -19,6 +19,8 @@ dependencies:
   json_serializable: ^6.8.0
   package_info_plus: ^8.0.2
   platform_info: ^5.0.0
+  shared_preferences: ^2.3.2
+  device_info_plus: ^10.1.2
   webview_flutter: ^4.8.0
   build_runner: ^2.4.11
   share_plus: ^11.0.0

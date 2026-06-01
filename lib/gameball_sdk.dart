@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
+import 'package:gameball_sdk/utils/gameball_logger.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
 import 'package:gameball_sdk/utils/platform_utils.dart';
 import 'package:share_plus/share_plus.dart';
@@ -53,6 +54,16 @@ class GameballApp extends StatelessWidget {
     _apiKey = config.apiKey;
     _apiPrefix = config.apiPrefix;
     _sessionToken = config.sessionToken;
+
+    GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
+    GameballLogger.instance.log('sdk.init', params: {
+      'apiKey': config.apiKey,
+      'lang': config.lang,
+      'platform': config.platform,
+      'shop': config.shop,
+      'apiPrefix': config.apiPrefix,
+      'sessionToken': config.sessionToken,
+    });
   }
 
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
@@ -93,6 +104,8 @@ class GameballApp extends StatelessWidget {
           .then((response) {
         responseCallback!(response, null);
       });
+      // Fire telemetry immediately after dispatching the request.
+      GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
     } catch (e) {
       responseCallback!(null, e as Exception);
     }
@@ -128,6 +141,8 @@ class GameballApp extends StatelessWidget {
           callback!(false, null);
         }
       });
+      // Fire telemetry immediately after dispatching the request.
+      GameballLogger.instance.log('sdk.sendEvent', params: event.toJson());
     } catch (e) {
       callback!(null, e as Exception);
     }
@@ -152,6 +167,10 @@ class GameballApp extends StatelessWidget {
 
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
+
+    // showProfile opens a webview (never hits the backend), so it is invisible server-side — log it here.
+    // Full request as-is (toJson omits the externalLinkCallback).
+    GameballLogger.instance.log('sdk.showProfile', params: request.toJson());
 
     _openCustomerProfileWidget(context, request);
   }
