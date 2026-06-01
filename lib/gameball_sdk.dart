@@ -351,6 +351,14 @@ class GameballApp extends StatelessWidget {
       widgetUrl += '&hideNavigation=${request.hideNavigation}';
     }
 
+    if (!isNullOrEmpty(request.mobile)) {
+      widgetUrl += '&mobile=${Uri.encodeComponent(request.mobile!)}';
+    }
+
+    if (!isNullOrEmpty(request.email)) {
+      widgetUrl += '&email=${Uri.encodeComponent(request.email!)}';
+    }
+
     if (!isNullOrEmpty(_sessionToken)) {
       widgetUrl += '&sessionToken=$_sessionToken';
     }
