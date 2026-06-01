@@ -2,7 +2,6 @@ import 'dart:math';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:platform_info/platform_info.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../network/request_calls/send_logs_request.dart';
@@ -58,16 +57,17 @@ class GameballLogger {
   Future<Map<String, dynamic>> _buildContext() async {
     if (_context != null) return _context!;
 
+    final platform = getDevicePlatform(); // 'iOS' | 'Android' | 'Unknown'
     String? model;
-    String osVersion = Platform.I.version;
+    String? osVersion;
     String? appBundleId;
     try {
       final deviceInfo = DeviceInfoPlugin();
-      if (Platform.I.isAndroid) {
+      if (platform == 'Android') {
         final android = await deviceInfo.androidInfo;
         model = '${android.manufacturer} ${android.model}';
         osVersion = 'Android ${android.version.release}';
-      } else if (Platform.I.isIOS) {
+      } else if (platform == 'iOS') {
         final ios = await deviceInfo.iosInfo;
         model = ios.utsname.machine;
         osVersion = '${ios.systemName} ${ios.systemVersion}';
@@ -81,7 +81,7 @@ class GameballLogger {
     _context = <String, dynamic>{
       'sdkType': 'flutter',
       'sdkVersion': getSdkVersion(),
-      'devicePlatform': getDevicePlatform(),
+      'devicePlatform': platform,
       'deviceOsVersion': osVersion,
       'deviceModel': model,
       'appBundleId': appBundleId,
