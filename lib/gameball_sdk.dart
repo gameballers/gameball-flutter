@@ -195,6 +195,21 @@ class GameballApp extends StatelessWidget {
     } catch (e) {}
   }
 
+  // Navigation handling — consumes every intercepted link (nothing loads in-widget):
+  //   1) gbExternalBrowser=true → device browser (flag outranks the callback)
+  //   2) else if externalLinkCallback set → delegate to it
+  //   3) else → device browser
+  bool _handleExternalBrowserLink(String url, ShowProfileRequest request) {
+    if (url.contains('gbExternalBrowser=true')) {
+      _openExternalInAppBrowser(url);
+    } else if (request.externalLinkCallback != null) {
+      request.externalLinkCallback!(url);
+    } else {
+      _openExternalInAppBrowser(url);
+    }
+    return true;
+  }
+
   /// Opens a bottom sheet to display the Gameball profile.
   ///
   /// Creates a bottom sheet with a WebView displaying the Gameball profile based on the provided parameters.
@@ -272,12 +287,8 @@ class GameballApp extends StatelessWidget {
           },
           onHttpError: (HttpResponseError error) {},
           onWebResourceError: (WebResourceError error) {},
-          onNavigationRequest: (NavigationRequest request) {
-            final uri = Uri.parse(request.url);
-            final widgetHost = Uri.parse(widgetBaseUrl).host;
-            final isExternal = request.url.isNotEmpty && !uri.host.contains(widgetHost);
-            if (isExternal) {
-              _openExternalInAppBrowser(request.url);
+          onNavigationRequest: (NavigationRequest navigationRequest) {
+            if (_handleExternalBrowserLink(navigationRequest.url, request)) {
               return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;

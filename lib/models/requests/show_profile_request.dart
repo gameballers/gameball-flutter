@@ -40,6 +40,11 @@ class ShowProfileRequest {
   @JsonKey(name: "email")
   final String? email;
 
+  /// Optional handler for links tagged gbExternalBrowser=true. When provided, the link is
+  /// delegated to this callback instead of being opened by the SDK in the system browser.
+  @JsonKey(includeToJson: false, includeFromJson: false)
+  final void Function(String url)? externalLinkCallback;
+
   /// Private constructor for creating ShowProfileRequest instances.
   /// Use [ShowProfileRequestBuilder] to create instances of this class.
   const ShowProfileRequest._({
@@ -51,6 +56,7 @@ class ShowProfileRequest {
     this.closeButtonColor,
     this.mobile,
     this.email,
+    this.externalLinkCallback,
   });
 
 
@@ -84,6 +90,7 @@ class ShowProfileRequestBuilder {
   String? _closeButtonColor;
   String? _mobile;
   String? _email;
+  void Function(String url)? _externalLinkCallback;
 
   /// Set the optional customer id.
   ShowProfileRequestBuilder customerId(String? customerId) {
@@ -133,6 +140,12 @@ class ShowProfileRequestBuilder {
     return this;
   }
 
+  /// Set the optional handler for links tagged gbExternalBrowser=true.
+  ShowProfileRequestBuilder externalLinkCallback(void Function(String url)? externalLinkCallback) {
+    _externalLinkCallback = externalLinkCallback;
+    return this;
+  }
+
   /// Build the final immutable [ShowProfileRequest] instance.
   ShowProfileRequest build() {
     return ShowProfileRequest._(
@@ -144,6 +157,7 @@ class ShowProfileRequestBuilder {
       closeButtonColor: _closeButtonColor,
       mobile: _mobile,
       email: _email,
+      externalLinkCallback: _externalLinkCallback,
     );
   }
 }
