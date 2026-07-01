@@ -32,6 +32,7 @@ class GameballApp extends StatelessWidget {
   static String? _customerPreferredLanguage;
   static String? _apiPrefix;
   static String? _sessionToken;
+  static VoidCallback? _dismissActiveWidget;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -175,6 +176,17 @@ class GameballApp extends StatelessWidget {
     _openCustomerProfileWidget(context, request);
   }
 
+  /// Hides the currently shown profile widget. No-op when nothing is shown. Counterpart to [showProfile].
+  void hideProfile() {
+    _closeActiveWidget();
+  }
+
+  /// Dismisses the active widget dialog, if any. Backs both the widget-initiated
+  /// window.GameballWidget.closeWidget() bridge and [hideProfile].
+  static void _closeActiveWidget() {
+    _dismissActiveWidget?.call();
+  }
+
   void _nativeShare(String title, String text, String url) {
     final bodyText = text.isNotEmpty ? text : title;
 
@@ -274,6 +286,13 @@ class GameballApp extends StatelessWidget {
           }
         },
       )
+      ..addJavaScriptChannel(
+        'GBWidgetClose',
+        onMessageReceived: (JavaScriptMessage message) {
+          // Widget-initiated close, posted via window.GameballWidget.closeWidget().
+          _closeActiveWidget();
+        },
+      )
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -308,6 +327,12 @@ class GameballApp extends StatelessWidget {
             window.WidgetEvent.postEvent = function (raw) {
               GBWidgetEvent.postMessage(raw);
             };
+
+            // Bridge widget-initiated close: window.GameballWidget.closeWidget() dismisses the widget.
+            window.GameballWidget = window.GameballWidget || {};
+            window.GameballWidget.closeWidget = function () {
+              GBWidgetClose.postMessage('');
+            };
           ''');
           },
           onHttpError: (HttpResponseError error) {},
@@ -326,6 +351,12 @@ class GameballApp extends StatelessWidget {
       context: context,
       barrierDismissible: true,
       builder: (BuildContext context) {
+        // Track the active widget so window.GameballWidget.closeWidget() and hideProfile() can dismiss it.
+        _dismissActiveWidget = () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        };
         String language = handleLanguage(_lang, _customerPreferredLanguage);
 
         return Dialog(
@@ -368,7 +399,9 @@ class GameballApp extends StatelessWidget {
           ),
         );
       },
-    );
+    ).then((_) {
+      _dismissActiveWidget = null;
+    });
   }
 
   /// Builds the URL for the Gameball profile widget.
