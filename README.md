@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.1.1
+  gameball_sdk: ^3.2.0
 ```
 
 ### Flutter CLI
@@ -134,6 +134,80 @@ final guestRequest = ShowProfileRequestBuilder()
 gameballApp.showProfile(context, guestRequest);
 ```
 
+### Widget Events & Dismissal (v3.2.0+)
+
+Pass `widgetEventCallback` to react to events the widget posts (e.g. game completion). Each event is a `Map<String, dynamic>` with a top-level `type` and a nested `metadata`; on a parse failure the callback is invoked with `(null, exception)`:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .widgetEventCallback((event, error) {
+      if (error != null) return;                                   // parse failure
+      final type = event?['type'] as String?;                      // e.g. "gameCompleted"
+      final metadata = event?['metadata'] as Map<String, dynamic>?;
+      if (type == 'gameCompleted') {
+        final hasWon = metadata?['hasWon'] as bool? ?? false;
+        final rewardType = metadata?['rewardType'] as String?;     // "Default", "Bonus", "NoReward"…
+        final discountType = metadata?['discountType'] as String?; // "FreeShipping", "Percentage"… (null if not a coupon win)
+        final rewardName = metadata?['rewardName'] as String?;     // localized display name
+        final campaignId = metadata?['campaignId'] as String?;     // e.g. "90340"
+        final campaignType = metadata?['campaignType'] as String?; // "spinTheWheel", "scratchCard"…
+        if (hasWon) { /* refresh balance, show win UI… */ }
+      }
+    })
+    .build();
+
+GameballApp.getInstance().showProfile(context, request);
+```
+
+The `gameCompleted` event's `metadata` carries:
+
+| Field | Type | Description |
+|---|---|---|
+| `hasWon` | `bool` | Whether the player won a reward this round |
+| `rewardType` | `String?` | Reward category — `Default`, `Friend`, `Bonus`, `CustomText`, `Streak`, `NoReward` |
+| `discountType` | `String?` | Coupon kind when the win is a coupon — e.g. `Fixed`, `Percentage`, `FreeShipping`, `FreeProduct`, `Custom`, `RechargeFixed`, `RechargePercentage`, `ExternalReward`; `null` for non-coupon wins |
+| `rewardName` | `String?` | Localized, human-readable reward name |
+| `campaignId` | `String` | Challenge / campaign identifier |
+| `campaignType` | `String?` | Game type — `spinTheWheel`, `slotMachine`, `quiz`, `scratchCard`, `matchCards`, `catcher`, `ticTacToe`, `shooter`, `puzzle`, `tapTarget`, `highwayDrive` |
+
+> All `gameCompleted` values arrive as `String` or `bool` — there are no numeric fields.
+
+Dismiss the widget programmatically from your app (no-op when nothing is shown):
+
+```dart
+GameballApp.getInstance().hideProfile();
+```
+
+The widget can also dismiss itself by calling `window.GameballWidget.closeWidget()`.
+
+### Channel Merging & Diagnostic Logging (v3.2.0+)
+
+`ShowProfileRequestBuilder` also accepts optional `mobile` and `email` for channel merging:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .mobile("+201234567890")
+    .email("customer@example.com")
+    .build();
+
+GameballApp.getInstance().showProfile(context, request);
+```
+
+You can also intercept links the widget flags with `gbExternalBrowser=true` instead of letting the SDK open them in the system browser:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .externalLinkCallback((url) {
+      // open `url` your own way — in-app browser, router, etc.
+    })
+    .build();
+```
+
+The SDK also records internal diagnostic logs automatically to aid troubleshooting. This requires no integration changes.
+
 ## API Methods
 
 The SDK provides the following public methods:
@@ -141,6 +215,7 @@ The SDK provides the following public methods:
 - `initializeCustomer(request, callback, {sessionToken})` - Register/initialize customer with builder pattern
 - `sendEvent(event, callback, {sessionToken})` - Track events with Event builder
 - `showProfile(context, request, {sessionToken})` - Show profile widget with ShowProfileRequest
+- `hideProfile()` - Dismiss the currently shown profile widget (no-op when nothing is shown)
 
 ### Session Token Per-Request Override
 
@@ -394,6 +469,10 @@ Request object for displaying the Gameball customer profile widget with customiz
 | `showCloseButton` | bool | ❌ | Show close button (defaults to true) |
 | `closeButtonColor` | String | ❌ | Close button color (hex format like "#FF0000") |
 | `widgetUrlPrefix` | String | ❌ | Custom widget URL prefix |
+| `mobile` | String | ❌ | Customer mobile number (for channel merging) |
+| `email` | String | ❌ | Customer email address (for channel merging) |
+| `externalLinkCallback` | void Function(String) | ❌ | Handler for links tagged `gbExternalBrowser=true`. When provided, the link is delegated to it; otherwise the SDK opens it in the system browser |
+| `widgetEventCallback` | void Function(Map<String, dynamic>?, Exception?) | ❌ | Receives events the widget posts (e.g. game completion) as a `{type, metadata}` map; called with `(null, exception)` on a parse failure |
 
 **Validation Rules:**
 - `customerId` cannot be null or empty
@@ -406,6 +485,10 @@ Request object for displaying the Gameball customer profile widget with customiz
 - `showCloseButton(bool showCloseButton)` - Sets close button visibility
 - `closeButtonColor(String closeButtonColor)` - Sets close button color
 - `widgetUrlPrefix(String widgetUrlPrefix)` - Sets custom widget URL prefix
+- `mobile(String mobile)` - Sets customer mobile number (channel merging)
+- `email(String email)` - Sets customer email address (channel merging)
+- `externalLinkCallback(void Function(String) callback)` - Sets handler for links tagged `gbExternalBrowser=true`
+- `widgetEventCallback(void Function(Map<String, dynamic>?, Exception?) callback)` - Registers a listener for widget events
 
 **Example:**
 ```dart
