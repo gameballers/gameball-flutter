@@ -45,6 +45,12 @@ class ShowProfileRequest {
   @JsonKey(includeToJson: false, includeFromJson: false)
   final void Function(String url)? externalLinkCallback;
 
+  /// Optional handler that receives widget events posted from the widget webview via
+  /// window.WidgetEvent.postEvent as a {type, metadata} map; receives (null, error) when the
+  /// event payload can't be parsed.
+  @JsonKey(includeToJson: false, includeFromJson: false)
+  final void Function(Map<String, dynamic>? event, Exception? error)? widgetEventCallback;
+
   /// Private constructor for creating ShowProfileRequest instances.
   /// Use [ShowProfileRequestBuilder] to create instances of this class.
   const ShowProfileRequest._({
@@ -57,6 +63,7 @@ class ShowProfileRequest {
     this.mobile,
     this.email,
     this.externalLinkCallback,
+    this.widgetEventCallback,
   });
 
 
@@ -91,6 +98,7 @@ class ShowProfileRequestBuilder {
   String? _mobile;
   String? _email;
   void Function(String url)? _externalLinkCallback;
+  void Function(Map<String, dynamic>? event, Exception? error)? _widgetEventCallback;
 
   /// Set the optional customer id.
   ShowProfileRequestBuilder customerId(String? customerId) {
@@ -146,6 +154,13 @@ class ShowProfileRequestBuilder {
     return this;
   }
 
+  /// Register a listener that receives widget events (e.g. game completion) as a
+  /// {type, metadata} map, posted from the widget via window.WidgetEvent.postEvent.
+  ShowProfileRequestBuilder widgetEventCallback(void Function(Map<String, dynamic>? event, Exception? error)? widgetEventCallback) {
+    _widgetEventCallback = widgetEventCallback;
+    return this;
+  }
+
   /// Build the final immutable [ShowProfileRequest] instance.
   ShowProfileRequest build() {
     return ShowProfileRequest._(
@@ -158,6 +173,7 @@ class ShowProfileRequestBuilder {
       mobile: _mobile,
       email: _email,
       externalLinkCallback: _externalLinkCallback,
+      widgetEventCallback: _widgetEventCallback,
     );
   }
 }

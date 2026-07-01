@@ -256,6 +256,24 @@ class GameballApp extends StatelessWidget {
           } catch (e) {}
         },
       )
+      ..addJavaScriptChannel(
+        'GBWidgetEvent',
+        onMessageReceived: (JavaScriptMessage message) {
+          // Widget → host events (e.g. game completion), posted via window.WidgetEvent.postEvent.
+          final callback = request.widgetEventCallback;
+          if (callback == null) return;
+          try {
+            final decoded = json.decode(message.message);
+            if (decoded is Map<String, dynamic>) {
+              callback(decoded, null);
+            } else {
+              callback(null, Exception('Unexpected widget event payload'));
+            }
+          } catch (e) {
+            callback(null, e is Exception ? e : Exception(e.toString()));
+          }
+        },
+      )
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -283,6 +301,13 @@ class GameballApp extends StatelessWidget {
                 return Promise.resolve();
               };
             }
+
+            // Bridge widget → host events onto the Flutter channel: the widget calls
+            // window.WidgetEvent.postEvent(rawJson), which webview_flutter surfaces via postMessage.
+            window.WidgetEvent = window.WidgetEvent || {};
+            window.WidgetEvent.postEvent = function (raw) {
+              GBWidgetEvent.postMessage(raw);
+            };
           ''');
           },
           onHttpError: (HttpResponseError error) {},
