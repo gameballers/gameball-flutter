@@ -4,82 +4,140 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v3.1.1
+## Latest Release: v3.2.0
 
-**Release Date**: 2025-12-15
-**Version**: 3.1.1
-**Type**: Patch Release
+**Release Date**: 2026-07-01
+**Version**: 3.2.0
+**Type**: Minor Release
 
 ---
 
 ## 🎉 What's New
 
-v3.1.1 adds guest mode support for the profile widget, allowing users to explore loyalty features before signing up. All v3.0.0 and v3.1.0 code continues to work without modifications.
+v3.2.0 introduces a **widget event channel** so your app can react to what customers do inside the widget, **dismissal controls** for both the widget and the host app, **external-link handling**, optional **channel-merging parameters**, and internal **diagnostic logging**. All v3.1.x code continues to work without modification — every addition is backward compatible.
 
-### Guest Mode Support
+### Widget Event Channel
 
-The profile widget now works without requiring customer authentication:
+The widget can now post events (e.g. game completion, reward redemption) back to your app. Register `widgetEventCallback` and each event arrives as a `Map<String, dynamic>` with a top-level `type` and a nested `metadata`. On a parse failure the callback is invoked with `(null, exception)`:
 
 ```dart
-// Show widget without customer ID
-final guestRequest = ShowProfileRequestBuilder()
-    .showCloseButton(true)
-    .closeButtonColor("#4CAF50")
-    .build();
-
-gameballApp.showProfile(context, guestRequest);
-
-// Authenticated mode
-final customerRequest = ShowProfileRequestBuilder()
+final request = ShowProfileRequestBuilder()
     .customerId("customer_123")
-    .showCloseButton(true)
+    .widgetEventCallback((event, error) {
+      if (error != null) return;                                   // parse failure
+      final type = event?['type'] as String?;                      // e.g. "gameCompleted"
+      final metadata = event?['metadata'] as Map<String, dynamic>?;
+
+      if (type == 'gameCompleted') {
+        final hasWon = metadata?['hasWon'] as bool? ?? false;
+        final rewardType = metadata?['rewardType'] as String?;     // "Default", "Bonus", "NoReward"…
+        final discountType = metadata?['discountType'] as String?; // "FreeShipping", "Percentage"… (null if not a coupon win)
+        final rewardName = metadata?['rewardName'] as String?;     // localized display name
+        final campaignId = metadata?['campaignId'] as String?;     // "90340"
+        final campaignType = metadata?['campaignType'] as String?; // "spinTheWheel", "scratchCard"…
+        if (hasWon) refreshBalance();
+      }
+    })
     .build();
 
-gameballApp.showProfile(context, customerRequest);
+GameballApp.getInstance().showProfile(context, request);
 ```
 
-### Simplified API
+The `gameCompleted` event's `metadata` carries:
 
-`ShowProfileRequest` builder no longer requires customer ID:
+| Field | Type | Description |
+|---|---|---|
+| `hasWon` | `bool` | Whether the player won a reward this round |
+| `rewardType` | `String?` | Reward category — `Default`, `Friend`, `Bonus`, `CustomText`, `Streak`, `NoReward` |
+| `discountType` | `String?` | Coupon kind when the win is a coupon — e.g. `Fixed`, `Percentage`, `FreeShipping`, `FreeProduct`, `Custom`, `RechargeFixed`, `RechargePercentage`, `ExternalReward`; `null` for non-coupon wins |
+| `rewardName` | `String?` | Localized, human-readable reward name |
+| `campaignId` | `String` | Challenge / campaign identifier |
+| `campaignType` | `String?` | Game type — `spinTheWheel`, `slotMachine`, `quiz`, `scratchCard`, `matchCards`, `catcher`, `ticTacToe`, `shooter`, `puzzle`, `tapTarget`, `highwayDrive` |
+
+> All `gameCompleted` values arrive as `String` or `bool` — there are no numeric fields.
+
+### Web-Initiated Close
+
+The widget can dismiss its own webview by calling `window.GameballWidget.closeWidget()` — no host code required.
+
+### Host-Initiated Dismiss
+
+Dismiss the widget programmatically from your app (e.g. on logout or a deep link):
 
 ```dart
-// v3.1.0 - customer ID required (but was documented as optional)
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")  // Required
-    .build();
-
-// v3.1.1 - customer ID optional
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")  // Optional
-    .build();
-
-// Guest mode
-final guestRequest = ShowProfileRequestBuilder().build();
+GameballApp.getInstance().hideProfile();   // no-op when nothing is shown
 ```
+
+### External-Link Handling
+
+Links the widget flags with `gbExternalBrowser=true` open in the system browser. Optionally intercept them with `externalLinkCallback`:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .externalLinkCallback((url) {
+      // open `url` your own way — in-app browser, router, etc.
+    })
+    .build();
+```
+
+### Channel-Merging Parameters
+
+`showProfile` now accepts optional `mobile` and `email`, so the widget can merge a guest/known profile with a customer's contact channels:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .mobile("+201234567890")
+    .email("customer@example.com")
+    .build();
+
+GameballApp.getInstance().showProfile(context, request);
+```
+
+### Diagnostic Logging
+
+The SDK now records internal diagnostic logs to aid troubleshooting. This is automatic and requires no integration changes.
 
 ---
 
 ## 🔄 Changes
 
-- `ShowProfileRequest` builder no longer requires customer ID
-- `customerId` parameter is optional (defaults to `null` for guest mode)
+- Added `ShowProfileRequestBuilder().widgetEventCallback(...)` — `void Function(Map<String, dynamic>? event, Exception? error)?`
+- Added `ShowProfileRequestBuilder().externalLinkCallback(...)` — `void Function(String url)?`
+- Added optional `mobile` and `email` on `ShowProfileRequestBuilder` (channel merging)
+- Added `GameballApp.hideProfile()`
+- Exposed `window.GameballWidget.closeWidget()` to the widget webview
+- Added internal SDK diagnostic logging
+- Unified the `x-gb-agent` header format to `GB/flutter/<version>`
+- Widened `share_plus`/`device_info_plus`/`package_info_plus` version ranges (floors unchanged; opting into `share_plus` 13.x requires Flutter 3.38.1+ / Dart 3.10+)
 
 ---
 
 ## Usage Examples
 
-**Conditional Display** - Show guest mode for unauthenticated users:
+**React to a reward and refresh the wallet:**
 ```dart
-void showLoyaltyWidget(BuildContext context) {
-  final customerId = getCustomerId(); // Your method to get customer ID
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .widgetEventCallback((event, error) {
+      if (error != null) return;
+      final metadata = event?['metadata'] as Map<String, dynamic>?;
+      if (metadata?['hasWon'] as bool? ?? false) {
+        showWinAnimation(metadata?['rewardName'] as String? ?? '');
+        refreshBalance();
+      }
+    })
+    .build();
 
-  final profileRequest = customerId != null
-      ? ShowProfileRequestBuilder()
-          .customerId(customerId)
-          .build()
-      : ShowProfileRequestBuilder().build(); // Guest mode
+GameballApp.getInstance().showProfile(context, request);
+```
 
-  gameballApp.showProfile(context, profileRequest);
+**Dismiss on logout:**
+```dart
+void logout() {
+  GameballApp.getInstance().hideProfile();
+  clearSession();
 }
 ```
 
@@ -96,7 +154,7 @@ void showLoyaltyWidget(BuildContext context) {
 
 ## Migration
 
-No changes required. Existing v3.1.0 and v3.0.0 code works without modifications.
+No changes required — all v3.1.x and v3.0.0 code works without modification. The new callbacks, parameters, and `hideProfile()` are additive. Diagnostic logging is automatic.
 
 See [MIGRATION.md](MIGRATION.md) for details.
 
@@ -106,7 +164,7 @@ See [MIGRATION.md](MIGRATION.md) for details.
 
 ```yaml
 dependencies:
-  gameball_sdk: ^3.1.1
+  gameball_sdk: ^3.2.0
 ```
 
 ---
@@ -119,228 +177,9 @@ dependencies:
 
 ---
 
-## Previous Release: v3.1.0
+## Previous Release: v3.1.1
 
-**Release Date**: 2025-10-14
-**Version**: 3.1.0
-**Type**: Feature Release
+**Release Date**: 2025-12-15
+**Type**: Patch Release
 
----
-
-### What's New
-
-Gameball Flutter SDK v3.1.0 introduces **Session Token authentication** for enhanced API security. This feature release adds optional token-based authentication with automatic secure endpoint routing, providing an additional layer of security for your API communications.
-
-### 🔒 Security Enhancements
-
-- **Session Token Authentication**: Optional token-based authentication mechanism for secure API communication
-- **Automatic Secure Routing**: SDK automatically switches from API v4.0 to v4.1 endpoints when Session Token is provided
-- **Secure Header Transmission**: `X-GB-TOKEN` header added to requests when using Session Token authentication
-- **Backward Compatible**: Existing implementations continue to work without any changes
-
-### 🛠️ Developer Experience
-
-- **Simple Configuration**: Add `sessionToken` to your `GameballConfig` to enable secure authentication
-- **Transparent Security**: No code changes required beyond initial configuration
-- **Flexible Authentication**: Token authentication is optional and can be enabled per configuration
-- **Per-Request Override**: All SDK methods now support optional `sessionToken` parameter for fine-grained control
-
-### 🐛 Bug Fixes
-
-- **Enum Naming**: Updated `PushProvider` enum to follow Dart lowerCamelCase convention (`firebase`, `huawei`)
-
----
-
-## 🚀 Key Features
-
-### GB Token Authentication
-
-Enable secure authentication by adding the `sessionToken` parameter to your SDK configuration:
-
-```dart
-import 'package:gameball_sdk/models/requests/gameball_config.dart';
-
-final config = GameballConfigBuilder()
-    .apiKey("your_api_key")
-    .lang("en")
-    .sessionToken("your-secure-session-token")  // Optional: Enable secure authentication
-    .build();
-
-gameballApp.init(config);
-```
-
-When a Session Token is provided:
-- All API requests automatically route to secure v4.1 endpoints
-- `X-GB-TOKEN` header is included in all authenticated requests
-- Enhanced security for customer data and API communications
-
-### Per-Request Session Token Override
-
-All SDK methods now support an optional `sessionToken` parameter for maximum flexibility:
-
-```dart
-// Use global sessionToken from init()
-await gameballApp.initializeCustomer(request, callback);
-
-// Override with a specific token for this request
-await gameballApp.initializeCustomer(request, callback, sessionToken: "user-specific-token");
-
-// Nullify sessionToken for this request
-await gameballApp.sendEvent(event, callback, sessionToken: null);
-
-// Show profile with a different token
-gameballApp.showProfile(context, request, sessionToken: "session-token");
-```
-
-**Behavior:**
-- **If provided (non-null)**: Overrides and updates the global sessionToken for this and subsequent requests
-- **If provided (null)**: Clears the global sessionToken for this and subsequent requests
-- **If omitted entirely**: Uses the current global sessionToken from `init()` or last override
-
-**Important Note:** The `sessionToken` parameter must be explicitly passed to **every method call** where you want to use a specific token. If you want consistent authentication across multiple calls, either set it globally via `init()` or pass it to each individual call.
-
-### Standard Configuration (Without Token)
-
-```dart
-final config = GameballConfigBuilder()
-    .apiKey("your_api_key")
-    .lang("en")
-    .platform("your_platform")
-    .shop("your_shop")
-    .build();
-
-gameballApp.init(config);
-```
-
----
-
-## ⚠️ Breaking Changes
-
-**None.** This is a backward-compatible feature release. All existing v3.0.0 implementations continue to work without modification.
-
----
-
-## 📈 What's Changed
-
-### Security Improvements
-- **Enhanced API Security**: Session Token authentication adds an additional security layer for sensitive operations
-- **Automatic Endpoint Management**: Smart routing to secure endpoints when authentication is enabled
-- **Secure Token Storage**: GB tokens are securely managed via static variables
-
----
-
-## 🔧 Technical Details
-
-### Requirements
-- **Minimum Flutter**: 1.17.0 (Recommended: 3.0+)
-- **Dart**: 3.4.4+
-- **Android**: API level 21+
-- **iOS**: 12.0+
-
-### New Configuration Option
-
-#### GameballConfig
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sessionToken` | String | ❌ Optional | Session Token for secure authentication |
-
-### Internal Changes
-- Added `getIntegrationsUrl()` function for conditional endpoint routing
-- HeaderGenerator now conditionally adds `X-GB-TOKEN` header when token is present
-- Automatic API version switching logic (v4.0 → v4.1) in request handlers
-- API version constants added for version management
-
----
-
-## 🛡️ Security & Reliability
-
-### Authentication Security
-- **Optional Session Token**: Adds token-based authentication layer when needed
-- **Automatic Secure Routing**: Transparent upgrade to secure v4.1 endpoints
-- **Header Security**: Secure transmission of authentication tokens via HTTP headers
-- **Token Management**: Secure storage and lifecycle management of GB tokens
-
----
-
-## 📚 Upgrading from v3.0.0
-
-### No Migration Required
-
-This is a backward-compatible release. Your existing v3.0.0 code will continue to work without any changes.
-
-### To Enable GB Token Authentication (Optional)
-
-Simply add the `sessionToken` parameter to your existing configuration:
-
-```dart
-// Before (v3.0.0) - Still works in v3.1.0
-final config = GameballConfigBuilder()
-    .apiKey("your_api_key")
-    .lang("en")
-    .build();
-
-// After (v3.1.0) - With optional GB Token
-final config = GameballConfigBuilder()
-    .apiKey("your_api_key")
-    .lang("en")
-    .sessionToken("your-secure-session-token")  // Add this line
-    .build();
-```
-
-### Support
-- 📧 **Email**: support@gameball.co
-- 📖 **Documentation**: [https://developer.gameball.co/](https://developer.gameball.co/)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/gameballers/gameball-flutter/issues)
-
----
-
-## 🎯 What's Next
-
-### Future Enhancements
-- Enhanced analytics capabilities
-- Additional security features
-- Performance optimizations
-- New integration features
-
-### Roadmap
-- Version 3.2.0: Enhanced analytics and reporting
-- Future versions: Continued improvements and new features
-
----
-
-## 📦 Installation
-
-### pubspec.yaml
-```yaml
-dependencies:
-  gameball_sdk: ^3.1.0
-```
-
-### Flutter CLI
-```bash
-flutter pub add gameball_sdk
-```
-
----
-
-## 🏆 Benefits Summary
-
-✅ **Enhanced Security**: Optional Session Token authentication for sensitive operations
-✅ **Backward Compatible**: Zero migration effort - existing code continues to work
-✅ **Automatic Routing**: Smart endpoint selection based on authentication status
-✅ **Simple Configuration**: One-line addition to enable secure authentication
-✅ **Flexible**: Use token authentication only when needed
-✅ **Transparent**: No code changes beyond initial configuration
-
----
-
-## ⭐ Acknowledgments
-
-We thank our development community for their feedback on security features.
-
----
-
-**Ready to upgrade?** Simply update your dependency to v3.1.0. No migration required!
-
-*For technical support, contact us at support@gameball.co*
+Guest mode support — the profile widget can be shown without customer authentication, and the `ShowProfileRequest` builder no longer requires a customer ID. See [CHANGELOG.md](CHANGELOG.md) for the full history.

@@ -6,9 +6,53 @@ This guide provides migration instructions for upgrading between major versions 
 
 ## Table of Contents
 
+- [v3.1.1 → v3.2.0](#migration-guide-v311--v320)
 - [v3.1.0 → v3.1.1](#migration-guide-v310--v311)
 - [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
 - [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.1.1 → v3.2.0
+
+Version 3.2.0 adds a widget event channel, widget dismissal controls, and external-link handling. This is a **minor update** with no breaking changes — all v3.1.x and v3.0.0 code continues to work.
+
+### Overview of Changes
+
+#### ✨ What's New
+- **Widget event channel** - pass `widgetEventCallback` to `ShowProfileRequestBuilder` to receive widget events as a `Map<String, dynamic>` `{type, metadata}`; `gameCompleted` includes `hasWon`, `rewardType`, `discountType`, `rewardName`, `campaignId`, `campaignType`
+- **Widget dismissal** - the widget can close itself via `window.GameballWidget.closeWidget()`; the host can dismiss it via `GameballApp.getInstance().hideProfile()`
+- **External links** - pass `externalLinkCallback` to intercept links the widget flags with `gbExternalBrowser=true`
+- **Channel merging** - `ShowProfileRequestBuilder` accepts optional `mobile` and `email`
+- **Diagnostic logging** - the SDK now records internal diagnostic logs (automatic, no integration change required)
+- **Header** - the `x-gb-agent` header format is now `GB/flutter/<version>`
+
+### Update Dependencies
+
+Update your dependency to v3.2.0:
+
+```yaml
+dependencies:
+  gameball_sdk: ^3.2.0
+```
+
+Run `flutter pub get` to update.
+
+### Action Required
+
+None. To adopt the new features, add the optional callbacks to your existing `ShowProfileRequestBuilder`:
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .widgetEventCallback((event, error) {
+      if (error != null) return;
+      // handle the {type, metadata} map
+    })
+    .build();
+
+GameballApp.getInstance().showProfile(context, request);
+```
 
 ---
 

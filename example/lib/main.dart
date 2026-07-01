@@ -91,9 +91,22 @@ class _MyHomePageState extends State<MyHomePage> {
               .hideNavigation(false)
               .showCloseButton(true)
               .closeButtonColor("#FF6B6B") // Custom close button color
+              // Widget event channel (v3.2.0+): react to events the widget posts (e.g. game completion)
+              .widgetEventCallback((event, error) {
+                if (error != null) return; // parse failure
+                final type = event?['type'] as String?;
+                final metadata = event?['metadata'] as Map<String, dynamic>?;
+                if (type == 'gameCompleted') {
+                  final hasWon = metadata?['hasWon'] as bool? ?? false;
+                  print('Widget event: gameCompleted (hasWon: $hasWon)');
+                }
+              })
               .build();
 
           gameballApp.showProfile(context, profileRequest);
+
+          // Host-initiated dismiss (v3.2.0+) - close the widget programmatically, e.g. on logout:
+          // gameballApp.hideProfile();
 
           // Guest Mode Example (v3.1.1+) - Show widget without customer ID
           // final guestRequest = ShowProfileRequestBuilder()
@@ -195,7 +208,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.1.1',
+              'Gameball Flutter SDK v3.2.0',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),
@@ -210,7 +223,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             const SizedBox(height: 4),
             Text(
-              '• SDK Initialization\n• Customer Registration\n• Event Tracking\n• Profile Widget',
+              '• SDK Initialization\n• Customer Registration\n• Event Tracking\n• Profile Widget\n• Widget Events',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
