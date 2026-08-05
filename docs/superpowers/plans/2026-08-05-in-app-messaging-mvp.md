@@ -25,6 +25,45 @@
 - **Test baseline is zero tests.** `test/gameball_sdk_test.dart` contains only `void main() {}`.
 - All commands run with `export PATH="$HOME/development/flutter/bin:$PATH"`.
 
+## Execution log — what implementation changed (all tasks complete)
+
+Recorded after the fact. Six things the plan did not anticipate:
+
+1. **A real bug in `startInAppMessaging` (Task 8, found by the Task 9 tests).**
+   `_inAppMessaging ??=` bound the service and its `OverlayPresenter` to the
+   *first* navigator key forever. A later call with a different key — exactly
+   what a hot restart does — left the presenter pointing at a dead key and
+   messages silently never appeared. The presenter is now rebuilt when the key
+   changes. Worst-possible failure mode for the SDK-development workflow this
+   module exists to serve.
+2. **A second real bug: the post-frame retry re-armed every frame (Task 7).**
+   A message deferred for want of a navigator scheduled a retry which, on
+   failing, scheduled another — spinning once per frame while no surface
+   existed. Now guarded by `_postFrameRetryScheduled`.
+3. **Two Task 7 tests were wrong, not the implementation.** Deferral is for
+   blocked *display*, not cap violations: a trigger firing inside the 30-second
+   floor is dropped at selection and never enters the pending slot, matching
+   Braze. The floor re-validation on retry therefore guards a narrower case —
+   an intervening display moving the floor while a message waits — which the
+   rewritten test now builds explicitly.
+4. **`(_, _)` does not compile in this package.** `pubspec.yaml` pins
+   `sdk: ">=3.4.4"`, so the language version predates wildcard `_` parameters,
+   even though the same syntax compiles in the sample app. Use `(_, __)`.
+5. **The pre-existing missing `catchError` makes `sendEvent` untestable
+   normally.** Its request failure escapes as an unhandled async error and fails
+   any test that calls it. Two tests capture it in a `runZonedGuarded` and assert
+   on it, documenting the defect rather than hiding it. Both carry a note to
+   delete the zone if the defect is ever fixed.
+6. **An extra test file: `test/in_app_messaging/end_to_end_test.dart`.** The
+   plan's manual walkthrough was the only proof that the units wire together.
+   This drives the whole module through its real collaborators via the public
+   API, which makes stage 1 automated rather than tap-dependent — and it is what
+   found deviation 1.
+
+Also: `startInAppMessaging` requires a non-empty API key, so the sample app
+needs *some* `GB_API_KEY` to demo. A placeholder is enough — MVP messages come
+from the stub, so no network call is involved in in-app messaging.
+
 ## Deviations from the spec (decided while planning)
 
 1. **A 15th file, `lib/in_app_messaging/iam_log.dart`.** The spec says diagnostics are "logged" but never says where. `GameballLogger` posts telemetry to a backend endpoint, which is wrong for per-parse diagnostics. This adds a local `iamLog()` using `dart:developer`.
