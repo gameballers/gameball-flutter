@@ -30,7 +30,18 @@ class NavigatorKeyNavigator implements MessageNavigator {
       iamLog('cannot navigate to "$route": no navigator available yet');
       return false;
     }
-    navigator.pushNamed(route, arguments: arguments);
-    return true;
+
+    try {
+      navigator.pushNamed(route, arguments: arguments);
+      return true;
+    } catch (error) {
+      // Flutter throws "Could not find a generator for route" when the host has
+      // not registered the name. A campaign is authored outside the app, so a
+      // route that does not exist is a routine content mistake — it must not be
+      // able to throw out of the SDK and into the host's error handling.
+      iamLog('cannot navigate to "$route": the host has not registered that '
+          'route ($error)');
+      return false;
+    }
   }
 }
