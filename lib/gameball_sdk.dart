@@ -1,5 +1,6 @@
 library gameball_sdk;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
@@ -12,6 +13,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'in_app_messaging/analytics/message_analytics.dart';
+import 'in_app_messaging/evaluation/frequency_cap.dart';
+import 'in_app_messaging/iam_log.dart';
+import 'in_app_messaging/in_app_messaging_service.dart';
+import 'in_app_messaging/models/in_app_message.dart';
+import 'in_app_messaging/models/in_app_message_campaign.dart';
+import 'in_app_messaging/presentation/overlay_presenter.dart';
+import 'in_app_messaging/source/stub_message_source.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
@@ -20,6 +29,9 @@ import 'network/models/callbacks.dart';
 import 'network/request_calls/send_event_request.dart';
 
 import 'network/utils/constants.dart';
+
+/// The in-app messaging public surface, so hosts need only one import.
+export 'in_app_messaging/in_app_messaging.dart';
 
 class GameballApp extends StatelessWidget {
   const GameballApp({super.key});
@@ -33,6 +45,15 @@ class GameballApp extends StatelessWidget {
   static String? _apiPrefix;
   static String? _sessionToken;
   static VoidCallback? _dismissActiveWidget;
+
+  /// Null until [startInAppMessaging] is called. Everything in-app-messaging
+  /// related no-ops while this is null, so upgrading changes nothing for a
+  /// client that does not opt in.
+  static InAppMessagingService? _inAppMessaging;
+
+  /// Created on first access of [onInAppMessage], so a host that never listens
+  /// pays nothing.
+  static StreamController<GameballInAppMessage>? _inAppMessageController;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -110,6 +131,15 @@ class GameballApp extends StatelessWidget {
     } catch (e) {
       responseCallback!(null, e as Exception);
     }
+
+    // Additive: tell in-app messaging the customer may have changed. Guarded,
+    // and deliberately outside the request's future chain — that chain has no
+    // catchError, so anything thrown inside it escapes unhandled.
+    try {
+      _inAppMessaging?.onCustomerChanged(request.customerId);
+    } catch (error) {
+      iamLog('onCustomerChanged hook failed: $error');
+    }
   }
 
   /// Sends an event to Gameball.
@@ -147,7 +177,82 @@ class GameballApp extends StatelessWidget {
     } catch (e) {
       callback!(null, e as Exception);
     }
+
+    // Additive: an event may trigger an in-app message. Guarded, and
+    // deliberately outside the request's future chain — that chain has no
+    // catchError, so anything thrown inside it escapes unhandled.
+    try {
+      final service = _inAppMessaging;
+      if (service != null) {
+        for (final eventName in event.events.keys) {
+          service.onCustomEvent(eventName);
+        }
+      }
+    } catch (error) {
+      iamLog('onCustomEvent hook failed: $error');
+    }
   }
+
+  /// Opts in to in-app messaging for [customerId].
+  ///
+  /// Nothing in the in-app messaging module runs until this is called: no
+  /// requests, no timers, no state. Existing integrations are unaffected by
+  /// upgrading.
+  ///
+  /// [navigatorKey] must be the key assigned to your `MaterialApp.navigatorKey`
+  /// — it is how the SDK finds a surface to draw on without needing a
+  /// `BuildContext` at every call site.
+  ///
+  /// [beforeDisplay] is consulted immediately before each message is shown, and
+  /// can show, defer or discard it. Omit it to always show.
+  ///
+  /// Calling this again with a different [customerId] refetches campaigns and
+  /// resets frequency caps. Calling it with the same one does nothing.
+  void startInAppMessaging({
+    required String customerId,
+    required GlobalKey<NavigatorState> navigatorKey,
+    GameballBeforeDisplay? beforeDisplay,
+  }) {
+    if (isNullOrEmpty(_apiKey)) {
+      iamLog('startInAppMessaging ignored: API key is not initialized. '
+          'Call init() first');
+      return;
+    }
+
+    final service = _inAppMessaging ??= InAppMessagingService(
+      source: StubMessageSource(),
+      presenter: OverlayPresenter(navigatorKey),
+      frequencyCap: InMemoryFrequencyCap(),
+      analytics: LoggingMessageAnalytics(),
+      isHostWidgetOpen: () => _dismissActiveWidget != null,
+      emit: (message) => _inAppMessageController?.add(message),
+    );
+
+    service.start(customerId: customerId, beforeDisplay: beforeDisplay);
+  }
+
+  /// Stops in-app messaging, dismissing anything on screen and clearing state.
+  ///
+  /// Call on logout. Safe to call when it was never started.
+  void stopInAppMessaging() => _inAppMessaging?.stop();
+
+  /// Whether in-app messaging is currently running.
+  bool get isInAppMessagingStarted => _inAppMessaging?.isStarted ?? false;
+
+  /// The message waiting for a display opportunity, if any. Diagnostic.
+  InAppMessageCampaign? get pendingInAppMessageCampaign =>
+      _inAppMessaging?.pendingCampaign;
+
+  /// Every in-app message the SDK selects for display.
+  ///
+  /// Observation only — the SDK owns impression and click logging, so there is
+  /// no way to double-count from here. Safe to subscribe before
+  /// [startInAppMessaging]. The controller is created on first access, so hosts
+  /// that never listen pay nothing.
+  Stream<GameballInAppMessage> get onInAppMessage =>
+      (_inAppMessageController ??=
+              StreamController<GameballInAppMessage>.broadcast())
+          .stream;
 
   /// Displays the Gameball profile in a bottom sheet.
   ///
@@ -401,6 +506,13 @@ class GameballApp extends StatelessWidget {
       },
     ).then((_) {
       _dismissActiveWidget = null;
+      // Additive: the screen is free again, so a deferred message may now be
+      // presentable.
+      try {
+        _inAppMessaging?.onHostWidgetClosed();
+      } catch (error) {
+        iamLog('onHostWidgetClosed hook failed: $error');
+      }
     });
   }
 
