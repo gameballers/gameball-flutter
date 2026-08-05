@@ -1,0 +1,113 @@
+import 'dart:ui' show Color, TextAlign;
+
+/// Maximum buttons a modal renders. Extra buttons in the payload are dropped.
+const int maxModalButtons = 2;
+
+/// Supported in-app message layouts.
+///
+/// An unrecognised wire value parses to [unsupported] rather than defaulting to
+/// a real layout. Braze's closed enum with a silent `slideup` fallback shipped
+/// wrong message types twice — prefer an explicit unknown over a default that
+/// lies.
+enum GameballMessageType { modal, unsupported }
+
+/// What a button does when tapped.
+sealed class GameballClickAction {
+  const GameballClickAction();
+}
+
+/// Closes the message and does nothing else.
+final class GameballDismissAction extends GameballClickAction {
+  const GameballDismissAction();
+}
+
+/// Opens [url], then closes the message.
+final class GameballOpenUrlAction extends GameballClickAction {
+  const GameballOpenUrlAction(this.url, {this.external = false});
+
+  final String url;
+
+  /// Whether to force an external browser rather than the platform default.
+  final bool external;
+}
+
+/// Per-button colours. A null field means "use the host's theme".
+class GameballButtonStyle {
+  const GameballButtonStyle({this.backgroundColor, this.textColor, this.borderColor});
+
+  final Color? backgroundColor;
+  final Color? textColor;
+  final Color? borderColor;
+}
+
+class GameballMessageButton {
+  const GameballMessageButton({
+    required this.id,
+    required this.text,
+    required this.action,
+    this.style = const GameballButtonStyle(),
+  });
+
+  /// Stable identifier used for click analytics.
+  final int id;
+  final String text;
+  final GameballClickAction action;
+  final GameballButtonStyle style;
+}
+
+/// Message-level colours and alignment. A null field means "use the host's theme".
+class GameballMessageStyle {
+  const GameballMessageStyle({
+    this.backgroundColor,
+    this.headerColor,
+    this.bodyColor,
+    this.scrimColor,
+    this.headerAlign,
+    this.bodyAlign,
+  });
+
+  final Color? backgroundColor;
+  final Color? headerColor;
+  final Color? bodyColor;
+  final Color? scrimColor;
+  final TextAlign? headerAlign;
+  final TextAlign? bodyAlign;
+}
+
+/// A single in-app message, ready to render.
+class GameballInAppMessage {
+  const GameballInAppMessage({
+    required this.id,
+    required this.type,
+    required this.body,
+    this.header,
+    this.imageUrl,
+    this.showCloseButton = true,
+    this.autoDismissAfter,
+    this.isTestSend = false,
+    this.buttons = const <GameballMessageButton>[],
+    this.extras = const <String, String>{},
+    this.style = const GameballMessageStyle(),
+  });
+
+  final String id;
+  final GameballMessageType type;
+  final String body;
+  final String? header;
+  final String? imageUrl;
+  final bool showCloseButton;
+
+  /// Null means the message stays until the user dismisses it.
+  final Duration? autoDismissAfter;
+
+  /// True when this was delivered as a marketer's test send.
+  final bool isTestSend;
+
+  final List<GameballMessageButton> buttons;
+
+  /// Arbitrary key-values from the campaign, for driving app behaviour without
+  /// a client release.
+  final Map<String, String> extras;
+
+  final GameballMessageStyle style;
+}
