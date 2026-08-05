@@ -133,6 +133,56 @@ void main() {
     expect(find.byKey(const Key('gb_iam_image')), findsNothing);
   });
 
+  group('close button legibility', () {
+    testWidgets('over artwork it gets a scrim disc and a light glyph',
+        (tester) async {
+      await pump(tester, message(imageUrl: 'https://example.com/dark.png'));
+
+      final icon = tester.widget<IconButton>(find.byKey(const Key('gb_iam_close')));
+      expect(icon.color, const Color(0xFFFFFFFF),
+          reason: 'a dark glyph on a dark photograph is invisible');
+
+      final disc = tester.widget<DecoratedBox>(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_close')),
+          matching: find.byType(DecoratedBox),
+        ).first,
+      );
+      expect((disc.decoration as BoxDecoration).color, isNotNull);
+    });
+
+    testWidgets('over the plain surface it needs no disc', (tester) async {
+      await pump(tester, message());
+
+      final disc = tester.widget<DecoratedBox>(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_close')),
+          matching: find.byType(DecoratedBox),
+        ).first,
+      );
+      expect((disc.decoration as BoxDecoration).color, isNull);
+    });
+
+    testWidgets('a campaign colour always wins', (tester) async {
+      await pump(tester, message(
+        imageUrl: 'https://example.com/dark.png',
+        style: const GameballMessageStyle(closeButtonColor: Color(0xFFFF0000)),
+      ));
+
+      final icon = tester.widget<IconButton>(find.byKey(const Key('gb_iam_close')));
+      expect(icon.color, const Color(0xFFFF0000));
+
+      final disc = tester.widget<DecoratedBox>(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_close')),
+          matching: find.byType(DecoratedBox),
+        ).first,
+      );
+      expect((disc.decoration as BoxDecoration).color, isNull,
+          reason: 'the campaign chose a colour, so do not second-guess it');
+    });
+  });
+
   group('image sizing', () {
     testWidgets('never crops — the image is fitted, not covered', (tester) async {
       await pump(tester, message(imageUrl: 'https://example.com/a.png'));
@@ -156,7 +206,10 @@ void main() {
           matching: find.byType(ConstrainedBox),
         ).first,
       );
-      expect(box.constraints.maxHeight, 220);
+      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      expect(box.constraints.maxHeight, closeTo(screenHeight * 0.4, 0.5),
+          reason: 'proportional, so a square banner fills the width rather than '
+              'letterboxing inside a fixed band');
     });
 
     testWidgets('an image-only message gets most of the screen', (tester) async {

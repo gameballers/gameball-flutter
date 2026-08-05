@@ -98,21 +98,44 @@ class GameballInAppMessageModal extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (message.showCloseButton)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: IconButton(
-                      key: const Key('gb_iam_close'),
-                      icon: const Icon(Icons.close),
-                      color: style.headerColor,
-                      tooltip: 'Close',
-                      onPressed: onClosePressed,
-                    ),
-                  ),
+                if (message.showCloseButton) _closeButton(style),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// The close affordance, kept legible over anything behind it.
+  ///
+  /// When the image starts at the top of the modal — an image-led or image-only
+  /// message — the glyph sits over artwork whose colours are unknown. A dark
+  /// glyph on a dark photograph is effectively invisible, so in that case it gets
+  /// a scrim disc behind it and a light glyph. Over the plain message surface no
+  /// disc is needed and the campaign's colour is used directly.
+  Widget _closeButton(GameballMessageStyle style) {
+    final overArtwork = message.imageUrl != null;
+    final glyphColour = style.closeButtonColor ??
+        (overArtwork ? const Color(0xFFFFFFFF) : null);
+
+    return Positioned(
+      top: 4,
+      right: 4,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: overArtwork && style.closeButtonColor == null
+              ? const Color(0x59000000)
+              : null,
+        ),
+        child: IconButton(
+          key: const Key('gb_iam_close'),
+          icon: const Icon(Icons.close),
+          iconSize: 20,
+          color: glyphColour,
+          tooltip: 'Close',
+          onPressed: onClosePressed,
         ),
       ),
     );
@@ -143,9 +166,13 @@ class GameballInAppMessageModal extends StatelessWidget {
   /// uploaded — for an image-only message it would reduce a portrait poster to an
   /// unreadable horizontal slice.
   Widget _image(BuildContext context, String url) {
-    final maxHeight = _hasText
-        ? 220.0
-        : MediaQuery.sizeOf(context).height * 0.65;
+    // Proportional rather than a fixed band. A fixed 220 letterboxed a square
+    // image — lossless, but the white bars either side read as a bug. At 40% of
+    // the screen a square or landscape banner fills the modal width exactly,
+    // and only an unusually tall one letterboxes, where the alternative
+    // (cropping) would be worse.
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final maxHeight = screenHeight * (_hasText ? 0.4 : 0.65);
 
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),

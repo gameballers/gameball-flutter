@@ -265,6 +265,7 @@ GameballMessageStyle _parseMessageStyle(Object? json) {
     headerColor: parseColor(json['headerColor']),
     bodyColor: parseColor(json['bodyColor']),
     scrimColor: parseColor(json['scrimColor']),
+    closeButtonColor: parseColor(json['closeButtonColor']),
     headerAlign: _parseAlign(json['headerAlign']),
     bodyAlign: _parseAlign(json['bodyAlign']),
   );

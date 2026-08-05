@@ -62,6 +62,7 @@ class GameballMessageStyle {
     this.headerColor,
     this.bodyColor,
     this.scrimColor,
+    this.closeButtonColor,
     this.headerAlign,
     this.bodyAlign,
   });
@@ -70,6 +71,14 @@ class GameballMessageStyle {
   final Color? headerColor;
   final Color? bodyColor;
   final Color? scrimColor;
+
+  /// Colour of the close glyph. Braze's `close_btn_color`.
+  ///
+  /// Needed as its own field rather than borrowing the header colour: the close
+  /// button can sit over artwork, where a colour chosen for text on the message
+  /// background may be invisible.
+  final Color? closeButtonColor;
+
   final TextAlign? headerAlign;
   final TextAlign? bodyAlign;
 }
