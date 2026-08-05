@@ -19,6 +19,7 @@ import 'in_app_messaging/iam_log.dart';
 import 'in_app_messaging/in_app_messaging_service.dart';
 import 'in_app_messaging/models/in_app_message.dart';
 import 'in_app_messaging/models/in_app_message_campaign.dart';
+import 'in_app_messaging/models/message_trigger.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
 import 'in_app_messaging/source/stub_message_source.dart';
 import 'models/requests/event.dart';
@@ -58,6 +59,10 @@ class GameballApp extends StatelessWidget {
   /// The navigator key the current presenter is bound to, so a changed key can
   /// be detected and the presenter rebuilt.
   static GlobalKey<NavigatorState>? _inAppMessagingNavigatorKey;
+
+  /// Registered on first [startInAppMessaging] so warm resumes begin new
+  /// sessions. Null for any client that never opts in.
+  static _GameballLifecycleObserver? _lifecycleObserver;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -197,6 +202,67 @@ class GameballApp extends StatelessWidget {
     }
   }
 
+  /// Logs a purchase.
+  ///
+  /// Additive: no existing behaviour changes and no client is required to call
+  /// it. Sends an event to the same events endpoint as [sendEvent], using the
+  /// reserved name `purchase` with the purchase details as metadata, and — when
+  /// in-app messaging is running — notifies it so any-purchase and
+  /// specific-purchase campaigns can trigger.
+  ///
+  /// Arguments:
+  ///   - `customerId`: who bought. Required for the same reason [sendEvent]
+  ///     takes it on the `Event` — this SDK keeps no ambient customer.
+  ///   - `productId`: identifier of the item bought.
+  ///   - `price`: unit price.
+  ///   - `currency`: ISO currency code, e.g. `USD`.
+  ///   - `quantity`: number of units, defaulting to 1.
+  ///   - `properties`: extra metadata, also available to campaign filters.
+  ///   - `callback`: invoked with the send result, as [sendEvent] does.
+  ///   - `sessionToken`: optional session token for this request.
+  void logPurchase({
+    required String customerId,
+    required String productId,
+    required double price,
+    required String currency,
+    int quantity = 1,
+    Map<String, Object>? properties,
+    SendEventCallback? callback,
+    String? sessionToken,
+  }) {
+    final metadata = <String, Object>{
+      'productId': productId,
+      'price': price,
+      'currency': currency,
+      'quantity': quantity,
+      ...?properties,
+    };
+
+    final builder = EventBuilder()
+        .customerId(customerId)
+        .eventName(gameballPurchaseEventName);
+    for (final entry in metadata.entries) {
+      builder.eventMetaData(entry.key, entry.value);
+    }
+
+    sendEvent(builder.build(), callback, sessionToken: sessionToken);
+
+    // Additive and guarded, like the other in-app messaging hooks. Note this
+    // runs in addition to the custom-event hook inside sendEvent, so a campaign
+    // can trigger on either the purchase or the reserved event name.
+    try {
+      _inAppMessaging?.onPurchase(
+        productId: productId,
+        price: price,
+        currency: currency,
+        quantity: quantity,
+        properties: properties,
+      );
+    } catch (error) {
+      iamLog('onPurchase hook failed: $error');
+    }
+  }
+
   /// Opts in to in-app messaging for [customerId].
   ///
   /// Nothing in the in-app messaging module runs until this is called: no
@@ -242,6 +308,15 @@ class GameballApp extends StatelessWidget {
       emit: (message) => _inAppMessageController?.add(message),
     );
 
+    // Watch the app lifecycle so a resume after the session timeout starts a new
+    // session and fires session_start again. Registered once, and only for hosts
+    // that opted in, so a client who never starts messaging gains no observer.
+    if (_lifecycleObserver == null) {
+      final observer = _GameballLifecycleObserver();
+      _lifecycleObserver = observer;
+      WidgetsBinding.instance.addObserver(observer);
+    }
+
     service.start(customerId: customerId, beforeDisplay: beforeDisplay);
   }
 
@@ -249,6 +324,26 @@ class GameballApp extends StatelessWidget {
   ///
   /// Call on logout. Safe to call when it was never started.
   void stopInAppMessaging() => _inAppMessaging?.stop();
+
+  /// Forwards a foreground resume to in-app messaging. Called by the lifecycle
+  /// observer; guarded so a host that never opted in is unaffected.
+  static void notifyAppResumed() {
+    try {
+      _inAppMessaging?.onAppResumed();
+    } catch (error) {
+      iamLog('onAppResumed hook failed: $error');
+    }
+  }
+
+  /// Forwards leaving the foreground to in-app messaging, so the time away can
+  /// be measured against the session timeout.
+  static void notifyAppPaused() {
+    try {
+      _inAppMessaging?.onAppPaused();
+    } catch (error) {
+      iamLog('onAppPaused hook failed: $error');
+    }
+  }
 
   /// Whether in-app messaging is currently running.
   bool get isInAppMessagingStarted => _inAppMessaging?.isStarted ?? false;
@@ -583,5 +678,26 @@ class GameballApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container();
+  }
+}
+
+/// Turns app lifecycle changes into session boundaries for in-app messaging.
+///
+/// Separate from [GameballApp] because that class is a `StatelessWidget` and
+/// cannot mix in [WidgetsBindingObserver]. Registered only once a host opts into
+/// in-app messaging, so a client that never calls `startInAppMessaging` pays
+/// nothing.
+class _GameballLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        GameballApp.notifyAppResumed();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        GameballApp.notifyAppPaused();
+    }
   }
 }

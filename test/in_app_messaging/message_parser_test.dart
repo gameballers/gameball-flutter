@@ -3,6 +3,7 @@ import 'dart:ui' show Color, TextAlign;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
+import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
 /// Builds a payload with one campaign, letting each test override just the
@@ -262,6 +263,105 @@ void main() {
     });
   });
 
+  group('parseCampaignsJson — purchase triggers and filters', () {
+    test('parses any_purchase', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "any_purchase" },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      '''));
+
+      expect(campaigns.single.trigger, isA<GameballAnyPurchaseTrigger>());
+    });
+
+    test('parses specific_purchase with a productId', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "specific_purchase", "productId": "sku-001" },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      '''));
+
+      final trigger = campaigns.single.trigger as GameballSpecificPurchaseTrigger;
+      expect(trigger.productId, 'sku-001');
+      expect(trigger.filters, isEmpty);
+    });
+
+    test('parses specific_purchase with only filters', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "specific_purchase", "filters": [
+            { "property": "price", "operator": "greater_than", "value": 100 } ] },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      '''));
+
+      final trigger = campaigns.single.trigger as GameballSpecificPurchaseTrigger;
+      expect(trigger.productId, isNull);
+      expect(trigger.filters.single.property, 'price');
+      expect(trigger.filters.single.operator, GameballFilterOperator.greaterThan);
+      expect(trigger.filters.single.value, 100);
+    });
+
+    test('drops specific_purchase with neither productId nor filters', () {
+      expect(parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "specific_purchase" },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      ''')), isEmpty,
+          reason: 'it would be indistinguishable from any_purchase');
+    });
+
+    test('parses filters on a custom event too', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "custom_event", "eventName": "add_to_cart",
+            "filters": [ { "property": "price", "operator": ">", "value": 100 } ] },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      '''));
+
+      final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
+      expect(trigger.filters.single.operator, GameballFilterOperator.greaterThan);
+    });
+
+    test('accepts operator aliases', () {
+      const aliases = <String, GameballFilterOperator>{
+        'equals': GameballFilterOperator.equals,
+        'eq': GameballFilterOperator.equals,
+        '==': GameballFilterOperator.equals,
+        'not_equals': GameballFilterOperator.notEquals,
+        'gt': GameballFilterOperator.greaterThan,
+        'gte': GameballFilterOperator.greaterThanOrEqual,
+        '<': GameballFilterOperator.lessThan,
+        'lte': GameballFilterOperator.lessThanOrEqual,
+        'CONTAINS': GameballFilterOperator.contains,
+      };
+
+      aliases.forEach((alias, expected) {
+        final campaigns = parseCampaignsJson(payload(campaigns: '''
+          { "id": "c", "trigger": { "type": "custom_event", "eventName": "e",
+              "filters": [ { "property": "p", "operator": "$alias", "value": 1 } ] },
+            "message": { "id": "m", "type": "modal", "body": "b" } }
+        '''));
+
+        final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
+        expect(trigger.filters.single.operator, expected,
+            reason: 'alias "$alias"');
+      });
+    });
+
+    test('an unusable filter is dropped, widening rather than narrowing', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "custom_event", "eventName": "e",
+            "filters": [
+              { "property": "p", "operator": "sorta_equals", "value": 1 },
+              { "operator": "eq", "value": 1 },
+              { "property": "q", "operator": "eq" },
+              { "property": "ok", "operator": "eq", "value": 5 } ] },
+          "message": { "id": "m", "type": "modal", "body": "b" } }
+      '''));
+
+      final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
+      expect(trigger.filters, hasLength(1),
+          reason: 'dropping the whole campaign would hide one typo behind a '
+              'message that simply never appears');
+      expect(trigger.filters.single.property, 'ok');
+    });
+  });
+
   group('parseCampaignsJson — keep but skip', () {
     test('keeps an unknown message type as unsupported', () {
       final campaigns = parseCampaignsJson(payload(campaigns: '''
@@ -277,7 +377,7 @@ void main() {
   group('parseCampaignsJson — drop what can never work', () {
     test('drops a campaign with an unknown trigger type', () {
       expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "any_purchase" },
+        { "id": "c", "trigger": { "type": "push_click" },
           "message": { "id": "m", "type": "modal", "body": "b" } }
       ''')), isEmpty);
     });
@@ -321,7 +421,7 @@ void main() {
     test('keeps valid campaigns alongside dropped ones', () {
       final campaigns = parseCampaignsJson(
         '{"campaigns":[$_oneModalCampaign,'
-        '{"id":"bad","trigger":{"type":"any_purchase"},'
+        '{"id":"bad","trigger":{"type":"push_click"},'
         '"message":{"id":"m","type":"modal","body":"b"}}]}',
       );
 
@@ -379,7 +479,7 @@ void main() {
   group('triggerMatches', () {
     test('matches session start to session start', () {
       expect(
-        triggerMatches(const GameballSessionStartTrigger(), const GameballSessionStartTrigger()),
+        triggerMatches(const GameballSessionStartTrigger(), const GameballSessionStartOccurrence()),
         isTrue,
       );
     });
@@ -388,7 +488,7 @@ void main() {
       expect(
         triggerMatches(
           const GameballCustomEventTrigger('a'),
-          const GameballCustomEventTrigger('a'),
+          const GameballCustomEventOccurrence('a'),
         ),
         isTrue,
       );
@@ -398,7 +498,7 @@ void main() {
       expect(
         triggerMatches(
           const GameballCustomEventTrigger('a'),
-          const GameballCustomEventTrigger('b'),
+          const GameballCustomEventOccurrence('b'),
         ),
         isFalse,
       );
@@ -408,9 +508,126 @@ void main() {
       expect(
         triggerMatches(
           const GameballSessionStartTrigger(),
-          const GameballCustomEventTrigger('a'),
+          const GameballCustomEventOccurrence('a'),
         ),
         isFalse,
+      );
+    });
+
+    test('any purchase matches any purchase occurrence', () {
+      expect(
+        triggerMatches(
+          const GameballAnyPurchaseTrigger(),
+          const GameballPurchaseOccurrence(
+            productId: 'sku-001',
+            price: 10,
+            currency: 'USD',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('specific purchase matches on productId', () {
+      const occurrence = GameballPurchaseOccurrence(
+        productId: 'sku-001',
+        price: 10,
+        currency: 'USD',
+      );
+
+      expect(
+        triggerMatches(
+          const GameballSpecificPurchaseTrigger(productId: 'sku-001'),
+          occurrence,
+        ),
+        isTrue,
+      );
+      expect(
+        triggerMatches(
+          const GameballSpecificPurchaseTrigger(productId: 'sku-999'),
+          occurrence,
+        ),
+        isFalse,
+      );
+    });
+
+    test('purchase built-ins are filterable like any other property', () {
+      const occurrence = GameballPurchaseOccurrence(
+        productId: 'sku-001',
+        price: 189.0,
+        currency: 'USD',
+        quantity: 2,
+      );
+
+      expect(
+        triggerMatches(
+          const GameballSpecificPurchaseTrigger(filters: [
+            GameballPropertyFilter(
+              property: 'price',
+              operator: GameballFilterOperator.greaterThan,
+              value: 100,
+            ),
+          ]),
+          occurrence,
+        ),
+        isTrue,
+      );
+      expect(
+        triggerMatches(
+          const GameballSpecificPurchaseTrigger(filters: [
+            GameballPropertyFilter(
+              property: 'price',
+              operator: GameballFilterOperator.greaterThan,
+              value: 500,
+            ),
+          ]),
+          occurrence,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a custom event filter narrows an otherwise matching name', () {
+      const trigger = GameballCustomEventTrigger('add_to_cart', filters: [
+        GameballPropertyFilter(
+          property: 'price',
+          operator: GameballFilterOperator.greaterThan,
+          value: 100,
+        ),
+      ]);
+
+      expect(
+        triggerMatches(
+          trigger,
+          const GameballCustomEventOccurrence('add_to_cart',
+              properties: <String, Object>{'price': 189.0}),
+        ),
+        isTrue,
+      );
+      expect(
+        triggerMatches(
+          trigger,
+          const GameballCustomEventOccurrence('add_to_cart',
+              properties: <String, Object>{'price': 12.99}),
+        ),
+        isFalse,
+      );
+    });
+
+    test('a filter on a property the occurrence lacks never matches', () {
+      expect(
+        triggerMatches(
+          const GameballCustomEventTrigger('e', filters: [
+            GameballPropertyFilter(
+              property: 'tier',
+              operator: GameballFilterOperator.equals,
+              value: 'gold',
+            ),
+          ]),
+          const GameballCustomEventOccurrence('e'),
+        ),
+        isFalse,
+        reason: 'a filter is a requirement, so a missing property is a failure',
       );
     });
   });

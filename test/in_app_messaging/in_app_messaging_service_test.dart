@@ -7,6 +7,7 @@ import 'package:gameball_sdk/in_app_messaging/models/gameball_audience.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
+import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_presenter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
@@ -518,6 +519,122 @@ void main() {
       expect(h.analytics.bodyClicks, isEmpty);
       expect(h.presenter.isShowing, isTrue,
           reason: 'an inert message must not dismiss on a stray tap');
+    });
+  });
+
+  group('purchase triggers', () {
+    test('any purchase displays regardless of the product', () async {
+      final h = build(campaigns: [
+        campaign('promo', trigger: const GameballAnyPurchaseTrigger()),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.onPurchase(
+        productId: 'anything',
+        price: 5,
+        currency: 'USD',
+      );
+
+      expect(h.presenter.shownMessageIds, ['msg_promo']);
+    });
+
+    test('specific purchase matches only its product', () async {
+      final h = build(campaigns: [
+        campaign('acc',
+            trigger: const GameballSpecificPurchaseTrigger(productId: 'sku-001')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.onPurchase(productId: 'sku-999', price: 5, currency: 'USD');
+      expect(h.presenter.shownMessageIds, isEmpty);
+
+      h.service.onPurchase(productId: 'sku-001', price: 5, currency: 'USD');
+      expect(h.presenter.shownMessageIds, ['msg_acc']);
+    });
+
+    test('a price filter narrows a purchase trigger', () async {
+      final h = build(campaigns: [
+        campaign('big', trigger: const GameballSpecificPurchaseTrigger(filters: [
+          GameballPropertyFilter(
+            property: 'price',
+            operator: GameballFilterOperator.greaterThan,
+            value: 100,
+          ),
+        ])),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.onPurchase(productId: 'sku-x', price: 12.99, currency: 'USD');
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'below the threshold');
+
+      h.service.onPurchase(productId: 'sku-x', price: 189, currency: 'USD');
+      expect(h.presenter.shownMessageIds, ['msg_big']);
+    });
+
+    test('does nothing before start', () {
+      final h = build();
+
+      h.service.onPurchase(productId: 'sku', price: 1, currency: 'USD');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+  });
+
+  group('sessions', () {
+    test('a resume after the timeout starts a new session and fires again',
+        () async {
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['msg_cold']);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+
+      expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
+          reason: 'caps survive the new session, so the next campaign shows');
+    });
+
+    test('a brief resume stays in the same session', () async {
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(seconds: 5)));
+      h.service.onAppResumed();
+
+      expect(h.presenter.shownMessageIds, ['msg_cold'],
+          reason: 'below the session timeout, so no new session began');
+    });
+
+    test('a resume with no preceding pause does nothing', () async {
+      final h = build();
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+      final before = h.presenter.shownMessageIds.length;
+
+      h.service.onAppResumed();
+
+      expect(h.presenter.shownMessageIds, hasLength(before));
+    });
+
+    test('lifecycle callbacks do nothing before start', () {
+      final h = build();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(hours: 1)));
+      h.service.onAppResumed();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
     });
   });
 

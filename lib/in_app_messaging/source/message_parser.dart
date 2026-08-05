@@ -5,6 +5,7 @@ import '../iam_log.dart';
 import '../models/in_app_message.dart';
 import '../models/in_app_message_campaign.dart';
 import '../models/message_trigger.dart';
+import '../models/property_filter.dart';
 
 /// Parses a message-source payload into campaigns.
 ///
@@ -91,15 +92,94 @@ GameballMessageTrigger? _parseTrigger(Object? json, String campaignId) {
         iamLog('campaign "$campaignId" dropped: custom_event trigger has no "eventName"');
         return null;
       }
-      return GameballCustomEventTrigger(eventName);
+      return GameballCustomEventTrigger(
+        eventName,
+        filters: _parseFilters(json['filters'], campaignId),
+      );
+    case 'any_purchase':
+      return const GameballAnyPurchaseTrigger();
+    case 'specific_purchase':
+      final productId = _asString(json['productId']);
+      final filters = _parseFilters(json['filters'], campaignId);
+      if ((productId == null || productId.isEmpty) && filters.isEmpty) {
+        // Otherwise it is indistinguishable from any_purchase, and a campaign
+        // that means "any" should say so.
+        iamLog('campaign "$campaignId" dropped: specific_purchase needs a '
+            '"productId" or at least one filter — use any_purchase for all');
+        return null;
+      }
+      return GameballSpecificPurchaseTrigger(
+        productId: productId,
+        filters: filters,
+      );
     default:
       // Expected steady state, not an edge case: the backend supports more
       // trigger types than this SDK version. Name both so "why didn't my
       // campaign fire" is answerable from the log alone.
       iamLog('campaign "$campaignId" dropped: unsupported trigger type "$type" '
-          '(this SDK supports session_start, custom_event)');
+          '(this SDK supports session_start, custom_event, any_purchase, '
+          'specific_purchase)');
       return null;
   }
+}
+
+/// Parses trigger property filters.
+///
+/// A filter that cannot be understood is **dropped**, which deliberately widens
+/// the campaign rather than narrowing it — the alternative, silently dropping the
+/// whole campaign, hides a typo in one operator behind a message that simply
+/// never appears.
+List<GameballPropertyFilter> _parseFilters(Object? json, String campaignId) {
+  if (json == null) return const <GameballPropertyFilter>[];
+  if (json is! List) {
+    iamLog('campaign "$campaignId": "filters" is not a list, ignoring');
+    return const <GameballPropertyFilter>[];
+  }
+
+  final filters = <GameballPropertyFilter>[];
+  for (final entry in json) {
+    if (entry is! Map<String, dynamic>) {
+      iamLog('campaign "$campaignId": filter skipped, entry is not an object');
+      continue;
+    }
+    final property = _asString(entry['property']);
+    if (property == null || property.isEmpty) {
+      iamLog('campaign "$campaignId": filter dropped, missing "property"');
+      continue;
+    }
+    final operator = _parseOperator(entry['operator']);
+    if (operator == null) {
+      iamLog('campaign "$campaignId": filter on "$property" dropped, '
+          'unsupported operator "${entry['operator']}"');
+      continue;
+    }
+    final value = entry['value'];
+    if (value == null) {
+      iamLog('campaign "$campaignId": filter on "$property" dropped, no "value"');
+      continue;
+    }
+    filters.add(GameballPropertyFilter(
+      property: property,
+      operator: operator,
+      value: value as Object,
+    ));
+  }
+  return filters;
+}
+
+GameballFilterOperator? _parseOperator(Object? value) {
+  return switch (_asString(value)?.toLowerCase()) {
+    'equals' || 'eq' || '==' => GameballFilterOperator.equals,
+    'not_equals' || 'ne' || '!=' => GameballFilterOperator.notEquals,
+    'greater_than' || 'gt' || '>' => GameballFilterOperator.greaterThan,
+    'greater_than_or_equal' || 'gte' || '>=' =>
+      GameballFilterOperator.greaterThanOrEqual,
+    'less_than' || 'lt' || '<' => GameballFilterOperator.lessThan,
+    'less_than_or_equal' || 'lte' || '<=' =>
+      GameballFilterOperator.lessThanOrEqual,
+    'contains' => GameballFilterOperator.contains,
+    _ => null,
+  };
 }
 
 GameballInAppMessage? _parseMessage(Map<String, dynamic> json, String campaignId) {

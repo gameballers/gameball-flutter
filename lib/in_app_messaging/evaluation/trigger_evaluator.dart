@@ -3,7 +3,7 @@ import '../models/in_app_message_campaign.dart';
 import '../models/message_trigger.dart';
 import 'frequency_cap.dart';
 
-/// Chooses which campaign, if any, should display for an occurred [trigger].
+/// Chooses which campaign, if any, should display for a given [occurrence].
 ///
 /// Pure: no I/O, no async, no `BuildContext`, and no clock — [now] is passed in
 /// so the 30-second floor is testable without waiting. All display policy lives
@@ -13,14 +13,14 @@ import 'frequency_cap.dart';
 /// cannot render, enforce the floor, then take the highest priority breaking
 /// ties on response order.
 InAppMessageCampaign? selectCampaign({
-  required GameballMessageTrigger trigger,
+  required GameballTriggerOccurrence occurrence,
   required List<InAppMessageCampaign> campaigns,
   required CapState capState,
   required DateTime now,
 }) {
   final eligible = <InAppMessageCampaign>[];
   for (final candidate in campaigns) {
-    if (!triggerMatches(candidate.trigger, trigger)) continue;
+    if (!triggerMatches(candidate.trigger, occurrence)) continue;
     if (capState.shownCampaignIds.contains(candidate.id)) continue;
     // An unsupported layout is filtered here rather than refused at display
     // time, so a usable lower-priority campaign can still win.

@@ -29,7 +29,7 @@ void main() {
     test('returns null when there are no campaigns', () {
       expect(
         selectCampaign(
-          trigger: const GameballSessionStartTrigger(),
+          occurrence: const GameballSessionStartOccurrence(),
           campaigns: const <InAppMessageCampaign>[],
           capState: emptyCaps,
           now: t0,
@@ -40,7 +40,7 @@ void main() {
 
     test('selects a campaign whose trigger matches', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: emptyCaps,
         now: t0,
@@ -51,7 +51,7 @@ void main() {
 
     test('ignores campaigns triggered by a different type', () {
       final result = selectCampaign(
-        trigger: const GameballCustomEventTrigger('add_to_cart'),
+        occurrence: const GameballCustomEventOccurrence('add_to_cart'),
         campaigns: [campaign('a')],
         capState: emptyCaps,
         now: t0,
@@ -67,7 +67,7 @@ void main() {
 
       expect(
         selectCampaign(
-          trigger: const GameballCustomEventTrigger('add_to_cart'),
+          occurrence: const GameballCustomEventOccurrence('add_to_cart'),
           campaigns: campaigns,
           capState: emptyCaps,
           now: t0,
@@ -76,7 +76,7 @@ void main() {
       );
       expect(
         selectCampaign(
-          trigger: const GameballCustomEventTrigger('checkout'),
+          occurrence: const GameballCustomEventOccurrence('checkout'),
           campaigns: campaigns,
           capState: emptyCaps,
           now: t0,
@@ -89,7 +89,7 @@ void main() {
   group('selectCampaign — priority', () {
     test('higher priority wins', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('low', priority: 1), campaign('high', priority: 99)],
         capState: emptyCaps,
         now: t0,
@@ -106,7 +106,7 @@ void main() {
       ];
 
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: campaigns,
         capState: emptyCaps,
         now: t0,
@@ -123,7 +123,7 @@ void main() {
       ];
 
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: campaigns,
         capState: emptyCaps,
         now: t0,
@@ -136,7 +136,7 @@ void main() {
   group('selectCampaign — caps', () {
     test('skips a campaign that has already been shown', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: const CapState(shownCampaignIds: {'a'}, lastDisplayAt: null),
         now: t0,
@@ -147,7 +147,7 @@ void main() {
 
     test('falls through to a lower-priority campaign when the top is spent', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('high', priority: 99), campaign('low', priority: 1)],
         capState: const CapState(shownCampaignIds: {'high'}, lastDisplayAt: null),
         now: t0,
@@ -158,7 +158,7 @@ void main() {
 
     test('returns null just inside the floor', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: CapState(
           shownCampaignIds: const <String>{},
@@ -172,7 +172,7 @@ void main() {
 
     test('returns a campaign just outside the floor', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: CapState(
           shownCampaignIds: const <String>{},
@@ -188,7 +188,7 @@ void main() {
   group('selectCampaign — unsupported types', () {
     test('never selects an unsupported message type', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a', type: GameballMessageType.unsupported)],
         capState: emptyCaps,
         now: t0,
@@ -199,7 +199,7 @@ void main() {
 
     test('a supported lower-priority campaign wins over an unsupported top one', () {
       final result = selectCampaign(
-        trigger: const GameballSessionStartTrigger(),
+        occurrence: const GameballSessionStartOccurrence(),
         campaigns: [
           campaign('top', priority: 99, type: GameballMessageType.unsupported),
           campaign('usable', priority: 1),

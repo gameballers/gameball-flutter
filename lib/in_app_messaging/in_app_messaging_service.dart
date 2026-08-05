@@ -35,6 +35,17 @@ typedef GameballBeforeDisplay = GameballDisplayDecision Function(
 /// Signature for opening a URL, injectable so tests never touch the platform.
 typedef UrlLauncher = Future<bool> Function(Uri uri, {bool external});
 
+/// How long the app must be backgrounded before returning counts as a new
+/// session.
+///
+/// Matched to [minimumIntervalBetweenDisplays] on purpose. A shorter timeout
+/// would create sessions that fire the session-start trigger while the display
+/// floor is still blocking, producing a dead zone where a message is selected and
+/// then silently suppressed. Braze's default is shorter than its floor and
+/// accepts that; here they are aligned so a new session can always show
+/// something.
+const Duration defaultSessionTimeout = minimumIntervalBetweenDisplays;
+
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
 /// Owns no display policy of its own — [selectCampaign] decides what shows —
@@ -49,6 +60,7 @@ class InAppMessagingService {
     void Function(GameballInAppMessage message)? emit,
     DateTime Function()? clock,
     UrlLauncher? launcher,
+    this.sessionTimeout = defaultSessionTimeout,
   })  : _source = source,
         _presenter = presenter,
         _cap = frequencyCap,
@@ -67,6 +79,9 @@ class InAppMessagingService {
   final DateTime Function() _clock;
   final UrlLauncher _launcher;
 
+  /// How long backgrounded before a resume counts as a new session.
+  final Duration sessionTimeout;
+
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
@@ -76,6 +91,10 @@ class InAppMessagingService {
   /// A single slot: a newer deferral displaces an older one. Braze keeps a
   /// stack; for one message type a slot is honest and enough.
   InAppMessageCampaign? _pending;
+
+  /// When the app last left the foreground, used to decide whether a resume
+  /// begins a new session.
+  DateTime? _lastPausedAt;
 
   /// Guards the post-frame retry so it cannot re-arm on every frame.
   ///
@@ -138,9 +157,61 @@ class InAppMessagingService {
   }
 
   /// Called when the host logs an event that may trigger a message.
-  void onCustomEvent(String eventName) {
+  void onCustomEvent(String eventName, {Map<String, Object>? properties}) {
     if (!isStarted) return;
-    _evaluate(GameballCustomEventTrigger(eventName));
+    _evaluate(GameballCustomEventOccurrence(
+      eventName,
+      properties: properties ?? const <String, Object>{},
+    ));
+  }
+
+  /// Called when the host logs a purchase.
+  void onPurchase({
+    required String productId,
+    required double price,
+    required String currency,
+    int quantity = 1,
+    Map<String, Object>? properties,
+  }) {
+    if (!isStarted) return;
+    _evaluate(GameballPurchaseOccurrence(
+      productId: productId,
+      price: price,
+      currency: currency,
+      quantity: quantity,
+      properties: properties ?? const <String, Object>{},
+    ));
+  }
+
+  /// Called when the app returns to the foreground.
+  ///
+  /// A resume after more than [sessionTimeout] in the background begins a new
+  /// session and fires the session-start trigger again — so a warm return is a
+  /// genuine trigger occurrence, not just a repaint.
+  ///
+  /// Frequency caps deliberately survive a new session: that is what makes the
+  /// first session-start campaign show on the cold start and the next one show on
+  /// the warm return, rather than the same message every time.
+  void onAppResumed() {
+    if (!isStarted) return;
+    final since = _lastPausedAt;
+    if (since == null) return;
+    _lastPausedAt = null;
+
+    final away = _clock().difference(since);
+    if (away < sessionTimeout) {
+      iamLog('resumed after ${away.inSeconds}s — same session, no trigger');
+      return;
+    }
+
+    iamLog('resumed after ${away.inSeconds}s — new session');
+    _evaluate(const GameballSessionStartOccurrence());
+  }
+
+  /// Called when the app leaves the foreground, to time the absence.
+  void onAppPaused() {
+    if (!isStarted) return;
+    _lastPausedAt = _clock();
   }
 
   /// Called when the Gameball profile widget closes, freeing the screen.
@@ -170,17 +241,17 @@ class InAppMessagingService {
       return;
     }
 
-    _evaluate(const GameballSessionStartTrigger());
+    _evaluate(const GameballSessionStartOccurrence());
   }
 
-  void _evaluate(GameballMessageTrigger trigger) {
+  void _evaluate(GameballTriggerOccurrence occurrence) {
     if (_campaigns.isEmpty) {
       iamLog('trigger ignored: no campaigns loaded');
       return;
     }
 
     final campaign = selectCampaign(
-      trigger: trigger,
+      occurrence: occurrence,
       campaigns: _campaigns,
       capState: _cap.snapshot(),
       now: _clock(),
