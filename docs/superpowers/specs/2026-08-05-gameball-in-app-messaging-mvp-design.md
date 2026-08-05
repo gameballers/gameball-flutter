@@ -279,6 +279,7 @@ The endpoint path is the backend team's call. What this spec pins down is the re
         "imageUrl": "https://cdn.gameball.co/campaigns/hero.png",
         "showCloseButton": true,
         "autoDismissAfterMs": null,
+        "isTestSend": false,
         "buttons": [
           {
             "id": 0,
@@ -327,10 +328,39 @@ The endpoint path is the backend team's call. What this spec pins down is the re
 - **`autoDismissAfterMs: null` (or absent) means no auto-dismiss** — the message stays until the
   user dismisses it via a button, the close button or the scrim.
 - **`priority` is higher-wins.** `100` beats `50`.
+- **`isTestSend`** marks a marketer's test send rather than a live campaign. Adopted from Braze
+  because it is genuinely useful: the debug screen surfaces it, and it gives us an obvious future
+  hook for bypassing frequency caps on test sends. Defaults to `false` when absent.
 - **`extras`** is the marketer's escape hatch — arbitrary key-values that drive app behaviour
   without a client release. The most-used part of Braze's model (§12.2).
 - **No `schemaVersion`.** Optional additive fields cover normal evolution; a version field only
   helps for genuinely breaking changes, which warrant a new endpoint.
+
+### Backend contract alignment
+
+**In-app messaging is new at Gameball — there is no existing schema to match.** The backend will
+be built for this, and the backend team intends to follow Braze closely.
+
+That makes the divergences below **integration risk, not design taste**: if backend emits Braze's
+literal conventions and the SDK expects these, the first real endpoint fails. Each row needs an
+explicit decision before backend implementation starts. The recommendation column is what this
+spec assumes; none of it blocks the MVP, which is stub-fed.
+
+| Aspect | Braze's format | This spec | Recommendation |
+| --- | --- | --- | --- |
+| Key casing | `snake_case` (`image_url`, `message_close`) | `camelCase` (`imageUrl`) | **camelCase** — matches every existing Gameball endpoint (`customerId`, `openDetail`, `closeButtonColor`) |
+| Colours | Packed ARGB ints (`4294967295`) | Hex strings (`"#FFFFFF"`) | **Hex strings** — matches `ShowProfileRequest.closeButtonColor`, and human-readable in campaign tooling. Parser accepts either regardless (see rules below) |
+| Buttons key | `btns` | `buttons` | **`buttons`** — no reason to inherit an abbreviation |
+| Button action | Flat: `click_action` + `uri` + `use_webview` | Tagged: `action: {type, url, external}` | **Tagged** — new action types add fields without widening the button object. Needs explicit agreement; the parser does *not* accept Braze's flat form |
+| Enum values | Uppercase (`"MODAL"`, `"SWIPE"`) | Lowercase (`"modal"`) | **Case-insensitive matching**, as Braze's own Dart layer does — so either works and this stops being a failure mode |
+| Trigger config | Separate `triggers` array; message carries `trigger_id` | Nested: `campaign → {trigger, priority, message}` | **Nested** — one round trip, no client-side join, and priority naturally belongs to the campaign |
+| Test sends | `is_test_send` | `isTestSend` | **Adopt it** — distinguishing a marketer's test send from a live campaign is genuinely useful in the debug screen |
+
+One consequence worth stating plainly: **the backend will support trigger types the SDK does not.**
+Braze has five (session start, push click, any purchase, specific purchase, custom event); the MVP
+supports two. So "drop campaigns with an unknown `trigger.type`" is not defensive coding for a
+hypothetical — it is the expected steady state, and it must be logged clearly enough to diagnose
+"why didn't my campaign fire".
 
 ### Parsing rules
 
@@ -338,10 +368,12 @@ Rule: **drop what can never work, keep-but-skip what a future SDK might support,
 
 | Situation | Behaviour |
 | --- | --- |
+| Enum-ish string values (`type`, `action.type`, alignments) | Matched **case-insensitively**, as Braze's own Dart layer does — `"MODAL"` and `"modal"` both parse |
 | Unknown `message.type` | → `GameballMessageType.unsupported`. Campaign **kept**, skipped at display with a log |
-| Unknown `trigger.type` | Campaign **dropped** at parse with a log — it can never fire |
+| Unknown `trigger.type` | Campaign **dropped** at parse with a log. **Expected steady state**, not an edge case — the backend will support more trigger types than the SDK, so the log must name the campaign and the unsupported type |
 | Unknown `action.type` | Button becomes `dismiss` with a log — a working close beats a dead button |
 | Missing `id` or `body` | Campaign dropped with a log |
+| Colour as a packed ARGB int | Accepted and converted, so a Braze-shaped payload still renders correctly |
 | Malformed colour string | Field ignored, theme default used, logged |
 | More than 2 buttons | First 2 kept, logged |
 | Non-string `extras` values | **Coerced via `toString()`**, not dropped |
@@ -586,8 +618,15 @@ Named so the implementation plan cannot drift into them:
 
 ## Open questions
 
-1. **Endpoint contract.** The response shape here is our proposal. It needs backend agreement
-   before `HttpMessageSource` is written; nothing in the MVP depends on the answer.
-2. **Native SDK parity.** If Gameball's native Android/iOS SDKs already implement in-app
-   messaging, their message schema, trigger semantics and analytics events are the contract to
-   match, and this design should be reconciled with them.
+1. **Endpoint contract — needs agreement before backend implementation, not before the MVP.**
+   In-app messaging is new across all of Gameball, so there is no existing schema to match, and
+   the backend team intends to follow Braze closely. The response shape here is this spec's
+   proposal; every point where it deliberately departs from Braze's literal payload is tabulated
+   in §"Backend contract alignment", and each needs a yes/no. The MVP is stub-fed and unblocked
+   either way — but the longer the divergences go unagreed, the more likely the first real
+   endpoint needs SDK rework.
+
+2. **Which trigger types backend ships first.** The SDK MVP supports session start and custom
+   event. If backend ships purchase triggers early, campaigns using them are dropped at parse
+   (logged, by design) until the SDK adds them — worth knowing so nobody debugs a "broken"
+   campaign that is behaving exactly as specified.
