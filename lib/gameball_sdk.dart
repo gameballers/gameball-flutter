@@ -55,6 +55,10 @@ class GameballApp extends StatelessWidget {
   /// pays nothing.
   static StreamController<GameballInAppMessage>? _inAppMessageController;
 
+  /// The navigator key the current presenter is bound to, so a changed key can
+  /// be detected and the presenter rebuilt.
+  static GlobalKey<NavigatorState>? _inAppMessagingNavigatorKey;
+
   /// Retrieves the singleton instance of the GameballApp class.
   ///
   /// Creates a new instance if it doesn't exist and returns it.
@@ -218,6 +222,16 @@ class GameballApp extends StatelessWidget {
           'Call init() first');
       return;
     }
+
+    // Rebuild when the host supplies a different navigator key — which is what
+    // a hot restart does. Reusing the old presenter would leave it bound to a
+    // key whose widget is gone, and messages would silently never appear.
+    if (_inAppMessaging != null && _inAppMessagingNavigatorKey != navigatorKey) {
+      iamLog('navigator key changed; rebuilding the presenter');
+      _inAppMessaging!.stop();
+      _inAppMessaging = null;
+    }
+    _inAppMessagingNavigatorKey = navigatorKey;
 
     final service = _inAppMessaging ??= InAppMessagingService(
       source: StubMessageSource(),
