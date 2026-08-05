@@ -68,14 +68,19 @@ void main() {
 
   group('CallbackNavigator — for routers Navigator.pushNamed cannot see', () {
     test('hands the route and arguments to the host', () {
-      final calls = <(String, Map<String, Object>?)>[];
+      // Compared field by field rather than as a record: Dart Map equality is by
+      // identity, so a record holding a map never matches an equivalent literal.
+      final routes = <String>[];
+      Map<String, Object>? lastArguments;
 
       final pushed = CallbackNavigator((route, arguments) {
-        calls.add((route, arguments));
+        routes.add(route);
+        lastArguments = arguments;
       }).pushNamed('/cart', arguments: <String, Object>{'from': 'campaign'});
 
       expect(pushed, isTrue);
-      expect(calls, [('/cart', <String, Object>{'from': 'campaign'})]);
+      expect(routes, ['/cart']);
+      expect(lastArguments, {'from': 'campaign'});
     });
 
     test('passes null arguments through', () {
