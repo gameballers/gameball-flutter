@@ -9,6 +9,12 @@ import '../models/in_app_message.dart';
 abstract class MessageAnalytics {
   void logImpression(GameballInAppMessage message, {required String campaignId});
 
+  /// A click on the message surface itself, with no button involved.
+  ///
+  /// Separate from [logButtonClick] so the two are distinguishable downstream —
+  /// Braze models the same distinction as one call with a null button id.
+  void logClick(GameballInAppMessage message, {required String campaignId});
+
   void logButtonClick(
     GameballInAppMessage message, {
     required String campaignId,
@@ -25,6 +31,11 @@ class LoggingMessageAnalytics implements MessageAnalytics {
   void logImpression(GameballInAppMessage message, {required String campaignId}) {
     iamLog('impression: campaign="$campaignId" message="${message.id}"'
         '${message.isTestSend ? ' (test send)' : ''}');
+  }
+
+  @override
+  void logClick(GameballInAppMessage message, {required String campaignId}) {
+    iamLog('click: campaign="$campaignId" message="${message.id}" (message body)');
   }
 
   @override

@@ -186,6 +186,82 @@ void main() {
     });
   });
 
+  group('parseCampaignsJson — Braze modal layouts', () {
+    test('image-only: an imageUrl alone is enough, with no text at all', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "session_start" },
+          "message": { "id": "m", "type": "modal",
+                       "imageUrl": "https://cdn.example.com/promo.png",
+                       "action": { "type": "open_url", "url": "app://sale" } } }
+      '''));
+
+      final m = campaigns.single.message;
+      expect(m.imageUrl, 'https://cdn.example.com/promo.png');
+      expect(m.body, isNull);
+      expect(m.header, isNull);
+      expect(m.clickAction, isA<GameballOpenUrlAction>());
+    });
+
+    test('a header with no body is enough to render', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "session_start" },
+          "message": { "id": "m", "type": "modal", "header": "Gold unlocked" } }
+      '''));
+
+      expect(campaigns.single.message.header, 'Gold unlocked');
+      expect(campaigns.single.message.body, isNull);
+    });
+
+    test('text layout: no message action means the surface is not tappable', () {
+      final campaigns = parseCampaignsJson(payload());
+
+      expect(campaigns.single.message.clickAction, isNull);
+    });
+
+    test('a message-level dismiss action is honoured', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "session_start" },
+          "message": { "id": "m", "type": "modal", "body": "b",
+                       "action": { "type": "dismiss" } } }
+      '''));
+
+      expect(campaigns.single.message.clickAction, isA<GameballDismissAction>());
+    });
+
+    test('an unusable message action leaves the surface untappable', () {
+      // Unlike a button, where an unusable action degrades to dismiss: silently
+      // turning the whole message into a close button would be worse.
+      for (final action in <String>[
+        '{ "type": "open_url" }',
+        '{ "type": "send_telepathy" }',
+        '"not-an-object"',
+      ]) {
+        final campaigns = parseCampaignsJson(payload(campaigns: '''
+          { "id": "c", "trigger": { "type": "session_start" },
+            "message": { "id": "m", "type": "modal", "body": "b",
+                         "action": $action } }
+        '''));
+
+        expect(campaigns.single.message.clickAction, isNull,
+            reason: 'action $action must not make the message tappable');
+      }
+    });
+
+    test('the message action is independent of button actions', () {
+      final campaigns = parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "session_start" },
+          "message": { "id": "m", "type": "modal", "body": "b",
+                       "action": { "type": "open_url", "url": "app://body" },
+                       "buttons": [ { "text": "Go",
+                         "action": { "type": "open_url", "url": "app://button" } } ] } }
+      '''));
+
+      final m = campaigns.single.message;
+      expect((m.clickAction! as GameballOpenUrlAction).url, 'app://body');
+      expect((m.buttons.single.action as GameballOpenUrlAction).url, 'app://button');
+    });
+  });
+
   group('parseCampaignsJson — keep but skip', () {
     test('keeps an unknown message type as unsupported', () {
       final campaigns = parseCampaignsJson(payload(campaigns: '''
@@ -220,10 +296,18 @@ void main() {
       ''')), isEmpty);
     });
 
-    test('drops a message with no body', () {
+    test('drops a message with nothing to render', () {
       expect(parseCampaignsJson(payload(campaigns: '''
         { "id": "c", "trigger": { "type": "session_start" },
           "message": { "id": "m", "type": "modal" } }
+      ''')), isEmpty);
+    });
+
+    test('drops a message whose only text fields are empty strings', () {
+      expect(parseCampaignsJson(payload(campaigns: '''
+        { "id": "c", "trigger": { "type": "session_start" },
+          "message": { "id": "m", "type": "modal", "header": "", "body": "",
+                       "imageUrl": "" } }
       ''')), isEmpty);
     });
 

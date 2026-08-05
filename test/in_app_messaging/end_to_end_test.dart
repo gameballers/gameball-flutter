@@ -115,6 +115,14 @@ void main() {
         reason: 'the global 30-second floor holds across campaigns');
   });
 
+  // NOTE: the image-only campaign cannot be exercised end to end through the
+  // public API. It triggers on `view_offers`, which can only fire after the
+  // welcome message has displayed — and the 30-second floor reads the real
+  // clock, which `tester.pump` does not advance. Injecting a clock or a source
+  // is internal-only, by design. Image-only is therefore covered at three
+  // narrower levels instead: parsing (message_parser_test), the fixture
+  // (stub_message_source_test) and rendering (in_app_message_modal_test).
+
   testWidgets('stopInAppMessaging dismisses whatever is on screen',
       (tester) async {
     await startWithHost(tester);

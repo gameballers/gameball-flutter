@@ -7,10 +7,10 @@ import 'package:gameball_sdk/in_app_messaging/source/stub_message_source.dart';
 void main() {
   const audience = CustomerAudience('customer-1');
 
-  test('the built-in fixture parses into two usable campaigns', () async {
+  test('the built-in fixture parses into three usable campaigns', () async {
     final campaigns = await StubMessageSource().fetch(audience);
 
-    expect(campaigns, hasLength(2));
+    expect(campaigns, hasLength(3));
     for (final c in campaigns) {
       expect(c.message.type, GameballMessageType.modal,
           reason: 'the fixture must only contain displayable messages');
@@ -23,9 +23,23 @@ void main() {
 
     expect(triggers.whereType<GameballSessionStartTrigger>(), hasLength(1));
     expect(
-      triggers.whereType<GameballCustomEventTrigger>().single.eventName,
-      stubCartEventName,
+      triggers.whereType<GameballCustomEventTrigger>().map((t) => t.eventName),
+      containsAll(<String>[stubCartEventName, stubPromoEventName]),
     );
+  });
+
+  test('the fixture covers both Braze modal layouts', () async {
+    final campaigns = await StubMessageSource().fetch(audience);
+    final messages = campaigns.map((c) => c.message);
+
+    // "Text (with Optional Image)"
+    expect(messages.where((m) => m.body != null), isNotEmpty);
+    // "Image Only" — no header, no body, tappable artwork
+    final imageOnly = messages.singleWhere((m) => m.body == null);
+    expect(imageOnly.header, isNull);
+    expect(imageOnly.imageUrl, isNotNull);
+    expect(imageOnly.clickAction, isA<GameballOpenUrlAction>(),
+        reason: 'an image-only message needs an action or it does nothing');
   });
 
   test('the session-start campaign exercises header, image and two buttons', () async {

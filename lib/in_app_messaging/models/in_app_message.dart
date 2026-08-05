@@ -75,13 +75,19 @@ class GameballMessageStyle {
 }
 
 /// A single in-app message, ready to render.
+///
+/// Covers both of Braze's modal layouts. "Text (with Optional Image)" sets
+/// [body]; "Image Only" sets [imageUrl] and leaves [header] and [body] null. At
+/// least one of the three must be present — a message with nothing to render is
+/// dropped at parse.
 class GameballInAppMessage {
   const GameballInAppMessage({
     required this.id,
     required this.type,
-    required this.body,
+    this.body,
     this.header,
     this.imageUrl,
+    this.clickAction,
     this.showCloseButton = true,
     this.autoDismissAfter,
     this.isTestSend = false,
@@ -92,9 +98,19 @@ class GameballInAppMessage {
 
   final String id;
   final GameballMessageType type;
-  final String body;
+
+  /// Null for an image-only message.
+  final String? body;
+
   final String? header;
   final String? imageUrl;
+
+  /// What tapping the message itself does, as opposed to tapping a button.
+  ///
+  /// Null means the message is not tappable. Required in practice for an
+  /// image-only layout, where the artwork is the only thing to act on.
+  final GameballClickAction? clickAction;
+
   final bool showCloseButton;
 
   /// Null means the message stays until the user dismisses it.

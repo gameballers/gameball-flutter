@@ -36,6 +36,7 @@ void main() {
       message: message(),
       onShown: () => shown++,
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () {},
     );
     await tester.pump();
@@ -55,6 +56,7 @@ void main() {
       message: message(),
       onShown: () => fail('must not report shown'),
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () => fail('must not report dismissed'),
     );
 
@@ -70,6 +72,7 @@ void main() {
       message: message(),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () {},
     );
     await tester.pump();
@@ -78,6 +81,7 @@ void main() {
       message: message(),
       onShown: () => fail('must not show a second message'),
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () {},
     );
 
@@ -93,6 +97,7 @@ void main() {
       message: message(),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () => dismissed++,
     );
     await tester.pump();
@@ -115,6 +120,7 @@ void main() {
       message: message(),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () => dismissed++,
     );
     await tester.pump();
@@ -137,6 +143,7 @@ void main() {
       ]),
       onShown: () {},
       onButtonPressed: (b) => tapped.add(b.id),
+      onMessagePressed: () {},
       onDismissed: () {},
     );
     await tester.pump();
@@ -157,6 +164,7 @@ void main() {
       message: message(autoDismissAfter: const Duration(seconds: 3)),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () => dismissed++,
     );
     await tester.pump();
@@ -177,6 +185,7 @@ void main() {
       message: message(autoDismissAfter: const Duration(seconds: 3)),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () => dismissed++,
     );
     await tester.pump();
@@ -195,6 +204,7 @@ void main() {
       message: message(),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () {},
     );
     await tester.pump();
@@ -205,6 +215,7 @@ void main() {
       message: message(),
       onShown: () {},
       onButtonPressed: (_) {},
+      onMessagePressed: () {},
       onDismissed: () {},
     );
     await tester.pump();

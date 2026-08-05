@@ -109,9 +109,17 @@ GameballInAppMessage? _parseMessage(Map<String, dynamic> json, String campaignId
     return null;
   }
 
+  // Braze's modal has two layouts: "Text (with Optional Image)" and
+  // "Image Only". So text is not required — but something to render is.
+  final header = _asString(json['header']);
   final body = _asString(json['body']);
-  if (body == null || body.isEmpty) {
-    iamLog('campaign "$campaignId" dropped: message "$id" has no "body"');
+  final imageUrl = _asString(json['imageUrl']);
+  final hasHeader = header != null && header.isNotEmpty;
+  final hasBody = body != null && body.isNotEmpty;
+  final hasImage = imageUrl != null && imageUrl.isNotEmpty;
+  if (!hasHeader && !hasBody && !hasImage) {
+    iamLog('campaign "$campaignId" dropped: message "$id" has no "header", '
+        '"body" or "imageUrl" — nothing to render');
     return null;
   }
 
@@ -130,9 +138,13 @@ GameballInAppMessage? _parseMessage(Map<String, dynamic> json, String campaignId
   return GameballInAppMessage(
     id: id,
     type: type,
-    body: body,
-    header: _asString(json['header']),
-    imageUrl: _asString(json['imageUrl']),
+    body: hasBody ? body : null,
+    header: hasHeader ? header : null,
+    imageUrl: hasImage ? imageUrl : null,
+    // Message-level action: what tapping the message itself does. Optional, and
+    // absent means the message is not tappable — so this is parsed leniently
+    // rather than defaulting to dismiss the way a button's action does.
+    clickAction: _parseOptionalAction(json['action'], id),
     showCloseButton: _asBool(json['showCloseButton']) ?? true,
     autoDismissAfter:
         (autoMs != null && autoMs > 0) ? Duration(milliseconds: autoMs) : null,
@@ -196,6 +208,40 @@ GameballClickAction _parseAction(Object? json, String messageId) {
       // A working close beats a dead button.
       iamLog('message "$messageId": unsupported action type "$type", using dismiss');
       return const GameballDismissAction();
+  }
+}
+
+/// Parses the message-level action, where absent means "not tappable".
+///
+/// Deliberately stricter than [_parseAction]: a button must do *something* when
+/// tapped, so an unusable action degrades to dismiss. A message surface that was
+/// never meant to be tappable should simply not be — silently turning the whole
+/// message into a close button would be worse than doing nothing.
+GameballClickAction? _parseOptionalAction(Object? json, String messageId) {
+  if (json == null) {
+    return null;
+  }
+  if (json is! Map<String, dynamic>) {
+    iamLog('message "$messageId": "action" is not an object, ignoring');
+    return null;
+  }
+
+  final type = _asString(json['type'])?.toLowerCase();
+  switch (type) {
+    case 'dismiss':
+      return const GameballDismissAction();
+    case 'open_url':
+      final url = _asString(json['url']);
+      if (url == null || url.isEmpty) {
+        iamLog('message "$messageId": message action open_url has no "url", '
+            'leaving the message untappable');
+        return null;
+      }
+      return GameballOpenUrlAction(url, external: _asBool(json['external']) ?? false);
+    default:
+      iamLog('message "$messageId": unsupported message action type "$type", '
+          'leaving the message untappable');
+      return null;
   }
 }
 

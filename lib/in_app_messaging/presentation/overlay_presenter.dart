@@ -31,6 +31,7 @@ class OverlayPresenter implements GameballMessagePresenter {
     required GameballInAppMessage message,
     required VoidCallback onShown,
     required void Function(GameballMessageButton button) onButtonPressed,
+    required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
   }) {
     if (_entry != null) {
@@ -49,6 +50,7 @@ class OverlayPresenter implements GameballMessagePresenter {
       builder: (context) => _MessageLayer(
         message: message,
         onButtonPressed: onButtonPressed,
+        onMessagePressed: onMessagePressed,
         onDismiss: dismiss,
       ),
     );
@@ -87,11 +89,13 @@ class _MessageLayer extends StatelessWidget {
   const _MessageLayer({
     required this.message,
     required this.onButtonPressed,
+    required this.onMessagePressed,
     required this.onDismiss,
   });
 
   final GameballInAppMessage message;
   final void Function(GameballMessageButton button) onButtonPressed;
+  final VoidCallback onMessagePressed;
   final VoidCallback onDismiss;
 
   @override
@@ -110,6 +114,7 @@ class _MessageLayer extends StatelessWidget {
         GameballInAppMessageModal(
           message: message,
           onButtonPressed: onButtonPressed,
+          onMessagePressed: onMessagePressed,
           onClosePressed: onDismiss,
         ),
       ],

@@ -37,6 +37,7 @@ class FakePresenter implements GameballMessagePresenter {
   final List<String> shownMessageIds = <String>[];
   VoidCallback? _onDismissed;
   void Function(GameballMessageButton)? _onButtonPressed;
+  VoidCallback? _onMessagePressed;
 
   @override
   bool get isShowing => _showing;
@@ -46,12 +47,14 @@ class FakePresenter implements GameballMessagePresenter {
     required GameballInAppMessage message,
     required VoidCallback onShown,
     required void Function(GameballMessageButton button) onButtonPressed,
+    required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
   }) {
     if (!available || _showing) return false;
     _showing = true;
     _onDismissed = onDismissed;
     _onButtonPressed = onButtonPressed;
+    _onMessagePressed = onMessagePressed;
     shownMessageIds.add(message.id);
     onShown();
     return true;
@@ -64,20 +67,30 @@ class FakePresenter implements GameballMessagePresenter {
     final onDismissed = _onDismissed;
     _onDismissed = null;
     _onButtonPressed = null;
+    _onMessagePressed = null;
     onDismissed?.call();
   }
 
   /// Simulates the user tapping a button.
   void tapButton(GameballMessageButton button) => _onButtonPressed?.call(button);
+
+  /// Simulates the user tapping the message surface.
+  void tapMessage() => _onMessagePressed?.call();
 }
 
 class RecordingAnalytics implements MessageAnalytics {
   final List<String> impressions = <String>[];
   final List<String> clicks = <String>[];
+  final List<String> bodyClicks = <String>[];
 
   @override
   void logImpression(GameballInAppMessage message, {required String campaignId}) {
     impressions.add('$campaignId/${message.id}');
+  }
+
+  @override
+  void logClick(GameballInAppMessage message, {required String campaignId}) {
+    bodyClicks.add('$campaignId/${message.id}');
   }
 
   @override
@@ -99,6 +112,7 @@ InAppMessageCampaign campaign(
   GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
   int priority = 0,
   List<GameballMessageButton> buttons = const <GameballMessageButton>[],
+  GameballClickAction? clickAction,
 }) {
   return InAppMessageCampaign(
     id: id,
@@ -109,6 +123,7 @@ InAppMessageCampaign campaign(
       type: GameballMessageType.modal,
       body: 'body',
       buttons: buttons,
+      clickAction: clickAction,
     ),
   );
 }
@@ -476,6 +491,33 @@ void main() {
 
       expect(h.analytics.clicks, ['a/msg_a/4']);
       expect(h.presenter.isShowing, isFalse);
+    });
+  });
+
+  group('message-surface taps', () {
+    test('a tap logs a body click and dismisses', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballOpenUrlAction('app://x')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapMessage();
+
+      expect(h.analytics.bodyClicks, ['a/msg_a']);
+      expect(h.analytics.clicks, isEmpty,
+          reason: 'a body click is not a button click');
+      expect(h.presenter.isShowing, isFalse);
+    });
+
+    test('a tap on a message with no action does nothing', () async {
+      final h = build(campaigns: [campaign('a')]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapMessage();
+
+      expect(h.analytics.bodyClicks, isEmpty);
+      expect(h.presenter.isShowing, isTrue,
+          reason: 'an inert message must not dismiss on a stray tap');
     });
   });
 

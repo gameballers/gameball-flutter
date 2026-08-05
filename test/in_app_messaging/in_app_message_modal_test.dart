@@ -4,9 +4,10 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/in_app_message_modal.dart';
 
 GameballInAppMessage message({
-  String body = 'body text',
+  String? body = 'body text',
   String? header,
   String? imageUrl,
+  GameballClickAction? clickAction,
   bool showCloseButton = true,
   List<GameballMessageButton> buttons = const <GameballMessageButton>[],
   GameballMessageStyle style = const GameballMessageStyle(),
@@ -17,6 +18,7 @@ GameballInAppMessage message({
     body: body,
     header: header,
     imageUrl: imageUrl,
+    clickAction: clickAction,
     showCloseButton: showCloseButton,
     buttons: buttons,
     style: style,
@@ -28,12 +30,14 @@ Future<void> pump(
   GameballInAppMessage m, {
   void Function(GameballMessageButton)? onButtonPressed,
   VoidCallback? onClosePressed,
+  VoidCallback? onMessagePressed,
 }) {
   return tester.pumpWidget(MaterialApp(
     home: Scaffold(
       body: GameballInAppMessageModal(
         message: m,
         onButtonPressed: onButtonPressed ?? (_) {},
+        onMessagePressed: onMessagePressed ?? () {},
         onClosePressed: onClosePressed ?? () {},
       ),
     ),
@@ -137,5 +141,114 @@ void main() {
 
     expect(find.text('still here'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  group('Braze layout: Image Only', () {
+    testWidgets('renders the image with no text block at all', (tester) async {
+      await pump(tester, message(
+        body: null,
+        imageUrl: 'https://example.com/promo.png',
+      ));
+
+      expect(find.byKey(const Key('gb_iam_image')), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_body')), findsNothing);
+      expect(find.byKey(const Key('gb_iam_header')), findsNothing);
+      expect(find.byKey(const Key('gb_iam_buttons')), findsNothing,
+          reason: 'no padding band should be laid out under the artwork');
+    });
+
+    testWidgets('still shows the close button', (tester) async {
+      await pump(tester, message(
+        body: null,
+        imageUrl: 'https://example.com/promo.png',
+      ));
+
+      expect(find.byKey(const Key('gb_iam_close')), findsOneWidget);
+    });
+
+    testWidgets('renders buttons even with no text', (tester) async {
+      await pump(tester, message(
+        body: null,
+        imageUrl: 'https://example.com/promo.png',
+        buttons: const [
+          GameballMessageButton(id: 0, text: 'Shop', action: GameballDismissAction()),
+        ],
+      ));
+
+      expect(find.text('Shop'), findsOneWidget);
+    });
+  });
+
+  group('Braze layout: header without body', () {
+    testWidgets('renders the header alone', (tester) async {
+      await pump(tester, message(body: null, header: 'Gold unlocked'));
+
+      expect(find.text('Gold unlocked'), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_body')), findsNothing);
+    });
+  });
+
+  group('message-level click action', () {
+    testWidgets('the surface is not tappable without an action', (tester) async {
+      await pump(tester, message());
+
+      expect(find.byKey(const Key('gb_iam_surface_tap')), findsNothing,
+          reason: 'an inert message must not absorb taps');
+    });
+
+    testWidgets('the surface is tappable when an action is set', (tester) async {
+      var pressed = 0;
+      await pump(
+        tester,
+        message(clickAction: const GameballOpenUrlAction('app://x')),
+        onMessagePressed: () => pressed++,
+      );
+
+      expect(find.byKey(const Key('gb_iam_surface_tap')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('gb_iam_body')));
+      await tester.pump();
+
+      expect(pressed, 1);
+    });
+
+    testWidgets('a button tap does not also fire the message action', (tester) async {
+      var messagePressed = 0;
+      final buttonsTapped = <int>[];
+      await pump(
+        tester,
+        message(
+          clickAction: const GameballOpenUrlAction('app://body'),
+          buttons: const [
+            GameballMessageButton(id: 7, text: 'Go', action: GameballDismissAction()),
+          ],
+        ),
+        onButtonPressed: (b) => buttonsTapped.add(b.id),
+        onMessagePressed: () => messagePressed++,
+      );
+
+      await tester.tap(find.text('Go'));
+      await tester.pump();
+
+      expect(buttonsTapped, [7]);
+      expect(messagePressed, 0,
+          reason: 'the button wins the hit test; the tap must not propagate');
+    });
+
+    testWidgets('the close button does not fire the message action', (tester) async {
+      var messagePressed = 0;
+      var closed = 0;
+      await pump(
+        tester,
+        message(clickAction: const GameballOpenUrlAction('app://body')),
+        onClosePressed: () => closed++,
+        onMessagePressed: () => messagePressed++,
+      );
+
+      await tester.tap(find.byKey(const Key('gb_iam_close')));
+      await tester.pump();
+
+      expect(closed, 1);
+      expect(messagePressed, 0);
+    });
   });
 }

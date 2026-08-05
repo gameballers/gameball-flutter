@@ -38,7 +38,7 @@ additive hooks listed in §"Compatibility contract".
 | Decision | Choice | Rationale |
 | --- | --- | --- |
 | Message source | Stub first; define the contract we want | No backend endpoint exists or is specced |
-| Message type | Modal, rendered in Flutter widgets | Braze's workhorse type; cheapest to build well in Flutter; forces the button/click-action and analytics contracts to be designed now |
+| Message type | Modal, rendered in Flutter widgets — **both** of Braze's modal layouts | Braze's workhorse type; cheapest to build well in Flutter; forces the button/click-action and analytics contracts to be designed now |
 | Triggers | Both session start **and** custom event | One generic evaluator; the second trigger is nearly free once the first exists |
 | UI-handle acquisition | Global navigator key | Braze's principle — acquire once at setup, never at the call site. Strictly cheaper and more capable than a wrapper widget: the same key yields both a dialog route and an `OverlayState` |
 | Draw target | `OverlayEntry` | Braze iOS's own-layer model. Braze's Android choice (host hierarchy) looks like a concession to Android's limits, not a preference; Flutter gives a real overlay for free |
@@ -336,6 +336,43 @@ The endpoint path is the backend team's call. What this spec pins down is the re
 - **No `schemaVersion`.** Optional additive fields cover normal evolution; a version field only
   helps for genuinely breaking changes, which warrant a new endpoint.
 
+### Modal layouts — full Braze parity
+
+Braze's modal type has exactly two named layouts, and the MVP implements both:
+
+| Braze layout | Text | Image | Buttons | In this contract |
+| --- | --- | --- | --- | --- |
+| **"Text (with Optional Image)"** | required | optional | up to 2 | `body` set; `imageUrl` optional |
+| **"Image Only"** | not required | required | up to 2 | `body` and `header` absent; `imageUrl` set |
+
+Two consequences for the contract:
+
+1. **`body` is optional, not required.** Validation is *at least one of `header`,
+   `body` or `imageUrl`* — a message with nothing to render is dropped at parse. An
+   earlier draft of this spec made `body` mandatory, which would have caused every
+   image-only campaign to be **silently dropped**.
+2. **A message-level `action` exists**, separate from button actions, so tapping the
+   message itself does something. Image-only needs it — the artwork is the only thing
+   to act on — and Braze has an equivalent on every type. It is parsed more strictly
+   than a button action: an unusable or absent action leaves the message *untappable*,
+   whereas a button's unusable action degrades to `dismiss`. Silently turning a whole
+   message into a close button would be worse than doing nothing.
+
+```json
+"message": {
+  "id": "msg_promo_v1",
+  "type": "modal",
+  "imageUrl": "https://cdn.gameball.co/campaigns/summer-sale.png",
+  "action": { "type": "open_url", "url": "https://gameball.co/offers", "external": false },
+  "showCloseButton": true,
+  "style": { "scrimColor": "#B3000000" }
+}
+```
+
+Analytics distinguishes the two: `MessageAnalytics.logClick` for a tap on the message
+surface, `logButtonClick` for a button. Braze models the same distinction as one call
+with a null button id.
+
 ### Backend contract alignment
 
 **In-app messaging is new at Gameball — there is no existing schema to match.** The backend will
@@ -372,7 +409,9 @@ Rule: **drop what can never work, keep-but-skip what a future SDK might support,
 | Unknown `message.type` | → `GameballMessageType.unsupported`. Campaign **kept**, skipped at display with a log |
 | Unknown `trigger.type` | Campaign **dropped** at parse with a log. **Expected steady state**, not an edge case — the backend will support more trigger types than the SDK, so the log must name the campaign and the unsupported type |
 | Unknown `action.type` | Button becomes `dismiss` with a log — a working close beats a dead button |
-| Missing `id` or `body` | Campaign dropped with a log |
+| Missing `id` | Campaign dropped with a log |
+| No `header`, `body` **and** no `imageUrl` | Campaign dropped with a log — nothing to render |
+| Message-level `action` absent or unusable | Message is left untappable (unlike a button action, which degrades to `dismiss`) |
 | Colour as a packed ARGB int | Accepted and converted, so a Braze-shaped payload still renders correctly |
 | Malformed colour string | Field ignored, theme default used, logged |
 | More than 2 buttons | First 2 kept, logged |

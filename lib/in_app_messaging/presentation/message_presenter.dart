@@ -17,12 +17,15 @@ abstract class GameballMessagePresenter {
   /// on, or if a message is already showing.
   ///
   /// [onShown] fires once, when the message becomes visible. [onButtonPressed]
-  /// fires per tap and does **not** dismiss — the caller decides. [onDismissed]
-  /// fires exactly once, after the message leaves the screen, however it left.
+  /// and [onMessagePressed] fire per tap and do **not** dismiss — the caller
+  /// decides. [onMessagePressed] is only reachable when the campaign set a
+  /// message-level action. [onDismissed] fires exactly once, after the message
+  /// leaves the screen, however it left.
   bool present({
     required GameballInAppMessage message,
     required VoidCallback onShown,
     required void Function(GameballMessageButton button) onButtonPressed,
+    required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
   });
 

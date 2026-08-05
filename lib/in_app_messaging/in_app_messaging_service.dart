@@ -238,6 +238,13 @@ class InAppMessagingService {
         _runAction(button.action);
         _presenter.dismiss();
       },
+      onMessagePressed: () {
+        final action = campaign.message.clickAction;
+        if (action == null) return;
+        _analytics.logClick(campaign.message, campaignId: campaign.id);
+        _runAction(action);
+        _presenter.dismiss();
+      },
       onDismissed: _retryPending,
     );
 

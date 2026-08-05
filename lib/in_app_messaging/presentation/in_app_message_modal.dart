@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
 
-/// The modal layout: optional image, optional header, body, and up to two
-/// buttons.
+/// The modal layout, covering both of Braze's modal variants.
+///
+/// "Text (with Optional Image)" draws a text block with an optional image above
+/// it. "Image Only" — no header and no body — draws the image alone, with no
+/// empty padding where the text would have been.
 ///
 /// Draws only what the message provides, and falls back to the host's theme for
 /// every colour the campaign leaves unset. Knows nothing about overlays,
@@ -15,11 +18,19 @@ class GameballInAppMessageModal extends StatelessWidget {
     required this.message,
     required this.onButtonPressed,
     required this.onClosePressed,
+    required this.onMessagePressed,
   });
 
   final GameballInAppMessage message;
   final void Function(GameballMessageButton button) onButtonPressed;
   final VoidCallback onClosePressed;
+
+  /// Invoked when the message surface itself is tapped. Only reachable when the
+  /// campaign set a message-level action.
+  final VoidCallback onMessagePressed;
+
+  /// Whether there is any text to lay out. False for an image-only message.
+  bool get _hasText => message.header != null || message.body != null;
 
   @override
   Widget build(BuildContext context) {
@@ -38,42 +49,53 @@ class GameballInAppMessageModal extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: Stack(
               children: [
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (message.imageUrl != null) _image(message.imageUrl!),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (message.header != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(
-                                message.header!,
-                                key: const Key('gb_iam_header'),
-                                textAlign: style.headerAlign ?? TextAlign.start,
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  color: style.headerColor,
-                                  fontWeight: FontWeight.w700,
+                // The tap target wraps the content, not the Stack, so the close
+                // button stays outside it. Buttons sit inside but win the hit
+                // test themselves, so their taps never reach here.
+                _wrapTappable(
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (message.imageUrl != null) _image(message.imageUrl!),
+                      // Omitted entirely for image-only, so there is no blank
+                      // band under the artwork.
+                      if (_hasText || message.buttons.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (message.header != null)
+                                Padding(
+                                  padding: EdgeInsets.only(
+                                      bottom: message.body != null ? 8 : 0),
+                                  child: Text(
+                                    message.header!,
+                                    key: const Key('gb_iam_header'),
+                                    textAlign:
+                                        style.headerAlign ?? TextAlign.start,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      color: style.headerColor,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          Text(
-                            message.body,
-                            key: const Key('gb_iam_body'),
-                            textAlign: style.bodyAlign ?? TextAlign.start,
-                            style: theme.textTheme.bodyMedium
-                                ?.copyWith(color: style.bodyColor),
+                              if (message.body != null)
+                                Text(
+                                  message.body!,
+                                  key: const Key('gb_iam_body'),
+                                  textAlign: style.bodyAlign ?? TextAlign.start,
+                                  style: theme.textTheme.bodyMedium
+                                      ?.copyWith(color: style.bodyColor),
+                                ),
+                              if (message.buttons.isNotEmpty) _buttons(context),
+                            ],
                           ),
-                          if (message.buttons.isNotEmpty) _buttons(context),
-                        ],
-                      ),
-                    ),
-                  ],
+                        ),
+                    ],
+                  ),
                 ),
                 if (message.showCloseButton)
                   Positioned(
@@ -92,6 +114,19 @@ class GameballInAppMessageModal extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// Makes [child] tappable only when the campaign supplied a message action.
+  ///
+  /// Without an action the surface stays inert, so a message that was never
+  /// meant to be interactive does not silently absorb taps.
+  Widget _wrapTappable(Widget child) {
+    if (message.clickAction == null) return child;
+    return InkWell(
+      key: const Key('gb_iam_surface_tap'),
+      onTap: onMessagePressed,
+      child: child,
     );
   }
 
