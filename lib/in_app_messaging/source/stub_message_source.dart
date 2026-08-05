@@ -66,6 +66,26 @@ const String stubCampaignsJson = '''
       }
     },
     {
+      "id": "cmp_welcome_back",
+      "priority": 90,
+      "trigger": { "type": "session_start" },
+      "message": {
+        "id": "msg_welcome_back_v1",
+        "type": "modal",
+        "header": "Still 1,250 points",
+        "body": "Your points are waiting whenever you are.",
+        "showCloseButton": true,
+        "buttons": [
+          {
+            "id": 0,
+            "text": "Got it",
+            "action": { "type": "dismiss" },
+            "style": { "backgroundColor": "#6C4DF6", "textColor": "#FFFFFF" }
+          }
+        ]
+      }
+    },
+    {
       "id": "cmp_cart_nudge",
       "priority": 50,
       "trigger": { "type": "custom_event", "eventName": "$stubCartEventName" },
@@ -89,6 +109,46 @@ const String stubCampaignsJson = '''
         "showCloseButton": true,
         "style": { "scrimColor": "#B3000000" },
         "extras": { "campaignSource": "seasonal" }
+      }
+    },
+    {
+      "id": "cmp_thanks_any_purchase",
+      "priority": 40,
+      "trigger": { "type": "any_purchase" },
+      "message": {
+        "id": "msg_thanks_v1",
+        "type": "modal",
+        "header": "Thanks for your order",
+        "body": "Points have been added to your balance.",
+        "autoDismissAfterMs": 5000,
+        "showCloseButton": false,
+        "style": { "headerAlign": "center", "bodyAlign": "center" }
+      }
+    },
+    {
+      "id": "cmp_big_spender",
+      "priority": 80,
+      "trigger": {
+        "type": "specific_purchase",
+        "filters": [
+          { "property": "price", "operator": "greater_than", "value": 100 }
+        ]
+      },
+      "message": {
+        "id": "msg_big_spender_v1",
+        "type": "modal",
+        "header": "You unlocked free delivery",
+        "body": "Orders over 100 earn free delivery on your next purchase.",
+        "showCloseButton": true,
+        "buttons": [
+          {
+            "id": 0,
+            "text": "Nice",
+            "action": { "type": "dismiss" },
+            "style": { "backgroundColor": "#0F7A52", "textColor": "#FFFFFF" }
+          }
+        ],
+        "extras": { "campaignSource": "threshold" }
       }
     }
   ]
