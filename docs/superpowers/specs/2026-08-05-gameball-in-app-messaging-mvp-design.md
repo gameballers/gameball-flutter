@@ -39,7 +39,7 @@ additive hooks listed in §"Compatibility contract".
 | --- | --- | --- |
 | Message source | Stub first; define the contract we want | No backend endpoint exists or is specced |
 | Message type | Modal, rendered in Flutter widgets — **both** of Braze's modal layouts | Braze's workhorse type; cheapest to build well in Flutter; forces the button/click-action and analytics contracts to be designed now |
-| Triggers | Both session start **and** custom event | One generic evaluator; the second trigger is nearly free once the first exists |
+| Triggers | Session start, custom event, any purchase, specific purchase (push click out of scope) | One generic evaluator; the second trigger is nearly free once the first exists |
 | UI-handle acquisition | Global navigator key | Braze's principle — acquire once at setup, never at the call site. Strictly cheaper and more capable than a wrapper widget: the same key yields both a dialog route and an `OverlayState` |
 | Draw target | `OverlayEntry` | Braze iOS's own-layer model. Braze's Android choice (host hierarchy) looks like a concession to Android's limits, not a preference; Flutter gives a real overlay for free |
 | Identity | `customerId` required now; wire contract shaped as a tagged union | Loyalty messages are customer-scoped. Diverges from Braze (which supports anonymous device-scoped users); a `DeviceAudience` variant stays additive |
@@ -372,6 +372,89 @@ Two consequences for the contract:
 Analytics distinguishes the two: `MessageAnalytics.logClick` for a tap on the message
 surface, `logButtonClick` for a button. Braze models the same distinction as one call
 with a null button id.
+
+### Triggers — four of Braze's five
+
+Braze drives in-app messages from exactly five triggers. We implement four; push
+click is out of scope because it needs push integration this module does not own.
+
+| Braze trigger | Wire `type` | Notes |
+| --- | --- | --- |
+| Session Start | `session_start` | Fires on the first session after launch **and** on any resume after the session timeout |
+| Custom Event | `custom_event` | `eventName` plus optional property `filters` |
+| Any Purchase | `any_purchase` | Unfiltered |
+| Specific Purchase | `specific_purchase` | `productId` and/or `filters`; needs at least one, else it is indistinguishable from `any_purchase` and is dropped |
+| Push Click | — | **Not implemented** |
+
+**Property filters** are what make Specific Purchase possible, and they apply to
+custom events too:
+
+```json
+"trigger": {
+  "type": "specific_purchase",
+  "filters": [ { "property": "price", "operator": "greater_than", "value": 100 } ]
+}
+```
+
+Operators: `equals`, `not_equals`, `greater_than`, `greater_than_or_equal`,
+`less_than`, `less_than_or_equal`, `contains`. Short aliases (`eq`, `gt`, `>`, …)
+are accepted so the backend is not forced into one spelling.
+
+Three filter semantics worth agreeing explicitly:
+
+1. **A missing property never matches.** A filter is a requirement, so absence is a
+   failure rather than something to skip.
+2. **Comparisons are numeric-only.** Ordering a non-number refuses and logs rather
+   than falling back to string ordering, which would silently produce nonsense.
+3. **An unparseable filter is dropped individually, not the whole campaign.** That
+   widens the campaign rather than narrowing it — dropping the campaign would hide
+   a single operator typo behind a message that simply never appears.
+
+**Purchase built-ins are filterable.** `productId`, `price`, `currency` and
+`quantity` are folded into the same property map as custom properties, so they
+filter with identical syntax. A campaign-supplied property of the same name wins,
+since the campaign author's data is the more specific.
+
+### Sessions
+
+Session start needed a real session concept, since "the host called start" is not
+one. A lifecycle observer records when the app leaves the foreground; a resume
+after `sessionTimeout` begins a new session and fires the trigger again.
+
+- **Frequency caps deliberately survive a new session.** That is what makes the
+  first `session_start` campaign show on the cold start and the *next* one show on
+  the warm return, rather than the same message every time. It is also how two
+  campaigns on one trigger are distinguishable without a cold/warm discriminator —
+  Braze has no such field, distinguishing first-time from returning users with
+  segment filters instead, which we have no equivalent of.
+- **`sessionTimeout` defaults to the display floor (30s).** A shorter timeout would
+  create sessions that fire the trigger while the floor still suppresses display —
+  a dead zone where a message is selected and then silently dropped. Braze's default
+  is shorter than its floor and accepts that; here they are aligned.
+
+### New public API: `logPurchase`
+
+```dart
+void logPurchase({
+  required String customerId,
+  required String productId,
+  required double price,
+  required String currency,
+  int quantity = 1,
+  Map<String, Object>? properties,
+  SendEventCallback? callback,
+  String? sessionToken,
+});
+```
+
+Additive, so no existing client is affected. `customerId` is explicit because this
+SDK keeps no ambient customer — the same reason `sendEvent` takes it on the `Event`.
+It sends a reserved `purchase` event to the existing events endpoint **and** notifies
+in-app messaging, so it is useful beyond messaging.
+
+**For the backend:** `gameballPurchaseEventName` is `purchase`, with `productId`,
+`price`, `currency` and `quantity` as metadata. That name is reserved by this
+contract.
 
 ### Backend contract alignment
 
