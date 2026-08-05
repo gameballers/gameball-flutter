@@ -57,7 +57,8 @@ class GameballInAppMessageModal extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (message.imageUrl != null) _image(message.imageUrl!),
+                      if (message.imageUrl != null)
+                        _image(context, message.imageUrl!),
                       // Omitted entirely for image-only, so there is no blank
                       // band under the artwork.
                       if (_hasText || message.buttons.isNotEmpty)
@@ -130,14 +131,31 @@ class GameballInAppMessageModal extends StatelessWidget {
     );
   }
 
-  Widget _image(String url) {
-    return Image.network(
-      url,
-      key: const Key('gb_iam_image'),
-      height: 160,
-      fit: BoxFit.cover,
-      // A campaign image that fails to load must never block the message.
-      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+  /// Renders the campaign image without ever cropping it.
+  ///
+  /// The image sizes to its own aspect ratio within the modal's width, capped so
+  /// it cannot overflow the screen. Two caps, because the image plays a different
+  /// role in each layout: a banner above copy stays modest, while an image-only
+  /// message *is* the content and gets most of the screen.
+  ///
+  /// Deliberately not `BoxFit.cover` with a fixed height. Braze crops header
+  /// images to a fixed band, but cropping discards the design a marketer
+  /// uploaded — for an image-only message it would reduce a portrait poster to an
+  /// unreadable horizontal slice.
+  Widget _image(BuildContext context, String url) {
+    final maxHeight = _hasText
+        ? 220.0
+        : MediaQuery.sizeOf(context).height * 0.65;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Image.network(
+        url,
+        key: const Key('gb_iam_image'),
+        fit: BoxFit.contain,
+        // A campaign image that fails to load must never block the message.
+        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+      ),
     );
   }
 

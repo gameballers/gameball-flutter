@@ -28,7 +28,7 @@ const String stubCampaignsJson = '''
         "type": "modal",
         "header": "Welcome back!",
         "body": "You have 1,250 points ready to redeem.",
-        "imageUrl": "https://cdn.gameball.co/campaigns/hero.png",
+        "imageUrl": "https://i.ibb.co/fdHs3hrk/welcome.jpg",
         "showCloseButton": true,
         "autoDismissAfterMs": null,
         "isTestSend": false,
@@ -84,7 +84,7 @@ const String stubCampaignsJson = '''
       "message": {
         "id": "msg_promo_v1",
         "type": "modal",
-        "imageUrl": "https://cdn.gameball.co/campaigns/summer-sale.png",
+        "imageUrl": "https://i.ibb.co/G34R4MtM/83312799-summer-sale-discount-promo-poster-or-banner-for-seasonal-shopping-50-percent-discount-of-pa.jpg",
         "action": { "type": "open_url", "url": "https://gameball.co/offers", "external": false },
         "showCloseButton": true,
         "style": { "scrimColor": "#B3000000" },

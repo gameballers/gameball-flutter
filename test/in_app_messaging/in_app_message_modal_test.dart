@@ -133,6 +133,50 @@ void main() {
     expect(find.byKey(const Key('gb_iam_image')), findsNothing);
   });
 
+  group('image sizing', () {
+    testWidgets('never crops — the image is fitted, not covered', (tester) async {
+      await pump(tester, message(imageUrl: 'https://example.com/a.png'));
+
+      final image = tester.widget<Image>(find.byKey(const Key('gb_iam_image')));
+      expect(image.fit, BoxFit.contain,
+          reason: 'cropping would discard the design a marketer uploaded');
+      expect(image.height, isNull,
+          reason: 'height comes from the image aspect ratio, not a fixed band');
+    });
+
+    testWidgets('a banner above copy is capped modestly', (tester) async {
+      await pump(tester, message(
+        body: 'text alongside',
+        imageUrl: 'https://example.com/a.png',
+      ));
+
+      final box = tester.widget<ConstrainedBox>(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_image')),
+          matching: find.byType(ConstrainedBox),
+        ).first,
+      );
+      expect(box.constraints.maxHeight, 220);
+    });
+
+    testWidgets('an image-only message gets most of the screen', (tester) async {
+      await pump(tester, message(
+        body: null,
+        imageUrl: 'https://example.com/promo.png',
+      ));
+
+      final box = tester.widget<ConstrainedBox>(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_image')),
+          matching: find.byType(ConstrainedBox),
+        ).first,
+      );
+      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      expect(box.constraints.maxHeight, closeTo(screenHeight * 0.65, 0.5),
+          reason: 'the artwork is the content, so it gets the room');
+    });
+  });
+
   testWidgets('a failing image does not prevent the message rendering', (tester) async {
     // The test HTTP client returns a 400 for every request, so the network
     // image always fails — which is exactly the case being asserted.
