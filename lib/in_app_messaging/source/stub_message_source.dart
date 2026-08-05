@@ -162,7 +162,7 @@ const String stubCampaignsJson = '''
           {
             "id": 1,
             "text": "See offers",
-            "action": { "type": "open_url", "url": "https://gameball.co/offers" },
+            "action": { "type": "navigate", "route": "/offers" },
             "style": { "backgroundColor": "#0F7A52", "textColor": "#FFFFFF" }
           }
         ],
