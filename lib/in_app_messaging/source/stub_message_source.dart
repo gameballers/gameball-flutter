@@ -92,9 +92,21 @@ const String stubCampaignsJson = '''
       "message": {
         "id": "msg_cart_v1",
         "type": "modal",
-        "body": "Add one more item for 2x points.",
+        "body": "Add one more item for 2x points. Tap to review your cart.",
+        "action": { "type": "navigate", "route": "/cart" },
         "showCloseButton": true,
-        "buttons": []
+        "buttons": [
+          {
+            "id": 0,
+            "text": "View cart",
+            "action": {
+              "type": "navigate",
+              "route": "/cart",
+              "arguments": { "from": "cmp_cart_nudge" }
+            },
+            "style": { "backgroundColor": "#6C4DF6", "textColor": "#FFFFFF" }
+          }
+        ]
       }
     },
     {
@@ -143,8 +155,14 @@ const String stubCampaignsJson = '''
         "buttons": [
           {
             "id": 0,
-            "text": "Nice",
+            "text": "Later",
             "action": { "type": "dismiss" },
+            "style": { "backgroundColor": "#EEEEEE", "textColor": "#111111" }
+          },
+          {
+            "id": 1,
+            "text": "See offers",
+            "action": { "type": "open_url", "url": "https://gameball.co/offers" },
             "style": { "backgroundColor": "#0F7A52", "textColor": "#FFFFFF" }
           }
         ],

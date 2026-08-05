@@ -31,6 +31,24 @@ final class GameballOpenUrlAction extends GameballClickAction {
   final bool external;
 }
 
+/// Navigates to a named route in the host app, then closes the message.
+///
+/// Braze cannot express this: it has no handle on the host's router, so a
+/// "deep link" there is a URI handed to the OS, which routes back into the app,
+/// where native code must catch it and forward it to Dart over a channel the
+/// integrator writes themselves. Because this SDK renders in Flutter and already
+/// holds the host's navigator key, it can simply push the route — no URI scheme
+/// to invent, no native code, no round trip.
+final class GameballNavigateAction extends GameballClickAction {
+  const GameballNavigateAction(this.route, {this.arguments});
+
+  /// A route name the host registered, e.g. `/cart`.
+  final String route;
+
+  /// Passed through as the route's `arguments`.
+  final Map<String, Object>? arguments;
+}
+
 /// Per-button colours. A null field means "use the host's theme".
 class GameballButtonStyle {
   const GameballButtonStyle({this.backgroundColor, this.textColor, this.borderColor});

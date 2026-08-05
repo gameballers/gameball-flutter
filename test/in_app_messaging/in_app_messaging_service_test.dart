@@ -8,6 +8,7 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/message_navigator.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_presenter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
@@ -79,6 +80,20 @@ class FakePresenter implements GameballMessagePresenter {
   void tapMessage() => _onMessagePressed?.call();
 }
 
+class RecordingNavigator implements MessageNavigator {
+  bool available = true;
+  final List<String> pushed = <String>[];
+  Object? lastArguments;
+
+  @override
+  bool pushNamed(String route, {Object? arguments}) {
+    if (!available) return false;
+    pushed.add(route);
+    lastArguments = arguments;
+    return true;
+  }
+}
+
 class RecordingAnalytics implements MessageAnalytics {
   final List<String> impressions = <String>[];
   final List<String> clicks = <String>[];
@@ -136,6 +151,7 @@ InAppMessageCampaign campaign(
   FakePresenter presenter,
   RecordingAnalytics analytics,
   InMemoryFrequencyCap cap,
+  RecordingNavigator navigator,
   List<GameballInAppMessage> emitted,
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
@@ -144,6 +160,7 @@ InAppMessageCampaign campaign(
   final presenter = FakePresenter();
   final analytics = RecordingAnalytics();
   final cap = InMemoryFrequencyCap();
+  final navigator = RecordingNavigator();
   final emitted = <GameballInAppMessage>[];
   var widgetOpen = false;
   var now = t0;
@@ -154,6 +171,7 @@ InAppMessageCampaign campaign(
     frequencyCap: cap,
     analytics: analytics,
     isHostWidgetOpen: () => widgetOpen,
+    navigator: navigator,
     emit: emitted.add,
     clock: () => now,
     launcher: (uri, {bool external = false}) async => true,
@@ -165,6 +183,7 @@ InAppMessageCampaign campaign(
     presenter: presenter,
     analytics: analytics,
     cap: cap,
+    navigator: navigator,
     emitted: emitted,
     setWidgetOpen: (v) => widgetOpen = v,
     setNow: (v) => now = v,
@@ -492,6 +511,154 @@ void main() {
 
       expect(h.analytics.clicks, ['a/msg_a/4']);
       expect(h.presenter.isShowing, isFalse);
+    });
+  });
+
+  group('navigate action', () {
+    test('a button pushes the route and dismisses', () async {
+      final h = build(campaigns: [
+        campaign('a', buttons: const [
+          GameballMessageButton(
+            id: 0,
+            text: 'View cart',
+            action: GameballNavigateAction('/cart', arguments: {'from': 'iam'}),
+          ),
+        ]),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapButton(const GameballMessageButton(
+        id: 0,
+        text: 'View cart',
+        action: GameballNavigateAction('/cart', arguments: {'from': 'iam'}),
+      ));
+
+      expect(h.navigator.pushed, ['/cart']);
+      expect(h.navigator.lastArguments, {'from': 'iam'});
+      expect(h.presenter.isShowing, isFalse);
+    });
+
+    test('the message surface can navigate too', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapMessage();
+
+      expect(h.navigator.pushed, ['/rewards']);
+    });
+
+    test('the message is dismissed before the route is pushed', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapMessage();
+
+      expect(h.presenter.isShowing, isFalse,
+          reason: 'leaving the overlay up would briefly cover the pushed route');
+    });
+
+    test('a missing navigator is logged, not thrown', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.navigator.available = false;
+
+      expect(h.presenter.tapMessage, returnsNormally);
+      expect(h.navigator.pushed, isEmpty);
+    });
+  });
+
+  group('onAction hook', () {
+    test('returning true suppresses the built-in action', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+      final seen = <String>[];
+
+      await h.service.start(
+        customerId: 'c1',
+        onAction: (message, button, action) {
+          seen.add('${message.id}/${button?.id}/${action.runtimeType}');
+          return true;
+        },
+      );
+      h.presenter.tapMessage();
+
+      expect(seen, ['msg_a/null/GameballNavigateAction'],
+          reason: 'button is null for a surface tap');
+      expect(h.navigator.pushed, isEmpty,
+          reason: 'the host said it handled the action');
+    });
+
+    test('returning false lets the built-in action run', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onAction: (_, __, ___) => false,
+      );
+      h.presenter.tapMessage();
+
+      expect(h.navigator.pushed, ['/rewards']);
+    });
+
+    test('the click is still logged and the message still dismissed', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onAction: (_, __, ___) => true,
+      );
+      h.presenter.tapMessage();
+
+      expect(h.analytics.bodyClicks, ['a/msg_a'],
+          reason: 'the hook replaces the action, not the bookkeeping');
+      expect(h.presenter.isShowing, isFalse);
+    });
+
+    test('a throwing hook falls back to the built-in action', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballNavigateAction('/rewards')),
+      ]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onAction: (_, __, ___) => throw StateError('host bug'),
+      );
+      h.presenter.tapMessage();
+
+      expect(h.navigator.pushed, ['/rewards'],
+          reason: 'a buggy host loses its override, not the action');
+    });
+
+    test('the hook receives the button for a button tap', () async {
+      const button = GameballMessageButton(
+        id: 3,
+        text: 'Go',
+        action: GameballDismissAction(),
+      );
+      final h = build(campaigns: [campaign('a', buttons: const [button])]);
+      final seen = <int?>[];
+
+      await h.service.start(
+        customerId: 'c1',
+        onAction: (message, b, action) {
+          seen.add(b?.id);
+          return true;
+        },
+      );
+      h.presenter.tapButton(button);
+
+      expect(seen, [3]);
     });
   });
 

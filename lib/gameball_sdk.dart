@@ -20,6 +20,7 @@ import 'in_app_messaging/in_app_messaging_service.dart';
 import 'in_app_messaging/models/in_app_message.dart';
 import 'in_app_messaging/models/in_app_message_campaign.dart';
 import 'in_app_messaging/models/message_trigger.dart';
+import 'in_app_messaging/presentation/message_navigator.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
 import 'in_app_messaging/source/stub_message_source.dart';
 import 'models/requests/event.dart';
@@ -282,6 +283,7 @@ class GameballApp extends StatelessWidget {
     required String customerId,
     required GlobalKey<NavigatorState> navigatorKey,
     GameballBeforeDisplay? beforeDisplay,
+    GameballOnAction? onAction,
   }) {
     if (isNullOrEmpty(_apiKey)) {
       iamLog('startInAppMessaging ignored: API key is not initialized. '
@@ -305,6 +307,7 @@ class GameballApp extends StatelessWidget {
       frequencyCap: InMemoryFrequencyCap(),
       analytics: LoggingMessageAnalytics(),
       isHostWidgetOpen: () => _dismissActiveWidget != null,
+      navigator: NavigatorKeyNavigator(navigatorKey),
       emit: (message) => _inAppMessageController?.add(message),
     );
 
@@ -317,7 +320,11 @@ class GameballApp extends StatelessWidget {
       WidgetsBinding.instance.addObserver(observer);
     }
 
-    service.start(customerId: customerId, beforeDisplay: beforeDisplay);
+    service.start(
+      customerId: customerId,
+      beforeDisplay: beforeDisplay,
+      onAction: onAction,
+    );
   }
 
   /// Stops in-app messaging, dismissing anything on screen and clearing state.

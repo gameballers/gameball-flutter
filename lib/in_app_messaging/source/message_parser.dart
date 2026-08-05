@@ -284,11 +284,38 @@ GameballClickAction _parseAction(Object? json, String messageId) {
         return const GameballDismissAction();
       }
       return GameballOpenUrlAction(url, external: _asBool(json['external']) ?? false);
+    case 'navigate':
+      final navigate = _parseNavigate(json, messageId);
+      if (navigate == null) return const GameballDismissAction();
+      return navigate;
     default:
       // A working close beats a dead button.
       iamLog('message "$messageId": unsupported action type "$type", using dismiss');
       return const GameballDismissAction();
   }
+}
+
+/// Parses a `navigate` action, or null when it is unusable.
+GameballNavigateAction? _parseNavigate(
+  Map<String, dynamic> json,
+  String messageId,
+) {
+  final route = _asString(json['route']);
+  if (route == null || route.isEmpty) {
+    iamLog('message "$messageId": navigate action has no "route"');
+    return null;
+  }
+
+  final argsJson = json['arguments'];
+  Map<String, Object>? arguments;
+  if (argsJson is Map) {
+    arguments = <String, Object>{};
+    argsJson.forEach((key, value) {
+      if (key is String && value != null) arguments![key] = value as Object;
+    });
+  }
+
+  return GameballNavigateAction(route, arguments: arguments);
 }
 
 /// Parses the message-level action, where absent means "not tappable".
@@ -318,6 +345,10 @@ GameballClickAction? _parseOptionalAction(Object? json, String messageId) {
         return null;
       }
       return GameballOpenUrlAction(url, external: _asBool(json['external']) ?? false);
+    case 'navigate':
+      // Null when unusable, which leaves the surface inert rather than making it
+      // a close button — same reasoning as the other message-level cases.
+      return _parseNavigate(json, messageId);
     default:
       iamLog('message "$messageId": unsupported message action type "$type", '
           'leaving the message untappable');

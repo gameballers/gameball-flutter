@@ -9,6 +9,7 @@ import 'models/gameball_audience.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
+import 'presentation/message_navigator.dart';
 import 'presentation/message_presenter.dart';
 import 'source/message_source.dart';
 
@@ -35,6 +36,23 @@ typedef GameballBeforeDisplay = GameballDisplayDecision Function(
 /// Signature for opening a URL, injectable so tests never touch the platform.
 typedef UrlLauncher = Future<bool> Function(Uri uri, {bool external});
 
+/// Consulted when a message or one of its buttons is tapped, before the SDK acts.
+///
+/// Return true to say the host handled it; the SDK then performs no action of its
+/// own. Return false to let the built-in handling run.
+///
+/// [button] is null when the message surface itself was tapped rather than a
+/// button. The impression, the click log and the dismissal all happen regardless —
+/// this hook replaces only the *action*, not the bookkeeping.
+///
+/// This is Braze's native `shouldProcess` / `onInAppMessageButtonClicked` hook,
+/// which their Flutter SDK cannot expose to Dart at all.
+typedef GameballOnAction = bool Function(
+  GameballInAppMessage message,
+  GameballMessageButton? button,
+  GameballClickAction action,
+);
+
 /// How long the app must be backgrounded before returning counts as a new
 /// session.
 ///
@@ -57,11 +75,13 @@ class InAppMessagingService {
     required FrequencyCap frequencyCap,
     required MessageAnalytics analytics,
     required bool Function() isHostWidgetOpen,
+    required MessageNavigator navigator,
     void Function(GameballInAppMessage message)? emit,
     DateTime Function()? clock,
     UrlLauncher? launcher,
     this.sessionTimeout = defaultSessionTimeout,
   })  : _source = source,
+        _navigator = navigator,
         _presenter = presenter,
         _cap = frequencyCap,
         _analytics = analytics,
@@ -75,6 +95,7 @@ class InAppMessagingService {
   final FrequencyCap _cap;
   final MessageAnalytics _analytics;
   final bool Function() _isHostWidgetOpen;
+  final MessageNavigator _navigator;
   final void Function(GameballInAppMessage message)? _emit;
   final DateTime Function() _clock;
   final UrlLauncher _launcher;
@@ -84,6 +105,7 @@ class InAppMessagingService {
 
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
+  GameballOnAction? _onAction;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
 
   /// The one message waiting for a display opportunity, if any.
@@ -120,6 +142,7 @@ class InAppMessagingService {
   Future<void> start({
     required String customerId,
     GameballBeforeDisplay? beforeDisplay,
+    GameballOnAction? onAction,
   }) async {
     final current = _audience;
     if (current is CustomerAudience && current.customerId == customerId) {
@@ -128,6 +151,7 @@ class InAppMessagingService {
     }
 
     _beforeDisplay = beforeDisplay;
+    _onAction = onAction;
     _resetFor(CustomerAudience(customerId));
     await _fetchAndEvaluateSessionStart();
   }
@@ -141,6 +165,7 @@ class InAppMessagingService {
     _cap.reset();
     _audience = null;
     _beforeDisplay = null;
+    _onAction = null;
     iamLog('in-app messaging stopped');
   }
 
@@ -306,15 +331,13 @@ class InAppMessagingService {
           campaignId: campaign.id,
           buttonId: button.id,
         );
-        _runAction(button.action);
-        _presenter.dismiss();
+        _act(campaign.message, button, button.action);
       },
       onMessagePressed: () {
         final action = campaign.message.clickAction;
         if (action == null) return;
         _analytics.logClick(campaign.message, campaignId: campaign.id);
-        _runAction(action);
-        _presenter.dismiss();
+        _act(campaign.message, null, action);
       },
       onDismissed: _retryPending,
     );
@@ -361,9 +384,48 @@ class InAppMessagingService {
     _tryPresent(campaign);
   }
 
+  /// Offers the tap to the host, then dismisses, then acts.
+  ///
+  /// Dismissal comes *before* the action deliberately: a navigate action pushes a
+  /// route, and leaving the overlay up during the transition would briefly cover
+  /// the screen the user just asked for.
+  void _act(
+    GameballInAppMessage message,
+    GameballMessageButton? button,
+    GameballClickAction action,
+  ) {
+    final handledByHost = _askHost(message, button, action);
+    _presenter.dismiss();
+    if (handledByHost) {
+      iamLog('action on message "${message.id}" handled by the host');
+      return;
+    }
+    _runAction(action);
+  }
+
+  bool _askHost(
+    GameballInAppMessage message,
+    GameballMessageButton? button,
+    GameballClickAction action,
+  ) {
+    final hook = _onAction;
+    if (hook == null) return false;
+    try {
+      return hook(message, button, action);
+    } catch (error) {
+      // Falling back to the built-in action matches the no-hook behaviour, so a
+      // buggy host loses its override rather than losing the action entirely.
+      iamLog('onAction threw; falling back to built-in handling ($error)');
+      return false;
+    }
+  }
+
   Future<void> _runAction(GameballClickAction action) async {
     switch (action) {
       case GameballDismissAction():
+        return;
+      case GameballNavigateAction(route: final route, arguments: final arguments):
+        _navigator.pushNamed(route, arguments: arguments);
         return;
       case GameballOpenUrlAction(url: final url, external: final external):
         final uri = Uri.tryParse(url);

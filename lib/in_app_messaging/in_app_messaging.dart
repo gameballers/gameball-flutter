@@ -7,7 +7,7 @@
 library;
 
 export 'in_app_messaging_service.dart'
-    show GameballBeforeDisplay, GameballDisplayDecision;
+    show GameballBeforeDisplay, GameballDisplayDecision, GameballOnAction;
 export 'models/in_app_message.dart'
     show
         GameballButtonStyle,
@@ -17,10 +17,14 @@ export 'models/in_app_message.dart'
         GameballMessageButton,
         GameballMessageStyle,
         GameballMessageType,
+        GameballNavigateAction,
         GameballOpenUrlAction,
         maxModalButtons;
 export 'models/message_trigger.dart'
     show
+        GameballAnyPurchaseTrigger,
         GameballCustomEventTrigger,
         GameballMessageTrigger,
-        GameballSessionStartTrigger;
+        GameballSessionStartTrigger,
+        GameballSpecificPurchaseTrigger,
+        gameballPurchaseEventName;
