@@ -65,4 +65,32 @@ void main() {
     expect(navigator.pushNamed('/cart'), isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  group('CallbackNavigator — for routers Navigator.pushNamed cannot see', () {
+    test('hands the route and arguments to the host', () {
+      final calls = <(String, Map<String, Object>?)>[];
+
+      final pushed = CallbackNavigator((route, arguments) {
+        calls.add((route, arguments));
+      }).pushNamed('/cart', arguments: <String, Object>{'from': 'campaign'});
+
+      expect(pushed, isTrue);
+      expect(calls, [('/cart', <String, Object>{'from': 'campaign'})]);
+    });
+
+    test('passes null arguments through', () {
+      Map<String, Object>? received = <String, Object>{'sentinel': 1};
+
+      CallbackNavigator((route, arguments) => received = arguments)
+          .pushNamed('/cart');
+
+      expect(received, isNull);
+    });
+
+    test('a throwing host callback is reported, not rethrown', () {
+      final navigator = CallbackNavigator((_, __) => throw StateError('host bug'));
+
+      expect(navigator.pushNamed('/cart'), isFalse);
+    });
+  });
 }

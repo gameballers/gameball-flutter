@@ -284,6 +284,7 @@ class GameballApp extends StatelessWidget {
     required GlobalKey<NavigatorState> navigatorKey,
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
+    GameballOnNavigate? onNavigate,
   }) {
     if (isNullOrEmpty(_apiKey)) {
       iamLog('startInAppMessaging ignored: API key is not initialized. '
@@ -307,7 +308,12 @@ class GameballApp extends StatelessWidget {
       frequencyCap: InMemoryFrequencyCap(),
       analytics: LoggingMessageAnalytics(),
       isHostWidgetOpen: () => _dismissActiveWidget != null,
-      navigator: NavigatorKeyNavigator(navigatorKey),
+      // The host routes when it told us how; otherwise fall back to named
+      // routes, which is right for a plain MaterialApp but cannot see the routes
+      // of go_router or any other Navigator 2.0 router.
+      navigator: onNavigate != null
+          ? CallbackNavigator(onNavigate)
+          : NavigatorKeyNavigator(navigatorKey),
       emit: (message) => _inAppMessageController?.add(message),
     );
 
