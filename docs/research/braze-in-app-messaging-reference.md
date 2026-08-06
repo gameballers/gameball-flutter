@@ -441,14 +441,18 @@ Matching is case-insensitive name comparison against the payload string.
 
 ### 7.2 What the dashboard offers **[doc]**
 
-| Type | Layout variants | Notable configurable properties |
-| --- | --- | --- |
-| **Slideup** | single layout | screen position (top/bottom), auto-dismiss duration, text, background/text colour. **No buttons.** |
-| **Modal** | text (+ optional image), image-only | up to 2 buttons, header, body, image, background colour, screen-overlay colour, auto-dismiss duration |
-| **Fullscreen** | image & text, image-only | orientation enforcement (portrait/landscape), up to 2 buttons, header, body, image, colours |
-| **Custom HTML** | free-form | HTML/CSS/JS, ZIP asset bundle, button actions; requires `allowUserSuppliedJavascript = true` |
-| **Email capture form** | single layout | input placeholder, button text/colours, header, body; requires `allowUserSuppliedJavascript = true` |
-| **Web modal with CSS** | text (+ optional image), image-only | web browsers only — not applicable to Flutter |
+Braze has **two editors**, and type availability differs between them. Only
+Fullscreen and Modal exist in both; everything else is traditional-editor only.
+
+| Type | Editors | Layout variants | Notable configurable properties |
+| --- | --- | --- | --- |
+| **Modal** | both | text (+ optional image), image-only | up to 2 buttons, header, body, image, background colour, screen-overlay colour, auto-dismiss duration |
+| **Fullscreen** | both | image & text, image-only | orientation enforcement (portrait/landscape), up to 2 buttons, header, body, image, colours. Per-orientation image aspect ratios; degrades to a centred modal on tablet/desktop |
+| **Slideup** | traditional | single layout | top or bottom position, auto-dismiss duration, text (3 lines before ellipsis), 50×50 image container, background/text colour. **No buttons — the whole surface is the tap target.** Non-blocking |
+| **Custom HTML** | traditional | free-form | HTML/CSS/JS, ZIP asset bundle, the `brazeBridge` JS API; requires `allowUserSuppliedJavascript = true` |
+| **Email capture form** | traditional | single layout | input placeholder, button text/colours, header, body; requires `allowUserSuppliedJavascript = true` |
+| **Simple survey** | traditional | single-choice, multiple-choice | star rating, multiple choice or open text; responses stored as custom attributes (string for single, array for multiple) or logged as button clicks only |
+| **Web modal with CSS** | — | text (+ optional image), image-only | web browsers only — not applicable to Flutter |
 
 Cross-cutting, all types **[doc]**: button actions (open web URL, deep link,
 close, log custom event, log custom attribute, request push permission), text
