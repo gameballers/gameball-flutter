@@ -424,7 +424,7 @@ class GameballApp extends StatelessWidget {
     }
 
     if (!isNullOrEmpty(_shop)) {
-      widgetUrl += '&platform=$_shop';
+      widgetUrl += '&shop=$_shop';
     }
 
     widgetUrl += '&os=${getDevicePlatform()}';
