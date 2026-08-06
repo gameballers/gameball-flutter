@@ -4,142 +4,37 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v3.2.0
+## Latest Release: v3.2.1
 
-**Release Date**: 2026-07-01
-**Version**: 3.2.0
-**Type**: Minor Release
+**Release Date**: 2026-08-06
+**Version**: 3.2.1
+**Type**: Patch Release
 
 ---
 
 ## 🎉 What's New
 
-v3.2.0 introduces a **widget event channel** so your app can react to what customers do inside the widget, **dismissal controls** for both the widget and the host app, **external-link handling**, optional **channel-merging parameters**, and internal **diagnostic logging**. All v3.1.x code continues to work without modification — every addition is backward compatible.
+v3.2.1 is a bug-fix release that corrects how the `shop` value is sent to the Gameball widget. There are no API changes — upgrading from any 3.x version requires no code changes.
 
-### Widget Event Channel
+### 🐛 Fixed: Widget Shop Parameter
 
-The widget can now post events (e.g. game completion, reward redemption) back to your app. Register `widgetEventCallback` and each event arrives as a `Map<String, dynamic>` with a top-level `type` and a nested `metadata`. On a parse failure the callback is invoked with `(null, exception)`:
+When `GameballConfigBuilder` was configured with both `.platform(...)` and `.shop(...)`, the SDK appended the shop value to the widget URL as a **second `platform` key**:
 
-```dart
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")
-    .widgetEventCallback((event, error) {
-      if (error != null) return;                                   // parse failure
-      final type = event?['type'] as String?;                      // e.g. "gameCompleted"
-      final metadata = event?['metadata'] as Map<String, dynamic>?;
-
-      if (type == 'gameCompleted') {
-        final hasWon = metadata?['hasWon'] as bool? ?? false;
-        final rewardType = metadata?['rewardType'] as String?;     // "Default", "Bonus", "NoReward"…
-        final discountType = metadata?['discountType'] as String?; // "FreeShipping", "Percentage"… (null if not a coupon win)
-        final rewardName = metadata?['rewardName'] as String?;     // localized display name
-        final campaignId = metadata?['campaignId'] as String?;     // "90340"
-        final campaignType = metadata?['campaignType'] as String?; // "spinTheWheel", "scratchCard"…
-        if (hasWon) refreshBalance();
-      }
-    })
-    .build();
-
-GameballApp.getInstance().showProfile(context, request);
+```
+...&platform=<platform>&platform=<shop>&...
 ```
 
-The `gameCompleted` event's `metadata` carries:
+The widget parses duplicate query keys into an array, and its coupon-redemption flow calls `platform.toLowerCase()` — which throws a `TypeError` on an array. The visible symptom: tapping redeem showed an infinite loading spinner and no request ever reached the backend.
 
-| Field | Type | Description |
-|---|---|---|
-| `hasWon` | `bool` | Whether the player won a reward this round |
-| `rewardType` | `String?` | Reward category — `Default`, `Friend`, `Bonus`, `CustomText`, `Streak`, `NoReward` |
-| `discountType` | `String?` | Coupon kind when the win is a coupon — e.g. `Fixed`, `Percentage`, `FreeShipping`, `FreeProduct`, `Custom`, `RechargeFixed`, `RechargePercentage`, `ExternalReward`; `null` for non-coupon wins |
-| `rewardName` | `String?` | Localized, human-readable reward name |
-| `campaignId` | `String` | Challenge / campaign identifier |
-| `campaignType` | `String?` | Game type — `spinTheWheel`, `slotMachine`, `quiz`, `scratchCard`, `matchCards`, `catcher`, `ticTacToe`, `shooter`, `puzzle`, `tapTarget`, `highwayDrive` |
+The SDK now sends the value under its own key:
 
-> All `gameCompleted` values arrive as `String` or `bool` — there are no numeric fields.
-
-### Web-Initiated Close
-
-The widget can dismiss its own webview by calling `window.GameballWidget.closeWidget()` — no host code required.
-
-### Host-Initiated Dismiss
-
-Dismiss the widget programmatically from your app (e.g. on logout or a deep link):
-
-```dart
-GameballApp.getInstance().hideProfile();   // no-op when nothing is shown
+```
+...&platform=<platform>&shop=<shop>&...
 ```
 
-### External-Link Handling
+### Who should upgrade
 
-Links the widget flags with `gbExternalBrowser=true` open in the system browser. Optionally intercept them with `externalLinkCallback`:
-
-```dart
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")
-    .externalLinkCallback((url) {
-      // open `url` your own way — in-app browser, router, etc.
-    })
-    .build();
-```
-
-### Channel-Merging Parameters
-
-`showProfile` now accepts optional `mobile` and `email`, so the widget can merge a guest/known profile with a customer's contact channels:
-
-```dart
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")
-    .mobile("+201234567890")
-    .email("customer@example.com")
-    .build();
-
-GameballApp.getInstance().showProfile(context, request);
-```
-
-### Diagnostic Logging
-
-The SDK now records internal diagnostic logs to aid troubleshooting. This is automatic and requires no integration changes.
-
----
-
-## 🔄 Changes
-
-- Added `ShowProfileRequestBuilder().widgetEventCallback(...)` — `void Function(Map<String, dynamic>? event, Exception? error)?`
-- Added `ShowProfileRequestBuilder().externalLinkCallback(...)` — `void Function(String url)?`
-- Added optional `mobile` and `email` on `ShowProfileRequestBuilder` (channel merging)
-- Added `GameballApp.hideProfile()`
-- Exposed `window.GameballWidget.closeWidget()` to the widget webview
-- Added internal SDK diagnostic logging
-- Unified the `x-gb-agent` header format to `GB/flutter/<version>`
-- Widened `share_plus`/`device_info_plus`/`package_info_plus` version ranges (floors unchanged; opting into `share_plus` 13.x requires Flutter 3.38.1+ / Dart 3.10+)
-
----
-
-## Usage Examples
-
-**React to a reward and refresh the wallet:**
-```dart
-final request = ShowProfileRequestBuilder()
-    .customerId("customer_123")
-    .widgetEventCallback((event, error) {
-      if (error != null) return;
-      final metadata = event?['metadata'] as Map<String, dynamic>?;
-      if (metadata?['hasWon'] as bool? ?? false) {
-        showWinAnimation(metadata?['rewardName'] as String? ?? '');
-        refreshBalance();
-      }
-    })
-    .build();
-
-GameballApp.getInstance().showProfile(context, request);
-```
-
-**Dismiss on logout:**
-```dart
-void logout() {
-  GameballApp.getInstance().hideProfile();
-  clearSession();
-}
-```
+Any app that sets both `platform` and `shop` in `GameballConfigBuilder` — widget coupon redemption is broken for that configuration in all prior releases.
 
 ---
 
@@ -154,7 +49,7 @@ void logout() {
 
 ## Migration
 
-No changes required — all v3.1.x and v3.0.0 code works without modification. The new callbacks, parameters, and `hideProfile()` are additive. Diagnostic logging is automatic.
+No changes required — all v3.x code works without modification.
 
 See [MIGRATION.md](MIGRATION.md) for details.
 
@@ -164,7 +59,7 @@ See [MIGRATION.md](MIGRATION.md) for details.
 
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.0
+  gameball_sdk: ^3.2.1
 ```
 
 ---
@@ -177,9 +72,9 @@ dependencies:
 
 ---
 
-## Previous Release: v3.1.1
+## Previous Release: v3.2.0
 
-**Release Date**: 2025-12-15
-**Type**: Patch Release
+**Release Date**: 2026-07-01
+**Type**: Minor Release
 
-Guest mode support — the profile widget can be shown without customer authentication, and the `ShowProfileRequest` builder no longer requires a customer ID. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+Widget event channel (`widgetEventCallback` receiving events such as `gameCompleted`), widget dismissal controls (`GameballApp.hideProfile()` and web-initiated `window.GameballWidget.closeWidget()`), external-link handling with optional `externalLinkCallback`, optional `mobile`/`email` channel-merging parameters, diagnostic logging, and widened dependency ranges. See [CHANGELOG.md](CHANGELOG.md) for the full history.
