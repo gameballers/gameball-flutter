@@ -4,6 +4,15 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.2.1] - 2026-08-06 🔧
+
+> **Patch Release**: Widget URL shop-parameter fix
+
+### 🐛 Fixed
+- 🎫 **Widget Shop Parameter**: the `shop` value was appended to the widget URL as a second `platform` key, so apps setting both `platform` and `shop` made the widget receive `platform` as an array — coupon redemption then failed with a `TypeError` (`toLowerCase is not a function`), showing an infinite loading spinner and never sending the request. The value is now sent under its own `&shop=` key.
+
+---
+
 ## [3.2.0] - 2026-07-01 📱
 
 > **Minor Release**: Widget event channel, widget dismissal controls, external-link handling, diagnostic logging, and channel-merging parameters

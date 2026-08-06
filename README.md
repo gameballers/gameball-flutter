@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.0
+  gameball_sdk: ^3.2.1
 ```
 
 ### Flutter CLI
