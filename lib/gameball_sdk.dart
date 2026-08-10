@@ -24,6 +24,7 @@ import 'in_app_messaging/models/in_app_message_campaign.dart';
 import 'in_app_messaging/models/message_trigger.dart';
 import 'in_app_messaging/presentation/message_navigator.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
+import 'in_app_messaging/source/campaign_cache.dart';
 import 'in_app_messaging/source/stub_message_source.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
@@ -155,6 +156,7 @@ class GameballApp extends StatelessWidget {
     // and deliberately outside the request's future chain — that chain has no
     // catchError, so anything thrown inside it escapes unhandled.
     try {
+      _inAppMessagingCustomerId = request.customerId;
       _inAppMessaging?.onCustomerChanged(request.customerId);
     } catch (error) {
       iamLog('onCustomerChanged hook failed: $error');
@@ -344,7 +346,12 @@ class GameballApp extends StatelessWidget {
     final service = _inAppMessaging ??= InAppMessagingService(
       source: StubMessageSource(),
       presenter: OverlayPresenter(navigatorKey),
-      frequencyCap: InMemoryFrequencyCap(),
+      // Persisted, both of them: the backend's contract requires that a
+      // non-repeatable campaign never shows again "locally too", and that a
+      // failed sync falls back to the previous cache. Neither survives a restart
+      // in memory.
+      frequencyCap: StoredFrequencyCap(),
+      campaignCache: StoredCampaignCache(),
       analytics: debugAnalytics ??
           BatchedMessageAnalytics(send: _sendInAppMessageEvents),
       sessionTimeout: sessionTimeout,

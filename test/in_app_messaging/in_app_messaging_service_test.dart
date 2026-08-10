@@ -11,6 +11,7 @@ import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_navigator.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_presenter.dart';
+import 'package:gameball_sdk/in_app_messaging/source/campaign_cache.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
 // ---------------------------------------------------------------- test doubles
@@ -26,13 +27,22 @@ class FakeSource implements GameballMessageSource {
   /// What the next sync reports as the global cooldown.
   Duration cooldown = defaultDisplayCooldown;
 
+  /// The payload the sync "arrived as". Null by default, because a source with no
+  /// raw response — as this fake is — has nothing for the cache to store, and the
+  /// service must not invent one.
+  String? rawJson;
+
   @override
   Future<GameballSyncResult> fetch(GameballAudience audience) async {
     fetchCount++;
     lastAudience = audience;
     final error = throwOnFetch;
     if (error != null) throw error;
-    return GameballSyncResult(campaigns: campaigns, cooldown: cooldown);
+    return GameballSyncResult(
+      campaigns: campaigns,
+      cooldown: cooldown,
+      rawJson: rawJson,
+    );
   }
 }
 
@@ -187,6 +197,19 @@ InAppMessageCampaign campaign(
   );
 }
 
+/// A real sync response, for seeding the cache — which stores payloads, not the
+/// constructed campaigns the fake source hands out.
+String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
+{
+  "success": true,
+  "response": { "cooldownSeconds": 30, "messages": [
+    { "campaignId": $campaignId, "messageType": 2,
+      "trigger": {"type": "session_start"},
+      "content": {}, "locale": {"message": "$body"} }
+  ]}
+}
+''';
+
 /// Assembles a service with controllable collaborators.
 ({
   InAppMessagingService service,
@@ -194,15 +217,20 @@ InAppMessageCampaign campaign(
   FakePresenter presenter,
   RecordingAnalytics analytics,
   InMemoryFrequencyCap cap,
+  InMemoryCampaignCache cache,
   RecordingNavigator navigator,
   List<GameballInAppMessage> emitted,
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
-}) build({List<InAppMessageCampaign>? campaigns}) {
+}) build({
+  List<InAppMessageCampaign>? campaigns,
+  InMemoryCampaignCache? cache,
+}) {
   final source = FakeSource(campaigns ?? [campaign('a')]);
   final presenter = FakePresenter();
   final analytics = RecordingAnalytics();
   final cap = InMemoryFrequencyCap();
+  final theCache = cache ?? InMemoryCampaignCache();
   final navigator = RecordingNavigator();
   final emitted = <GameballInAppMessage>[];
   var widgetOpen = false;
@@ -212,6 +240,7 @@ InAppMessageCampaign campaign(
     source: source,
     presenter: presenter,
     frequencyCap: cap,
+    campaignCache: theCache,
     analytics: analytics,
     isHostWidgetOpen: () => widgetOpen,
     navigator: navigator,
@@ -226,6 +255,7 @@ InAppMessageCampaign campaign(
     presenter: presenter,
     analytics: analytics,
     cap: cap,
+    cache: theCache,
     navigator: navigator,
     emitted: emitted,
     setWidgetOpen: (v) => widgetOpen = v,
@@ -900,6 +930,9 @@ void main() {
       h.service.onAppPaused();
       h.setNow(t0.add(const Duration(minutes: 5)));
       h.service.onAppResumed();
+      // A new session now re-syncs before evaluating, so the warm message
+      // arrives after a round trip rather than synchronously.
+      await pumpEventQueue();
 
       expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
           reason: 'caps survive the new session, so the next campaign shows');
@@ -986,7 +1019,19 @@ void main() {
       expect(h.presenter.isShowing, isFalse);
       expect(h.service.isStarted, isFalse);
       expect(h.service.pendingCampaign, isNull);
-      expect(h.cap.snapshot().shownCampaignIds, isEmpty);
+    });
+
+    test('does not erase display history', () async {
+      final h = build();
+      await h.service.start(customerId: 'c1');
+
+      h.service.stop();
+
+      expect(h.cap.snapshot().shownCampaignIds, isNotEmpty,
+          reason: 'history belongs to the customer, not the session. Wiping it '
+              'on logout would let a once-ever campaign show again the moment '
+              'they log back in — and load() already discards it when a '
+              'different customer starts');
     });
 
     test('is a no-op when not started', () {
@@ -1028,6 +1073,115 @@ void main() {
       h.service.onHostWidgetClosed(); // any retry trigger
 
       expect(h.presenter.shownMessageIds, ['msg_a']);
+    });
+  });
+
+  group('the campaign cache', () {
+    test('a failed sync falls back to the cache instead of going silent',
+        () async {
+      final h = build();
+      await h.cache.write('c1', rawSync(campaignId: 4242));
+      h.source.throwOnFetch = StateError('no network');
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['4242'],
+          reason: 'the backend rule is "on sync failure keep the previous '
+              'cache" — clearing would make every offline launch silent');
+    });
+
+    test('a successful sync wins over the cache', () async {
+      final h = build(campaigns: [campaign('fresh')]);
+      await h.cache.write('c1', rawSync(campaignId: 999));
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['msg_fresh'],
+          reason: 'the cache is a fallback, never a preference');
+    });
+
+    test('a successful sync is written to the cache', () async {
+      final h = build();
+      h.source.rawJson = rawSync(campaignId: 55);
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect((await h.cache.read('c1')).campaigns.single.campaignId, 55);
+    });
+
+    test('a sync with no raw payload writes nothing', () async {
+      final h = build();
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect((await h.cache.read('c1')).campaigns, isEmpty,
+          reason: 'the service must not invent a payload to cache');
+    });
+
+    test('a failed sync writes nothing', () async {
+      final h = build();
+      h.source.throwOnFetch = StateError('no network');
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect((await h.cache.read('c1')).campaigns, isEmpty,
+          reason: 'a failure must not overwrite a good cache with nothing');
+    });
+  });
+
+  group('sync per session', () {
+    test('a warm session re-syncs rather than reusing the cold-start list',
+        () async {
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+      expect(h.source.fetchCount, 1);
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.source.fetchCount, 2,
+          reason: 'a session start is when campaign edits, expiries and '
+              'eligibility changes land');
+    });
+
+    test('a resume inside the timeout does not sync', () async {
+      final h = build();
+      await h.service.start(customerId: 'c1');
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(seconds: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.source.fetchCount, 1);
+    });
+
+    test('a warm session evaluates against the cache when the sync fails',
+        () async {
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
+          reason: 'the campaigns already in memory stay usable');
     });
   });
 }

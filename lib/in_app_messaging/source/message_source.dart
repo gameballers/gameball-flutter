@@ -18,16 +18,26 @@ class GameballSyncResult {
   const GameballSyncResult({
     required this.campaigns,
     this.cooldown = defaultDisplayCooldown,
+    this.rawJson,
   });
 
   const GameballSyncResult.empty()
       : campaigns = const <InAppMessageCampaign>[],
-        cooldown = defaultDisplayCooldown;
+        cooldown = defaultDisplayCooldown,
+        rawJson = null;
 
   final List<InAppMessageCampaign> campaigns;
 
   /// Minimum gap between any two displays, from any campaign.
   final Duration cooldown;
+
+  /// The response exactly as it arrived, when there was one.
+  ///
+  /// Carried so the cache can store the payload rather than serialised objects —
+  /// which means no serialiser to keep in step with the model, and the parser
+  /// stays the only thing that reads a sync. Null for a result that came *from*
+  /// the cache, so re-reading can never rewrite it.
+  final String? rawJson;
 }
 
 /// Where campaigns come from.

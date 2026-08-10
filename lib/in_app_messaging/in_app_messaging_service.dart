@@ -14,6 +14,7 @@ import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
 import 'presentation/message_navigator.dart';
 import 'presentation/message_presenter.dart';
+import 'source/campaign_cache.dart';
 import 'source/message_source.dart';
 
 /// What the host wants done with a message about to be displayed.
@@ -80,6 +81,7 @@ class InAppMessagingService {
     required GameballMessageSource source,
     required GameballMessagePresenter presenter,
     required FrequencyCap frequencyCap,
+    required CampaignCache campaignCache,
     required MessageAnalytics analytics,
     required bool Function() isHostWidgetOpen,
     required MessageNavigator navigator,
@@ -91,6 +93,7 @@ class InAppMessagingService {
         _navigator = navigator,
         _presenter = presenter,
         _cap = frequencyCap,
+        _cache = campaignCache,
         _analytics = analytics,
         _isHostWidgetOpen = isHostWidgetOpen,
         _emit = emit,
@@ -100,6 +103,7 @@ class InAppMessagingService {
   final GameballMessageSource _source;
   final GameballMessagePresenter _presenter;
   final FrequencyCap _cap;
+  final CampaignCache _cache;
   final MessageAnalytics _analytics;
   final bool Function() _isHostWidgetOpen;
   final MessageNavigator _navigator;
@@ -109,6 +113,9 @@ class InAppMessagingService {
 
   /// How long backgrounded before a resume counts as a new session.
   final Duration sessionTimeout;
+
+  /// How long to wait on local storage before giving up on it.
+  static const Duration _storeTimeout = Duration(seconds: 2);
 
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
@@ -163,7 +170,7 @@ class InAppMessagingService {
     _beforeDisplay = beforeDisplay;
     _onAction = onAction;
     _resetFor(CustomerAudience(customerId));
-    await _fetchAndEvaluateSessionStart();
+    await _syncAndEvaluateSessionStart(loadPersisted: true);
   }
 
   /// Clears all state and dismisses anything on screen.
@@ -172,7 +179,6 @@ class InAppMessagingService {
     _presenter.dismiss();
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _cap.reset();
     _audience = null;
     _beforeDisplay = null;
     _onAction = null;
@@ -197,7 +203,7 @@ class InAppMessagingService {
     iamLog('customer changed to "$customerId"; refetching campaigns');
     _resetFor(CustomerAudience(customerId));
     // Fire and forget: the caller's contract must not wait on ours.
-    _fetchAndEvaluateSessionStart();
+    unawaited(_syncAndEvaluateSessionStart(loadPersisted: true));
   }
 
   /// Called when the host logs an event that may trigger a message.
@@ -252,7 +258,10 @@ class InAppMessagingService {
     }
 
     iamLog('resumed after ${away.inSeconds}s — new session');
-    _evaluate(const GameballSessionStartOccurrence());
+    // Re-synced, not just re-evaluated: a session start is when campaign edits,
+    // expiries and eligibility changes land. Fire and forget, because the caller
+    // is a lifecycle callback and the evaluation happens inside.
+    unawaited(_syncAndEvaluateSessionStart());
   }
 
   /// Called when the app leaves the foreground, to time the absence.
@@ -274,29 +283,76 @@ class InAppMessagingService {
     _presenter.dismiss();
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _cap.reset();
     _audience = audience;
   }
 
-  Future<void> _fetchAndEvaluateSessionStart() async {
+  /// Reads persisted state, bounded so a wedged store cannot kill the feature.
+  ///
+  /// Every call here goes through a platform channel, and a channel that never
+  /// answers is not something a `try` can catch — an unregistered
+  /// `shared_preferences` simply never completes. Left unbounded, that means
+  /// `start` never returns and **no message ever displays**, silently. Degrading
+  /// to "no history" risks showing a once-ever campaign twice, which is a far
+  /// smaller failure than the feature being dead.
+  Future<GameballSyncResult?> _readPersisted(String customerId) async {
+    try {
+      await _cap.load(customerId).timeout(_storeTimeout);
+      final cached = await _cache.read(customerId).timeout(_storeTimeout);
+      return cached.campaigns.isEmpty ? null : cached;
+    } on TimeoutException {
+      iamLog('local storage did not respond within '
+          '${_storeTimeout.inSeconds}s; continuing without history or cache');
+      return null;
+    } catch (error) {
+      iamLog('could not read local state ($error)');
+      return null;
+    }
+  }
+
+  /// Syncs, then evaluates session start.
+  ///
+  /// Disk and network run **concurrently**: the display history gates the
+  /// decision, not the request, so paying for them in series would delay the
+  /// first message for no reason.
+  ///
+  /// The cache is applied only when the sync failed. That ordering is the
+  /// backend's rule — *"on sync failure keep the previous unexpired cache"* — and
+  /// it also removes the race a parallel read would otherwise create, where a slow
+  /// cache read lands after a fast sync and clobbers fresher campaigns.
+  Future<void> _syncAndEvaluateSessionStart({bool loadPersisted = false}) async {
     final audience = _audience;
     if (audience == null) return;
 
-    await _cap.load();
-    // Deliberately not awaited. Recovering a previous run's unsent events has
-    // nothing to do with showing this session's message, and awaiting it puts a
-    // disk read — and a plugin dependency — on the path to the first display.
-    unawaited(_analytics.load());
+    Future<GameballSyncResult?>? persisted;
+    if (loadPersisted && audience is CustomerAudience) {
+      persisted = _readPersisted(audience.customerId);
+      // Not awaited: recovering a previous run's unsent events has nothing to do
+      // with showing this session's message.
+      unawaited(_analytics.load());
+    }
+
+    var synced = false;
     try {
-      final synced = await _source.fetch(audience);
-      _campaigns = synced.campaigns;
-      _cooldown = synced.cooldown;
+      final result = await _source.fetch(audience);
+      _campaigns = result.campaigns;
+      _cooldown = result.cooldown;
+      synced = true;
       iamLog('synced ${_campaigns.length} campaign(s), '
           'cooldown ${_cooldown.inSeconds}s');
+
+      final raw = result.rawJson;
+      if (raw != null && audience is CustomerAudience) {
+        unawaited(_cache.write(audience.customerId, raw));
+      }
     } catch (error) {
-      _campaigns = const <InAppMessageCampaign>[];
-      iamLog('sync failed; no campaigns available for this session ($error)');
-      return;
+      iamLog('sync failed ($error)');
+    }
+
+    final cached = await persisted;
+    if (!synced && cached != null) {
+      _campaigns = cached.campaigns;
+      _cooldown = cached.cooldown;
+      iamLog('falling back to ${_campaigns.length} cached campaign(s)');
     }
 
     _evaluate(const GameballSessionStartOccurrence());

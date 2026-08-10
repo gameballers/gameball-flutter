@@ -6,6 +6,7 @@ import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Drives the whole module through its real collaborators — the stub source,
 /// the real parser, the real evaluator, the real overlay presenter and the real
@@ -35,6 +36,9 @@ void main() {
   }
 
   setUp(() {
+    // The real module now persists display history and the campaign cache, so
+    // the store has to exist for this suite to get past start().
+    SharedPreferences.setMockInitialValues({});
     // This suite drives the real module through the real public API, so without
     // a substitute it would post batches to the live API and leave the flush
     // timer pending. Analytics content is asserted in the service unit tests.

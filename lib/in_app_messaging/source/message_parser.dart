@@ -81,6 +81,7 @@ GameballSyncResult parseSyncResponse(String rawJson) {
     cooldown: cooldownSeconds == null || cooldownSeconds < 0
         ? defaultDisplayCooldown
         : Duration(seconds: cooldownSeconds),
+    rawJson: rawJson,
   );
 }
 

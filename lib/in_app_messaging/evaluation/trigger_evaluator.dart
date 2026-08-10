@@ -27,7 +27,9 @@ InAppMessageCampaign? selectCampaign({
     // session: one fetched at 23:58 would otherwise keep firing all night, and
     // keep firing after the campaign was paused or archived.
     if (candidate.hasExpiredAt(now)) continue;
-    if (capState.shownCampaignIds.contains(candidate.campaignId)) continue;
+    if (!isRepeatEligible(campaign: candidate, capState: capState, now: now)) {
+      continue;
+    }
     // An unsupported layout is filtered here rather than refused at display
     // time, so a usable lower-priority campaign can still win.
     if (candidate.message.type == GameballMessageType.unsupported) continue;
@@ -49,6 +51,31 @@ InAppMessageCampaign? selectCampaign({
   });
 
   return indexed.first.$2;
+}
+
+/// Whether [campaign] may display again given what it has already done.
+///
+/// Two rules, both the backend's:
+///
+/// * **Not repeatable** means once ever. Enforced locally rather than relying on
+///   the server stopping to send it, because the campaign is cached on the device
+///   and a stale cache would show it again.
+/// * **Repeatable** means after `minIntervalSeconds` since *this* campaign's own
+///   last display. Distinct from the global cooldown, which applies between any
+///   two messages from any campaign.
+bool isRepeatEligible({
+  required InAppMessageCampaign campaign,
+  required CapState capState,
+  required DateTime now,
+}) {
+  final lastShown = capState.lastDisplayByCampaign[campaign.campaignId];
+  if (lastShown == null) return true;
+
+  if (!campaign.repeatable) return false;
+
+  final interval = campaign.minInterval;
+  if (interval == null) return true;
+  return now.difference(lastShown) >= interval;
 }
 
 /// Whether too little time has passed since the last display.
