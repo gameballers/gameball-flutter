@@ -91,7 +91,13 @@ const String stubCampaignsJson = '''
       "id": "cmp_cart_nudge",
       "analyticsToken": "stub.cart_nudge.v1",
       "priority": 50,
-      "trigger": { "type": "custom_event", "eventName": "$stubCartEventName" },
+      "trigger": {
+        "type": "custom_event",
+        "eventName": "$stubCartEventName",
+        "filters": [
+          { "property": "productId", "operator": "contains", "value": "sku" }
+        ]
+      },
       "message": {
         "id": "msg_cart_v1",
         "type": "modal",

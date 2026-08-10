@@ -203,8 +203,13 @@ class GameballApp extends StatelessWidget {
     try {
       final service = _inAppMessaging;
       if (service != null) {
-        for (final eventName in event.events.keys) {
-          service.onCustomEvent(eventName);
+        // Iterating entries, not keys: `Event.events` maps a name to its
+        // metadata, and a campaign's property filters are evaluated against that
+        // metadata. Passing only the name made every filtered custom-event
+        // campaign unmatchable, because a filter on an absent property never
+        // matches — the filters were built and unit-tested but unreachable.
+        for (final entry in event.events.entries) {
+          service.onCustomEvent(entry.key, properties: entry.value);
         }
       }
     } catch (error) {

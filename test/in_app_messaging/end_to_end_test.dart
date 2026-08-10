@@ -165,10 +165,64 @@ void main() {
     expect(find.text('Welcome back!'), findsOneWidget,
         reason: 'the post-frame retry presents it once a surface exists');
   });
+
+  /// These two use the same trick as the test above — opt in before a widget
+  /// tree exists, so nothing can display and the selected campaign becomes
+  /// `pendingInAppMessageCampaign` instead. That sidesteps the 30-second floor,
+  /// which reads the real clock and so cannot be exercised here, and still
+  /// asserts through the public API which campaign the evaluator chose.
+  group('event metadata reaches campaign filters', () {
+    Future<void> optInWithNoSurface(WidgetTester tester) async {
+      app().init(GameballConfigBuilder().apiKey('test-key').lang('en').build());
+      app().startInAppMessaging(
+        customerId: 'customer-1',
+        navigatorKey: GlobalKey<NavigatorState>(),
+      );
+      await tester.pump();
+      expect(app().pendingInAppMessageCampaign?.id, 'cmp_welcome_modal');
+    }
+
+    testWidgets('a matching property selects the filtered campaign',
+        (tester) async {
+      await optInWithNoSurface(tester);
+
+      // Guarded because `sendEvent` has no catchError — a pre-existing defect.
+      await runZonedGuarded(() async {
+        app().sendEvent(_cartEvent(), (_, __) {});
+        await tester.pump();
+      }, (_, __) {});
+
+      expect(app().pendingInAppMessageCampaign?.id, 'cmp_cart_nudge',
+          reason: 'the cart campaign filters on productId. If the event\'s '
+              'metadata does not reach the evaluator, the filter cannot match, '
+              'no campaign is selected, and the welcome message stays pending — '
+              'which is exactly the bug this test exists for');
+    });
+
+    testWidgets('a non-matching event leaves the filtered campaign alone',
+        (tester) async {
+      await optInWithNoSurface(tester);
+
+      await runZonedGuarded(() async {
+        app().sendEvent(_cartEvent(withMetadata: false), (_, __) {});
+        await tester.pump();
+      }, (_, __) {});
+
+      expect(app().pendingInAppMessageCampaign?.id, 'cmp_welcome_modal',
+          reason: 'a filter on an absent property must not match, or filters '
+              'would be decorative');
+    });
+  });
 }
 
-/// The stub's cart campaign listens for `add_to_cart`.
-dynamic _cartEvent() {
+/// The stub's cart campaign listens for `add_to_cart` and filters on `productId`.
+///
+/// [withMetadata] false builds the same event with no metadata, which the
+/// fixture's filter must reject.
+dynamic _cartEvent({bool withMetadata = true}) {
   // Built via the SDK's own builder so the event name matches the fixture.
-  return EventBuilder().customerId('customer-1').eventName('add_to_cart').build();
+  final builder =
+      EventBuilder().customerId('customer-1').eventName('add_to_cart');
+  if (withMetadata) builder.eventMetaData('productId', 'sku-001');
+  return builder.build();
 }
