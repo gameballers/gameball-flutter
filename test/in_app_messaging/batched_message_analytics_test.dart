@@ -9,20 +9,22 @@ const String _outboxKey = 'gameball_iam_analytics_outbox';
 
 GameballMessageEvent event(
   GameballMessageEventType type, {
-  String campaignId = 'cmp_a',
-  String messageId = 'msg_a',
-  String? token = 'tok_a',
-  int? buttonId,
-  String? eventId,
+  int campaignId = 2041,
+  int? variationId,
+  String? dispatchId = 'disp_a',
+  String? buttonId,
+  String? url,
+  String? eventUid,
 }) {
   return GameballMessageEvent(
     type: type,
     campaignId: campaignId,
-    messageId: messageId,
+    variationId: variationId,
+    dispatchId: dispatchId,
     occurredAt: DateTime.utc(2026, 8, 10, 9, 14, 22),
-    analyticsToken: token,
     buttonId: buttonId,
-    eventId: eventId,
+    url: url,
+    eventUid: eventUid,
   );
 }
 
@@ -64,45 +66,46 @@ void main() {
 
   group('the wire shape', () {
     test('an impression serialises to exactly the agreed fields', () {
-      final json = event(GameballMessageEventType.impression, eventId: 'e1')
+      final json = event(GameballMessageEventType.impression, eventUid: 'e1')
           .toJson();
 
       expect(json, {
-        'eventId': 'e1',
-        'event': 'impression',
-        'campaignId': 'cmp_a',
-        'messageId': 'msg_a',
+        'eventUid': 'e1',
+        'type': 'impression',
+        'campaignId': 2041,
         'occurredAt': '2026-08-10T09:14:22.000Z',
-        'analyticsToken': 'tok_a',
+        'dispatchId': 'disp_a',
       });
     });
 
-    test('a button click carries buttonId; others omit it', () {
+    test('a button tap and a surface tap are both clicks, told apart by buttonId',
+        () {
       final button =
-          event(GameballMessageEventType.buttonClick, buttonId: 1).toJson();
-      final body = event(GameballMessageEventType.click).toJson();
+          event(GameballMessageEventType.click, buttonId: 'cta').toJson();
+      final surface = event(GameballMessageEventType.click).toJson();
 
-      expect(button['event'], 'button_click');
-      expect(button['buttonId'], 1);
-      expect(body.containsKey('buttonId'), isFalse,
-          reason: 'a null buttonId is omitted rather than sent as null, so the '
-              'backend can treat presence as meaning "a button was tapped"');
+      expect(button['type'], 'click');
+      expect(surface['type'], 'click',
+          reason: 'the backend has no separate button-click type');
+      expect(button['buttonId'], 'cta');
+      expect(surface.containsKey('buttonId'), isFalse,
+          reason: 'a null buttonId is omitted rather than sent as null, which is '
+              'what lets presence mean "a button was tapped"');
     });
 
-    test('a missing token is omitted, not sent as null', () {
-      final json = event(GameballMessageEventType.impression, token: null)
+    test('a missing dispatchId is omitted, not sent as null', () {
+      final json = event(GameballMessageEventType.impression, dispatchId: null)
           .toJson();
 
-      expect(json.containsKey('analyticsToken'), isFalse);
-      expect(json['campaignId'], 'cmp_a',
-          reason: 'the campaign id still correlates the event without a token');
+      expect(json.containsKey('dispatchId'), isFalse);
+      expect(json['campaignId'], 2041,
+          reason: 'the campaign id still correlates the event without one');
     });
 
     test('occurredAt is always UTC on the wire', () {
       final local = GameballMessageEvent(
         type: GameballMessageEventType.impression,
-        campaignId: 'c',
-        messageId: 'm',
+        campaignId: 2041,
         occurredAt: DateTime(2026, 8, 10, 12),
       );
 
@@ -112,7 +115,7 @@ void main() {
     test('event ids are unique, because they are the idempotency key', () {
       final ids = List.generate(
         200,
-        (_) => event(GameballMessageEventType.impression, eventId: null).eventId,
+        (_) => event(GameballMessageEventType.impression, eventUid: null).eventUid,
       ).toSet();
 
       expect(ids, hasLength(200));
@@ -143,7 +146,7 @@ void main() {
       await pumpEventQueue();
 
       expect(sender.batches, hasLength(1));
-      expect(sender.batches.single.map((e) => e['event']),
+      expect(sender.batches.single.map((e) => e['type']),
           ['impression', 'click']);
       expect(analytics.bufferedCount, 0);
       analytics.dispose();
@@ -185,7 +188,7 @@ void main() {
       final sender = FakeSender(result: GameballAnalyticsSendResult.discard);
       final analytics = build(sender, batchSize: 1);
 
-      analytics.log(event(GameballMessageEventType.impression, eventId: 'bad'));
+      analytics.log(event(GameballMessageEventType.impression, eventUid: 'bad'));
       await pumpEventQueue();
 
       expect(analytics.bufferedCount, 0,
@@ -193,10 +196,10 @@ void main() {
               'forever would take every later event down with it');
 
       sender.result = GameballAnalyticsSendResult.accepted;
-      analytics.log(event(GameballMessageEventType.click, eventId: 'good'));
+      analytics.log(event(GameballMessageEventType.click, eventUid: 'good'));
       await pumpEventQueue();
 
-      expect(sender.batches.last.single['eventId'], 'good');
+      expect(sender.batches.last.single['eventUid'], 'good');
       analytics.dispose();
     });
 
@@ -233,7 +236,7 @@ void main() {
       released = true;
       await pumpEventQueue();
 
-      expect(sender.batches.first.single['event'], 'impression');
+      expect(sender.batches.first.single['type'], 'impression');
       expect(analytics.bufferedCount, 1,
           reason: 'the dismiss arrived mid-send, so removing the sent batch '
               'from the front must not take it with them');
@@ -246,7 +249,7 @@ void main() {
 
       for (var i = 0; i < 5; i++) {
         analytics.log(event(GameballMessageEventType.impression,
-            eventId: 'e$i'));
+            eventUid: 'e$i'));
       }
 
       expect(analytics.bufferedCount, 3);
@@ -258,19 +261,19 @@ void main() {
     test('a logged event reaches storage before any send', () async {
       final analytics = build(FakeSender());
 
-      analytics.log(event(GameballMessageEventType.impression, eventId: 'e1'));
+      analytics.log(event(GameballMessageEventType.impression, eventUid: 'e1'));
       await pumpEventQueue();
 
       final prefs = await SharedPreferences.getInstance();
       final stored = jsonDecode(prefs.getString(_outboxKey)!) as List;
-      expect(stored.single['eventId'], 'e1');
+      expect(stored.single['eventUid'], 'e1');
       analytics.dispose();
     });
 
     test('load restores what a previous run never sent', () async {
       SharedPreferences.setMockInitialValues({
         _outboxKey: jsonEncode([
-          event(GameballMessageEventType.impression, eventId: 'old').toJson(),
+          event(GameballMessageEventType.impression, eventUid: 'old').toJson(),
         ]),
       });
       final sender = FakeSender();
@@ -280,7 +283,7 @@ void main() {
       await analytics.load();
       await Future<void>.delayed(const Duration(milliseconds: 60));
 
-      expect(sender.batches.single.single['eventId'], 'old');
+      expect(sender.batches.single.single['eventUid'], 'old');
       analytics.dispose();
     });
 

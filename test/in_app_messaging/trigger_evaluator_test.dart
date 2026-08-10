@@ -4,25 +4,39 @@ import 'package:gameball_sdk/in_app_messaging/evaluation/trigger_evaluator.dart'
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
+import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
 final DateTime t0 = DateTime.utc(2026, 8, 5, 12);
 
+/// Campaigns are keyed by the backend's numeric id now, but these tests read far
+/// better with names. [idFor] hands out a stable id per label so an assertion can
+/// still say `idFor('high')` rather than a number that means nothing.
+final Map<String, int> _idsByLabel = <String, int>{};
+int idFor(String label) =>
+    _idsByLabel.putIfAbsent(label, () => 2000 + _idsByLabel.length);
+
 InAppMessageCampaign campaign(
-  String id, {
+  String label, {
   GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
   int priority = 0,
   GameballMessageType type = GameballMessageType.modal,
+  DateTime? expiresAt,
 }) {
   return InAppMessageCampaign(
-    id: id,
+    campaignId: idFor(label),
     trigger: trigger,
     priority: priority,
-    message: GameballInAppMessage(id: 'msg_$id', type: type, body: 'body'),
+    expiresAt: expiresAt,
+    message: GameballInAppMessage(
+      id: '${idFor(label)}',
+      type: type,
+      body: 'body',
+    ),
   );
 }
 
 const CapState emptyCaps =
-    CapState(shownCampaignIds: <String>{}, lastDisplayAt: null);
+    CapState(shownCampaignIds: <int>{}, lastDisplayAt: null);
 
 void main() {
   group('selectCampaign — matching', () {
@@ -46,7 +60,8 @@ void main() {
         now: t0,
       );
 
-      expect(result?.id, 'a');
+      expect(result?.campaignId,
+        idFor('a'));
     });
 
     test('ignores campaigns triggered by a different type', () {
@@ -71,8 +86,8 @@ void main() {
           campaigns: campaigns,
           capState: emptyCaps,
           now: t0,
-        )?.id,
-        'cart',
+        )?.campaignId,
+        idFor('cart'),
       );
       expect(
         selectCampaign(
@@ -95,7 +110,8 @@ void main() {
         now: t0,
       );
 
-      expect(result?.id, 'high');
+      expect(result?.campaignId,
+        idFor('high'));
     });
 
     test('ties break on response order, not sort order', () {
@@ -112,7 +128,8 @@ void main() {
         now: t0,
       );
 
-      expect(result?.id, 'c0');
+      expect(result?.campaignId,
+        idFor('c0'));
     });
 
     test('the winner is the first of the top priority in response order', () {
@@ -129,7 +146,8 @@ void main() {
         now: t0,
       );
 
-      expect(result?.id, 'first_top');
+      expect(result?.campaignId,
+        idFor('first_top'));
     });
   });
 
@@ -138,7 +156,7 @@ void main() {
       final result = selectCampaign(
         occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
-        capState: const CapState(shownCampaignIds: {'a'}, lastDisplayAt: null),
+        capState: CapState(shownCampaignIds: {idFor('a')}, lastDisplayAt: null),
         now: t0,
       );
 
@@ -149,11 +167,12 @@ void main() {
       final result = selectCampaign(
         occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('high', priority: 99), campaign('low', priority: 1)],
-        capState: const CapState(shownCampaignIds: {'high'}, lastDisplayAt: null),
+        capState: CapState(shownCampaignIds: {idFor('high')}, lastDisplayAt: null),
         now: t0,
       );
 
-      expect(result?.id, 'low');
+      expect(result?.campaignId,
+        idFor('low'));
     });
 
     test('returns null just inside the floor', () {
@@ -161,7 +180,7 @@ void main() {
         occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: CapState(
-          shownCampaignIds: const <String>{},
+          shownCampaignIds: const <int>{},
           lastDisplayAt: t0.subtract(const Duration(milliseconds: 29900)),
         ),
         now: t0,
@@ -175,13 +194,14 @@ void main() {
         occurrence: const GameballSessionStartOccurrence(),
         campaigns: [campaign('a')],
         capState: CapState(
-          shownCampaignIds: const <String>{},
+          shownCampaignIds: const <int>{},
           lastDisplayAt: t0.subtract(const Duration(milliseconds: 30100)),
         ),
         now: t0,
       );
 
-      expect(result?.id, 'a');
+      expect(result?.campaignId,
+        idFor('a'));
     });
   });
 
@@ -208,7 +228,8 @@ void main() {
         now: t0,
       );
 
-      expect(result?.id, 'usable');
+      expect(result?.campaignId,
+        idFor('usable'));
     });
   });
 
@@ -220,7 +241,7 @@ void main() {
     test('is true immediately after a display', () {
       expect(
         isWithinFloor(
-          capState: CapState(shownCampaignIds: const <String>{}, lastDisplayAt: t0),
+          capState: CapState(shownCampaignIds: const <int>{}, lastDisplayAt: t0),
           now: t0,
         ),
         isTrue,
@@ -231,8 +252,8 @@ void main() {
       expect(
         isWithinFloor(
           capState: CapState(
-            shownCampaignIds: const <String>{},
-            lastDisplayAt: t0.subtract(minimumIntervalBetweenDisplays),
+            shownCampaignIds: const <int>{},
+            lastDisplayAt: t0.subtract(defaultDisplayCooldown),
           ),
           now: t0,
         ),

@@ -6,33 +6,66 @@ import '../models/in_app_message.dart';
 import '../models/in_app_message_campaign.dart';
 import '../models/message_trigger.dart';
 import '../models/property_filter.dart';
+import 'message_source.dart';
 
-/// Parses a message-source payload into campaigns.
+/// Message types the backend can send, as its numeric enum.
+///
+/// Only [modal] is rendered. The rest are listed so an unsupported campaign is
+/// logged by name rather than by number — "why didn't my slideup show" should be
+/// answerable from the log alone.
+const Map<int, String> _messageTypeNames = <int, String>{
+  1: 'slideup',
+  2: 'modal',
+  3: 'fullscreen',
+  4: 'htmlFullscreen',
+  5: 'emailCapture',
+};
+
+const int _modalMessageType = 2;
+
+/// Parses a `bots/inapp/sync` response.
 ///
 /// Never throws. The rule is: drop what can never work, keep-but-skip what a
 /// future SDK version might support, and log every decision.
-List<InAppMessageCampaign> parseCampaignsJson(String rawJson) {
+GameballSyncResult parseSyncResponse(String rawJson) {
   Object? decoded;
   try {
     decoded = jsonDecode(rawJson);
   } catch (error) {
-    iamLog('parse failed: payload is not valid JSON ($error)');
-    return const <InAppMessageCampaign>[];
+    iamLog('sync parse failed: payload is not valid JSON ($error)');
+    return const GameballSyncResult.empty();
   }
 
   if (decoded is! Map<String, dynamic>) {
-    iamLog('parse failed: payload root is not an object');
-    return const <InAppMessageCampaign>[];
+    iamLog('sync parse failed: payload root is not an object');
+    return const GameballSyncResult.empty();
   }
 
-  final campaignsJson = decoded['campaigns'];
-  if (campaignsJson is! List) {
-    iamLog('parse failed: "campaigns" is missing or not a list');
-    return const <InAppMessageCampaign>[];
+  // The bots envelope reports failure *inside a 200*, so the status code alone
+  // never tells you whether a sync worked.
+  final success = _asBool(decoded['success']);
+  if (success == false) {
+    iamLog('sync rejected by the backend: '
+        '${_asString(decoded['errorMsg']) ?? 'no message'} '
+        '(errorCode ${decoded['errorCode']})');
+    return const GameballSyncResult.empty();
   }
 
+  // Tolerated unwrapped for the fixture source and for any future endpoint that
+  // returns the payload directly.
+  final payload = decoded['response'] is Map<String, dynamic>
+      ? decoded['response'] as Map<String, dynamic>
+      : decoded;
+
+  final messagesJson = payload['messages'];
+  if (messagesJson is! List) {
+    iamLog('sync parse failed: "messages" is missing or not a list');
+    return const GameballSyncResult.empty();
+  }
+
+  final cooldownSeconds = _asInt(payload['cooldownSeconds']);
   final campaigns = <InAppMessageCampaign>[];
-  for (final entry in campaignsJson) {
+  for (final entry in messagesJson) {
     if (entry is! Map<String, dynamic>) {
       iamLog('campaign skipped: entry is not an object');
       continue;
@@ -42,47 +75,70 @@ List<InAppMessageCampaign> parseCampaignsJson(String rawJson) {
       campaigns.add(campaign);
     }
   }
-  return campaigns;
+
+  return GameballSyncResult(
+    campaigns: campaigns,
+    cooldown: cooldownSeconds == null || cooldownSeconds < 0
+        ? defaultDisplayCooldown
+        : Duration(seconds: cooldownSeconds),
+  );
 }
 
 InAppMessageCampaign? _parseCampaign(Map<String, dynamic> json) {
-  final id = _asString(json['id']);
-  if (id == null || id.isEmpty) {
-    iamLog('campaign dropped: missing "id"');
+  final campaignId = _asInt(json['campaignId']);
+  if (campaignId == null) {
+    iamLog('campaign dropped: missing or non-numeric "campaignId"');
+    return null;
+  }
+  final name = _asString(json['name']);
+  final label = name == null ? '$campaignId' : '$campaignId ($name)';
+
+  // Anything but the one mode we know how to render. Checked before the message,
+  // because a future mode would make every field below mean something else.
+  final contentMode = _asString(json['contentMode']);
+  if (contentMode != null && contentMode.toLowerCase() != 'prerendered') {
+    iamLog('campaign $label skipped: unsupported contentMode "$contentMode" '
+        '(this SDK renders "prerendered" only)');
     return null;
   }
 
-  final trigger = _parseTrigger(json['trigger'], id);
+  final trigger = _parseTrigger(json['trigger'], label);
   if (trigger == null) {
     return null; // already logged
   }
 
-  final messageJson = json['message'];
-  if (messageJson is! Map<String, dynamic>) {
-    iamLog('campaign "$id" dropped: "message" is missing or not an object');
-    return null;
-  }
-
-  final message = _parseMessage(messageJson, id);
+  final message = _parseMessage(json, label, campaignId);
   if (message == null) {
     return null; // already logged
   }
 
+  final triggerJson =
+      json['trigger'] is Map<String, dynamic> ? json['trigger'] as Map<String, dynamic> : const <String, dynamic>{};
+  final minIntervalSeconds = _asInt(triggerJson['minIntervalSeconds']);
+
   return InAppMessageCampaign(
-    id: id,
+    campaignId: campaignId,
+    variationId: _asInt(json['variationId']),
+    // Never validated beyond "is it a non-empty string": the id is opaque by
+    // contract, so any check here would be this SDK asserting something about a
+    // format it has no business knowing.
+    dispatchId: _asString(json['dispatchId']),
+    name: name,
     trigger: trigger,
     priority: _asInt(json['priority']) ?? 0,
     message: message,
-    // Never validated beyond "is it a non-empty string": the token is opaque by
-    // contract, so any check here would be this SDK asserting something about a
-    // format it has no business knowing.
-    analyticsToken: _asString(json['analyticsToken']),
+    expiresAt: _parseUtcTimestamp(json['expiresAt'], label),
+    isTest: _asBool(json['isTest']) ?? false,
+    repeatable: _asBool(triggerJson['repeatable']) ?? false,
+    minInterval: (minIntervalSeconds != null && minIntervalSeconds > 0)
+        ? Duration(seconds: minIntervalSeconds)
+        : null,
   );
 }
 
-GameballMessageTrigger? _parseTrigger(Object? json, String campaignId) {
+GameballMessageTrigger? _parseTrigger(Object? json, String label) {
   if (json is! Map<String, dynamic>) {
-    iamLog('campaign "$campaignId" dropped: "trigger" is missing or not an object');
+    iamLog('campaign $label dropped: "trigger" is missing or not an object');
     return null;
   }
 
@@ -90,76 +146,86 @@ GameballMessageTrigger? _parseTrigger(Object? json, String campaignId) {
   switch (type) {
     case 'session_start':
       return const GameballSessionStartTrigger();
+    // `custom_event` accepted alongside the backend's `event` so the fixture
+    // source and any older payload keep parsing.
+    case 'event':
     case 'custom_event':
       final eventName = _asString(json['eventName']);
       if (eventName == null || eventName.isEmpty) {
-        iamLog('campaign "$campaignId" dropped: custom_event trigger has no "eventName"');
+        // The backend keys triggers on a numeric eventId and sends the name
+        // alongside it. Without the name there is nothing to match a locally
+        // logged event against — the id is meaningless on the device.
+        iamLog('campaign $label dropped: event trigger has no "eventName" '
+            '(eventId ${json['eventId']} cannot be resolved on the device)');
         return null;
       }
-      return GameballCustomEventTrigger(
-        eventName,
-        filters: _parseFilters(json['filters'], campaignId),
-      );
-    case 'any_purchase':
-      return const GameballAnyPurchaseTrigger();
-    case 'specific_purchase':
-      final productId = _asString(json['productId']);
-      final filters = _parseFilters(json['filters'], campaignId);
-      if ((productId == null || productId.isEmpty) && filters.isEmpty) {
-        // Otherwise it is indistinguishable from any_purchase, and a campaign
-        // that means "any" should say so.
-        iamLog('campaign "$campaignId" dropped: specific_purchase needs a '
-            '"productId" or at least one filter — use any_purchase for all');
+      final filters = _parseFilters(json['metadataFilters'] ?? json['filters'], label);
+      if (filters == null) {
+        return null; // a named filter was unusable; already logged
+      }
+
+      final logical = _asString(json['metadataLogicalOperator'])?.toLowerCase();
+      if (logical != null && logical != 'and') {
+        iamLog('campaign $label dropped: metadataLogicalOperator "$logical" is '
+            'not supported (this SDK evaluates filters with AND)');
         return null;
       }
-      return GameballSpecificPurchaseTrigger(
-        productId: productId,
-        filters: filters,
-      );
+
+      return GameballCustomEventTrigger(eventName, filters: filters);
     default:
       // Expected steady state, not an edge case: the backend supports more
       // trigger types than this SDK version. Name both so "why didn't my
       // campaign fire" is answerable from the log alone.
-      iamLog('campaign "$campaignId" dropped: unsupported trigger type "$type" '
-          '(this SDK supports session_start, custom_event, any_purchase, '
-          'specific_purchase)');
+      iamLog('campaign $label dropped: unsupported trigger type "$type" '
+          '(this SDK supports session_start and event)');
       return null;
   }
 }
 
-/// Parses trigger property filters.
+/// Parses trigger property filters, or null when the campaign must be skipped.
 ///
-/// A filter that cannot be understood is **dropped**, which deliberately widens
-/// the campaign rather than narrowing it — the alternative, silently dropping the
-/// whole campaign, hides a typo in one operator behind a message that simply
-/// never appears.
-List<GameballPropertyFilter> _parseFilters(Object? json, String campaignId) {
+/// A filter whose **property name is missing** skips the whole campaign: the
+/// backend identifies metadata by a numeric id and sends the name alongside, and
+/// a filter we cannot name is a filter we cannot evaluate. Dropping just that
+/// filter would silently *widen* the campaign — showing a "spent over $100"
+/// message to everyone — which is worse than not showing it.
+///
+/// A filter with an unusable **operator or value** is dropped individually, which
+/// widens rather than narrows, because that is a content mistake in one field
+/// rather than a contract mismatch.
+List<GameballPropertyFilter>? _parseFilters(Object? json, String label) {
   if (json == null) return const <GameballPropertyFilter>[];
   if (json is! List) {
-    iamLog('campaign "$campaignId": "filters" is not a list, ignoring');
+    iamLog('campaign $label: filters are not a list, ignoring');
     return const <GameballPropertyFilter>[];
   }
 
   final filters = <GameballPropertyFilter>[];
   for (final entry in json) {
     if (entry is! Map<String, dynamic>) {
-      iamLog('campaign "$campaignId": filter skipped, entry is not an object');
+      iamLog('campaign $label: filter skipped, entry is not an object');
       continue;
     }
-    final property = _asString(entry['property']);
+    // Three spellings: the backend's agreed metadata name, whichever of the two
+    // it ships as, and the fixture source's own. Costs one `??` and means the
+    // parser does not care which lands.
+    final property = _asString(entry['metadataKey']) ??
+        _asString(entry['metadataName']) ??
+        _asString(entry['property']);
     if (property == null || property.isEmpty) {
-      iamLog('campaign "$campaignId": filter dropped, missing "property"');
-      continue;
+      iamLog('campaign $label dropped: filter has no metadata name '
+          '(metadataId ${entry['metadataId']} cannot be resolved on the device)');
+      return null;
     }
     final operator = _parseOperator(entry['operator']);
     if (operator == null) {
-      iamLog('campaign "$campaignId": filter on "$property" dropped, '
+      iamLog('campaign $label: filter on "$property" dropped, '
           'unsupported operator "${entry['operator']}"');
       continue;
     }
     final value = entry['value'];
     if (value == null) {
-      iamLog('campaign "$campaignId": filter on "$property" dropped, no "value"');
+      iamLog('campaign $label: filter on "$property" dropped, no "value"');
       continue;
     }
     filters.add(GameballPropertyFilter(
@@ -173,51 +239,70 @@ List<GameballPropertyFilter> _parseFilters(Object? json, String campaignId) {
 
 GameballFilterOperator? _parseOperator(Object? value) {
   return switch (_asString(value)?.toLowerCase()) {
-    'equals' || 'eq' || '==' => GameballFilterOperator.equals,
-    'not_equals' || 'ne' || '!=' => GameballFilterOperator.notEquals,
-    'greater_than' || 'gt' || '>' => GameballFilterOperator.greaterThan,
-    'greater_than_or_equal' || 'gte' || '>=' =>
+    // `is` / `isnot` are the backend's spellings; the rest are ours and Braze's.
+    'is' || 'equals' || 'eq' || '==' => GameballFilterOperator.equals,
+    'isnot' || 'is_not' || 'not_equals' || 'ne' || '!=' =>
+      GameballFilterOperator.notEquals,
+    'greaterthan' || 'greater_than' || 'gt' || '>' =>
+      GameballFilterOperator.greaterThan,
+    'greaterthanorequal' || 'greater_than_or_equal' || 'gte' || '>=' =>
       GameballFilterOperator.greaterThanOrEqual,
-    'less_than' || 'lt' || '<' => GameballFilterOperator.lessThan,
-    'less_than_or_equal' || 'lte' || '<=' =>
+    'lessthan' || 'less_than' || 'lt' || '<' => GameballFilterOperator.lessThan,
+    'lessthanorequal' || 'less_than_or_equal' || 'lte' || '<=' =>
       GameballFilterOperator.lessThanOrEqual,
     'contains' => GameballFilterOperator.contains,
     _ => null,
   };
 }
 
-GameballInAppMessage? _parseMessage(Map<String, dynamic> json, String campaignId) {
-  final id = _asString(json['id']);
-  if (id == null || id.isEmpty) {
-    iamLog('campaign "$campaignId" dropped: message has no "id"');
-    return null;
+/// Builds the renderable message from a campaign's `content` and `locale`.
+///
+/// The backend separates untranslated styling from translated text, with buttons
+/// appearing in both halves. Ours is one flat object, so this is where the two are
+/// joined — buttons paired by id, and only those present on both sides kept.
+GameballInAppMessage? _parseMessage(
+  Map<String, dynamic> json,
+  String label,
+  int campaignId,
+) {
+  final content = json['content'] is Map<String, dynamic>
+      ? json['content'] as Map<String, dynamic>
+      : const <String, dynamic>{};
+  final locale = json['locale'] is Map<String, dynamic>
+      ? json['locale'] as Map<String, dynamic>
+      : const <String, dynamic>{};
+
+  // No message id exists in this contract, so one is derived. It appears only in
+  // local diagnostics; telemetry correlates on campaignId and dispatchId.
+  final variationId = _asInt(json['variationId']);
+  final id = variationId == null ? '$campaignId' : '$campaignId/$variationId';
+
+  final typeNumber = _asInt(json['messageType']);
+  final type = typeNumber == _modalMessageType
+      ? GameballMessageType.modal
+      : GameballMessageType.unsupported;
+  if (type == GameballMessageType.unsupported) {
+    final named = _messageTypeNames[typeNumber] ?? 'unknown';
+    iamLog('campaign $label has messageType $typeNumber ($named) — kept, but '
+        'this SDK version renders modal only');
   }
 
-  // Braze's modal has two layouts: "Text (with Optional Image)" and
-  // "Image Only". So text is not required — but something to render is.
-  final header = _asString(json['header']);
-  final body = _asString(json['body']);
-  final imageUrl = _asString(json['imageUrl']);
+  // Two modal layouts exist: text with an optional image, and image only. So
+  // text is not required — but something to render is.
+  final header = _asString(locale['header']);
+  final body = _asString(locale['message']) ?? _asString(locale['body']);
+  final imageUrl = _asString(content['imageUrl']);
   final hasHeader = header != null && header.isNotEmpty;
   final hasBody = body != null && body.isNotEmpty;
   final hasImage = imageUrl != null && imageUrl.isNotEmpty;
   if (!hasHeader && !hasBody && !hasImage) {
-    iamLog('campaign "$campaignId" dropped: message "$id" has no "header", '
-        '"body" or "imageUrl" — nothing to render');
+    iamLog('campaign $label dropped: no header, message or imageUrl — nothing '
+        'to render');
     return null;
   }
 
-  final typeName = _asString(json['type'])?.toLowerCase();
-  final type = switch (typeName) {
-    'modal' => GameballMessageType.modal,
-    _ => GameballMessageType.unsupported,
-  };
-  if (type == GameballMessageType.unsupported) {
-    iamLog('message "$id" has unsupported type "$typeName" — kept, but this SDK '
-        'version will not display it');
-  }
-
-  final autoMs = _asInt(json['autoDismissAfterMs']);
+  final autoSeconds = _asNum(content['autoDismissSeconds']);
+  final close = _parseCloseBehaviour(content['closeBehaviour'], label);
 
   return GameballInAppMessage(
     id: id,
@@ -228,48 +313,111 @@ GameballInAppMessage? _parseMessage(Map<String, dynamic> json, String campaignId
     // Message-level action: what tapping the message itself does. Optional, and
     // absent means the message is not tappable — so this is parsed leniently
     // rather than defaulting to dismiss the way a button's action does.
-    clickAction: _parseOptionalAction(json['action'], id),
-    showCloseButton: _asBool(json['showCloseButton']) ?? true,
-    autoDismissAfter:
-        (autoMs != null && autoMs > 0) ? Duration(milliseconds: autoMs) : null,
-    isTestSend: _asBool(json['isTestSend']) ?? false,
-    buttons: _parseButtons(json['buttons'], id),
-    extras: _parseExtras(json['extras']),
-    style: _parseMessageStyle(json['style']),
+    clickAction: _parseOptionalAction(content['action'], label),
+    showCloseButton: close.showCloseButton,
+    dismissOnScrimTap: close.dismissOnScrimTap,
+    autoDismissAfter: (autoSeconds != null && autoSeconds > 0)
+        ? Duration(milliseconds: (autoSeconds * 1000).round())
+        : null,
+    buttons: _parseButtons(content['buttons'], locale['buttons'], label),
+    extras: _parseExtras(content['extras']),
+    style: _parseMessageStyle(content['colors'], content['textAlignment']),
   );
 }
 
-List<GameballMessageButton> _parseButtons(Object? json, String messageId) {
-  if (json is! List) {
+/// How the message may be closed.
+///
+/// Defaults to offering both, and refuses to produce a message offering neither —
+/// an undismissable modal traps the user in the app.
+({bool showCloseButton, bool dismissOnScrimTap}) _parseCloseBehaviour(
+  Object? value,
+  String label,
+) {
+  switch (_asString(value)?.toLowerCase()) {
+    case 'button':
+      return (showCloseButton: true, dismissOnScrimTap: false);
+    case 'swipe':
+      return (showCloseButton: false, dismissOnScrimTap: true);
+    case 'both':
+    case null:
+      return (showCloseButton: true, dismissOnScrimTap: true);
+    default:
+      iamLog('campaign $label: unknown closeBehaviour "$value", offering both');
+      return (showCloseButton: true, dismissOnScrimTap: true);
+  }
+}
+
+/// Joins styled buttons with their translated labels, pairing on id.
+///
+/// A button styled but not translated has no text to render; a button translated
+/// but not styled has no action to perform. Either way it is dropped, which is the
+/// backend's own rule: render only buttons present on both sides.
+List<GameballMessageButton> _parseButtons(
+  Object? contentJson,
+  Object? localeJson,
+  String label,
+) {
+  if (contentJson is! List) {
     return const <GameballMessageButton>[];
   }
 
+  final labels = <String, String>{};
+  if (localeJson is List) {
+    for (final entry in localeJson) {
+      if (entry is! Map<String, dynamic>) continue;
+      final id = _asString(entry['id']);
+      final text = _asString(entry['text']);
+      if (id != null && id.isNotEmpty && text != null && text.isNotEmpty) {
+        labels[id] = text;
+      }
+    }
+  }
+
   final buttons = <GameballMessageButton>[];
-  for (final entry in json) {
+  for (final entry in contentJson) {
     if (entry is! Map<String, dynamic>) {
-      iamLog('message "$messageId": button skipped, entry is not an object');
+      iamLog('campaign $label: button skipped, entry is not an object');
       continue;
     }
-    final text = _asString(entry['text']);
+    final id = _asString(entry['id']);
+    if (id == null || id.isEmpty) {
+      iamLog('campaign $label: button dropped, missing "id" — there is no way '
+          'to pair it with a label or report a click for it');
+      continue;
+    }
+    // The fixture source carries text inline; the backend puts it in `locale`.
+    final text = labels[id] ?? _asString(entry['text']);
     if (text == null || text.isEmpty) {
-      iamLog('message "$messageId": button dropped, missing "text"');
+      iamLog('campaign $label: button "$id" dropped, no label for it in the '
+          'locale block');
       continue;
     }
     buttons.add(GameballMessageButton(
-      // Default to position so analytics still distinguishes buttons.
-      id: _asInt(entry['id']) ?? buttons.length,
+      id: id,
       text: text,
-      action: _parseAction(entry['action'], messageId),
-      style: _parseButtonStyle(entry['style']),
+      action: _parseAction(entry['action'], label),
+      style: _parseButtonStyle(entry['colors'] ?? entry['style']),
     ));
   }
 
   if (buttons.length > maxModalButtons) {
-    iamLog('message "$messageId": ${buttons.length} buttons provided, keeping '
-        'the first $maxModalButtons');
+    iamLog('campaign $label: ${buttons.length} buttons provided, keeping the '
+        'first $maxModalButtons');
     return buttons.sublist(0, maxModalButtons);
   }
   return buttons;
+}
+
+/// Parses an ISO-8601 instant, normalised to UTC.
+DateTime? _parseUtcTimestamp(Object? value, String label) {
+  final raw = _asString(value);
+  if (raw == null || raw.isEmpty) return null;
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) {
+    iamLog('campaign $label: ignoring unparseable timestamp "$raw"');
+    return null;
+  }
+  return parsed.toUtc();
 }
 
 GameballClickAction _parseAction(Object? json, String messageId) {
@@ -360,29 +508,43 @@ GameballClickAction? _parseOptionalAction(Object? json, String messageId) {
   }
 }
 
+/// Per-button colours.
+///
+/// The backend's key names are read first, with ours accepted as aliases so the
+/// fixture source and any hand-written payload keep working.
 GameballButtonStyle _parseButtonStyle(Object? json) {
   if (json is! Map<String, dynamic>) {
     return const GameballButtonStyle();
   }
   return GameballButtonStyle(
-    backgroundColor: parseColor(json['backgroundColor']),
-    textColor: parseColor(json['textColor']),
-    borderColor: parseColor(json['borderColor']),
+    backgroundColor: parseColor(json['background'] ?? json['backgroundColor']),
+    textColor: parseColor(json['text'] ?? json['textColor']),
+    borderColor: parseColor(json['border'] ?? json['borderColor']),
   );
 }
 
-GameballMessageStyle _parseMessageStyle(Object? json) {
-  if (json is! Map<String, dynamic>) {
-    return const GameballMessageStyle();
-  }
+/// Message-level colours and alignment, from the backend's two separate blocks.
+///
+/// `content.colors` carries `{background, text, header, closeButton, border,
+/// frame}` and `content.textAlignment` carries `{header, body}`. `frame` has no
+/// equivalent in a modal — it is the surround a fullscreen message draws — so it
+/// is read as the scrim, which is the nearest thing a modal has.
+GameballMessageStyle _parseMessageStyle(Object? colorsJson, Object? alignJson) {
+  final colors = colorsJson is Map<String, dynamic>
+      ? colorsJson
+      : const <String, dynamic>{};
+  final align =
+      alignJson is Map<String, dynamic> ? alignJson : const <String, dynamic>{};
+
   return GameballMessageStyle(
-    backgroundColor: parseColor(json['backgroundColor']),
-    headerColor: parseColor(json['headerColor']),
-    bodyColor: parseColor(json['bodyColor']),
-    scrimColor: parseColor(json['scrimColor']),
-    closeButtonColor: parseColor(json['closeButtonColor']),
-    headerAlign: _parseAlign(json['headerAlign']),
-    bodyAlign: _parseAlign(json['bodyAlign']),
+    backgroundColor: parseColor(colors['background'] ?? colors['backgroundColor']),
+    headerColor: parseColor(colors['header'] ?? colors['headerColor']),
+    bodyColor: parseColor(colors['text'] ?? colors['bodyColor']),
+    scrimColor: parseColor(colors['frame'] ?? colors['scrimColor']),
+    closeButtonColor:
+        parseColor(colors['closeButton'] ?? colors['closeButtonColor']),
+    headerAlign: _parseAlign(align['header'] ?? align['headerAlign']),
+    bodyAlign: _parseAlign(align['body'] ?? align['bodyAlign']),
   );
 }
 
@@ -453,5 +615,13 @@ int? _asInt(Object? value) {
   if (value is int) return value;
   if (value is num) return value.toInt();
   if (value is String) return int.tryParse(value);
+  return null;
+}
+
+/// Kept separate from [_asInt] for durations, where a fractional second in the
+/// payload should round rather than truncate to zero.
+num? _asNum(Object? value) {
+  if (value is num) return value;
+  if (value is String) return num.tryParse(value);
   return null;
 }

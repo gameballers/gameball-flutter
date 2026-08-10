@@ -66,8 +66,15 @@ class GameballMessageButton {
     this.style = const GameballButtonStyle(),
   });
 
-  /// Stable identifier used for click analytics.
-  final int id;
+  /// Stable identifier used for click analytics, and to pair a button's styling
+  /// with its translated label.
+  ///
+  /// A string, because that is what the backend assigns (`"b1"`, `"cta"`) and
+  /// because it survives translation: the same id appears in the untranslated
+  /// styling and in every locale's labels. Braze instead requires a marketer to
+  /// set positional `"0"` / `"1"` identifiers by hand, and reports nothing when
+  /// they forget.
+  final String id;
   final String text;
   final GameballClickAction action;
   final GameballButtonStyle style;
@@ -116,8 +123,8 @@ class GameballInAppMessage {
     this.imageUrl,
     this.clickAction,
     this.showCloseButton = true,
+    this.dismissOnScrimTap = true,
     this.autoDismissAfter,
-    this.isTestSend = false,
     this.buttons = const <GameballMessageButton>[],
     this.extras = const <String, String>{},
     this.style = const GameballMessageStyle(),
@@ -138,13 +145,18 @@ class GameballInAppMessage {
   /// image-only layout, where the artwork is the only thing to act on.
   final GameballClickAction? clickAction;
 
+  /// Whether to draw a close glyph. From the backend's `closeBehaviour`.
   final bool showCloseButton;
+
+  /// Whether tapping the scrim outside the message dismisses it.
+  ///
+  /// Separate from [showCloseButton] because the backend's `closeBehaviour`
+  /// distinguishes them (`button`, `swipe`, `both`), and because a campaign that
+  /// offers neither would be undismissable — which the parser refuses to produce.
+  final bool dismissOnScrimTap;
 
   /// Null means the message stays until the user dismisses it.
   final Duration? autoDismissAfter;
-
-  /// True when this was delivered as a marketer's test send.
-  final bool isTestSend;
 
   final List<GameballMessageButton> buttons;
 

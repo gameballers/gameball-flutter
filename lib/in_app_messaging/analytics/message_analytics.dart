@@ -43,9 +43,7 @@ class LoggingMessageAnalytics implements MessageAnalytics {
   @override
   void log(GameballMessageEvent event) {
     final button = event.buttonId == null ? '' : ' button=${event.buttonId}';
-    iamLog('${event.type.wireName}: campaign="${event.campaignId}" '
-        'message="${event.messageId}"$button'
-        '${event.isTestSend ? ' (test send)' : ''}');
+    iamLog('${event.type.wireName}: campaign=${event.campaignId}$button');
   }
 
   @override

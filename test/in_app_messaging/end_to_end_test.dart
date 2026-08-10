@@ -98,7 +98,9 @@ void main() {
     // Broadcast controllers deliver asynchronously.
     await tester.pumpAndSettle();
 
-    expect(seen, contains('msg_welcome_v1'));
+    expect(seen, contains('2041/1'),
+        reason: 'the id is derived from campaignId/variationId — this contract '
+            'has no message id of its own');
   });
 
   testWidgets('the 30-second floor blocks a second message immediately after',
@@ -153,7 +155,7 @@ void main() {
     app().startInAppMessaging(customerId: 'customer-1', navigatorKey: key);
     await tester.pump();
 
-    expect(app().pendingInAppMessageCampaign?.id, 'cmp_welcome_modal',
+    expect(app().pendingInAppMessageCampaign?.campaignId, 2041,
         reason: 'nothing to draw on yet, so it waits rather than being lost');
 
     await tester.pumpWidget(MaterialApp(
@@ -179,7 +181,7 @@ void main() {
         navigatorKey: GlobalKey<NavigatorState>(),
       );
       await tester.pump();
-      expect(app().pendingInAppMessageCampaign?.id, 'cmp_welcome_modal');
+      expect(app().pendingInAppMessageCampaign?.campaignId, 2041);
     }
 
     testWidgets('a matching property selects the filtered campaign',
@@ -192,7 +194,7 @@ void main() {
         await tester.pump();
       }, (_, __) {});
 
-      expect(app().pendingInAppMessageCampaign?.id, 'cmp_cart_nudge',
+      expect(app().pendingInAppMessageCampaign?.campaignId, 2043,
           reason: 'the cart campaign filters on productId. If the event\'s '
               'metadata does not reach the evaluator, the filter cannot match, '
               'no campaign is selected, and the welcome message stays pending — '
@@ -208,7 +210,7 @@ void main() {
         await tester.pump();
       }, (_, __) {});
 
-      expect(app().pendingInAppMessageCampaign?.id, 'cmp_welcome_modal',
+      expect(app().pendingInAppMessageCampaign?.campaignId, 2041,
           reason: 'a filter on an absent property must not match, or filters '
               'would be decorative');
     });

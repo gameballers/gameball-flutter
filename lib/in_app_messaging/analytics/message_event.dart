@@ -4,10 +4,14 @@ import 'dart:math';
 ///
 /// [wireName] is spelled out rather than derived from the enum identifier, so
 /// renaming a Dart symbol can never silently change the wire format.
+///
+/// There is deliberately no `buttonClick`: the backend's vocabulary is
+/// `impression | click | dismiss | submit`, and a button tap is a [click]
+/// carrying a `buttonId`. Presence of the id is the discriminator. `submit`
+/// belongs to email-capture messages, which this SDK does not render.
 enum GameballMessageEventType {
   impression('impression'),
   click('click'),
-  buttonClick('button_click'),
   dismiss('dismiss');
 
   const GameballMessageEventType(this.wireName);
@@ -17,65 +21,68 @@ enum GameballMessageEventType {
 
 /// One analytics event, shaped as the JSON the backend receives.
 ///
-/// A value object rather than four method signatures on the analytics interface:
-/// the payload is the thing both sides have to agree on, so it is worth one Dart
-/// type that mirrors it field for field. Adding an event type then costs an enum
-/// entry, not an interface change.
+/// A value object rather than several method signatures on the analytics
+/// interface: the payload is the thing both sides have to agree on, so it is worth
+/// one Dart type that mirrors it field for field.
 class GameballMessageEvent {
   GameballMessageEvent({
     required this.type,
     required this.campaignId,
-    required this.messageId,
     required this.occurredAt,
-    this.analyticsToken,
+    this.variationId,
+    this.dispatchId,
     this.buttonId,
-    this.isTestSend = false,
-    String? eventId,
-  }) : eventId = eventId ?? uuidV4();
+    this.url,
+    String? eventUid,
+  }) : eventUid = eventUid ?? uuidV4();
 
   /// Unique per event, generated on the device.
   ///
-  /// Delivery is **at-least-once**: a batch can be accepted by the backend and
-  /// then resent, if the process dies after the response but before the outbox
-  /// bookkeeping is written. The backend must treat this as an idempotency key —
-  /// without that, a kill at the wrong moment inflates impression counts.
-  final String eventId;
+  /// Delivery is **at-least-once**: a batch can be accepted and then resent if the
+  /// process dies after the response but before the outbox bookkeeping is written.
+  /// The backend deduplicates on this, so a kill at the wrong moment cannot
+  /// inflate impression counts. Generated once per event and **never regenerated
+  /// on retry** — that is the whole point of it.
+  final String eventUid;
 
   final GameballMessageEventType type;
-  final String campaignId;
-  final String messageId;
+
+  /// The campaign this happened to.
+  final int campaignId;
+
+  /// Which A/B arm was displayed, when the campaign had more than one.
+  final int? variationId;
+
+  /// The campaign's opaque dispatch id, echoed verbatim.
+  ///
+  /// Null when the campaign carried none; [campaignId] then carries the
+  /// correlation, which is enough for counting but not for attributing a variation.
+  final String? dispatchId;
 
   /// When it happened on the device, not when it was sent.
   ///
   /// Events are buffered, and a send can be delayed for hours by a dead network,
-  /// so the send time is not a usable substitute. Every conversion window and the
-  /// per-calendar-day unique-impression rule are anchored to this value.
+  /// so send time is not a usable substitute. Conversion windows and the
+  /// per-calendar-day unique-impression rule are both anchored to this.
   final DateTime occurredAt;
 
-  /// The opaque token the backend attached to this campaign at fetch time.
-  ///
-  /// Null when the campaign carried none — a stub campaign, or a backend that has
-  /// not started sending them. [campaignId] and [messageId] then carry the
-  /// correlation instead, which is enough for reporting but not for attributing a
-  /// variant.
-  final String? analyticsToken;
+  /// Which button was tapped. Set only on a [GameballMessageEventType.click] that
+  /// came from a button rather than the message surface.
+  final String? buttonId;
 
-  /// Set only for [GameballMessageEventType.buttonClick].
-  final int? buttonId;
-
-  /// True when the campaign was a marketer's test send.
-  final bool isTestSend;
+  /// The destination, on a click whose action opened a URL.
+  final String? url;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'eventId': eventId,
-      'event': type.wireName,
+      'eventUid': eventUid,
+      'type': type.wireName,
       'campaignId': campaignId,
-      'messageId': messageId,
       'occurredAt': occurredAt.toUtc().toIso8601String(),
-      if (analyticsToken != null) 'analyticsToken': analyticsToken,
+      if (variationId != null) 'variationId': variationId,
+      if (dispatchId != null) 'dispatchId': dispatchId,
       if (buttonId != null) 'buttonId': buttonId,
-      if (isTestSend) 'isTestSend': true,
+      if (url != null) 'url': url,
     };
   }
 }
@@ -83,8 +90,8 @@ class GameballMessageEvent {
 /// A version-4 UUID, for event idempotency keys.
 ///
 /// Hand-rolled rather than adding a dependency: the compatibility contract keeps
-/// this package's dependency list unchanged, and a v4 UUID is sixteen random
-/// bytes with two fixed nibbles.
+/// this package's dependency list unchanged, and a v4 UUID is sixteen random bytes
+/// with two fixed nibbles.
 String uuidV4() {
   final random = Random();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));

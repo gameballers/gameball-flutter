@@ -86,12 +86,12 @@ void main() {
   });
 
   testWidgets('renders each button and reports which was tapped', (tester) async {
-    final tapped = <int>[];
+    final tapped = <String>[];
     await pump(
       tester,
       message(buttons: const [
-        GameballMessageButton(id: 0, text: 'Later', action: GameballDismissAction()),
-        GameballMessageButton(id: 1, text: 'Redeem', action: GameballDismissAction()),
+        GameballMessageButton(id: 'b1', text: 'Later', action: GameballDismissAction()),
+        GameballMessageButton(id: 'b2', text: 'Redeem', action: GameballDismissAction()),
       ]),
       onButtonPressed: (b) => tapped.add(b.id),
     );
@@ -102,7 +102,7 @@ void main() {
     await tester.tap(find.text('Redeem'));
     await tester.pump();
 
-    expect(tapped, [1]);
+    expect(tapped, ['b2']);
   });
 
   testWidgets('renders no button row when there are no buttons', (tester) async {
@@ -268,7 +268,7 @@ void main() {
         body: null,
         imageUrl: 'https://example.com/promo.png',
         buttons: const [
-          GameballMessageButton(id: 0, text: 'Shop', action: GameballDismissAction()),
+          GameballMessageButton(id: 'b1', text: 'Shop', action: GameballDismissAction()),
         ],
       ));
 
@@ -310,13 +310,13 @@ void main() {
 
     testWidgets('a button tap does not also fire the message action', (tester) async {
       var messagePressed = 0;
-      final buttonsTapped = <int>[];
+      final buttonsTapped = <String>[];
       await pump(
         tester,
         message(
           clickAction: const GameballOpenUrlAction('app://body'),
           buttons: const [
-            GameballMessageButton(id: 7, text: 'Go', action: GameballDismissAction()),
+            GameballMessageButton(id: 'b8', text: 'Go', action: GameballDismissAction()),
           ],
         ),
         onButtonPressed: (b) => buttonsTapped.add(b.id),
@@ -326,7 +326,7 @@ void main() {
       await tester.tap(find.text('Go'));
       await tester.pump();
 
-      expect(buttonsTapped, [7]);
+      expect(buttonsTapped, ['b8']);
       expect(messagePressed, 0,
           reason: 'the button wins the hit test; the tap must not propagate');
     });

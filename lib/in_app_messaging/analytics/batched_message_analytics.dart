@@ -130,9 +130,7 @@ class BatchedMessageAnalytics implements MessageAnalytics {
     _outbox.add(event.toJson());
 
     final button = event.buttonId == null ? '' : ' button=${event.buttonId}';
-    iamLog('${event.type.wireName}: campaign="${event.campaignId}" '
-        'message="${event.messageId}"$button'
-        '${event.isTestSend ? ' (test send)' : ''}');
+    iamLog('${event.type.wireName}: campaign=${event.campaignId}$button');
 
     if (_outbox.length > maxBuffered) {
       final excess = _outbox.length - maxBuffered;

@@ -23,13 +23,16 @@ class FakeSource implements GameballMessageSource {
   int fetchCount = 0;
   GameballAudience? lastAudience;
 
+  /// What the next sync reports as the global cooldown.
+  Duration cooldown = defaultDisplayCooldown;
+
   @override
-  Future<List<InAppMessageCampaign>> fetch(GameballAudience audience) async {
+  Future<GameballSyncResult> fetch(GameballAudience audience) async {
     fetchCount++;
     lastAudience = audience;
     final error = throwOnFetch;
     if (error != null) throw error;
-    return campaigns;
+    return GameballSyncResult(campaigns: campaigns, cooldown: cooldown);
   }
 }
 
@@ -100,18 +103,31 @@ class RecordingAnalytics implements MessageAnalytics {
   int flushes = 0;
   int loads = 0;
 
-  List<String> _ids(GameballMessageEventType type) => events
+  /// Reported back as the test's own campaign labels, so assertions stay legible
+  /// now that the wire identity is a number.
+  List<String> _labels(GameballMessageEventType type) => events
       .where((e) => e.type == type)
-      .map((e) => '${e.campaignId}/${e.messageId}')
+      .map((e) => labelOf(e.campaignId))
       .toList();
 
-  List<String> get impressions => _ids(GameballMessageEventType.impression);
-  List<String> get bodyClicks => _ids(GameballMessageEventType.click);
-  List<String> get dismissals => _ids(GameballMessageEventType.dismiss);
+  List<String> get impressions => _labels(GameballMessageEventType.impression);
+  List<String> get dismissals => _labels(GameballMessageEventType.dismiss);
+
+  /// A click with no button: the message surface itself was tapped.
+  ///
+  /// Button clicks and surface clicks share one wire type now, and `buttonId`
+  /// presence is the only thing that distinguishes them — so splitting them here
+  /// is what proves the merge kept them distinguishable.
+  List<String> get bodyClicks => events
+      .where((e) =>
+          e.type == GameballMessageEventType.click && e.buttonId == null)
+      .map((e) => labelOf(e.campaignId))
+      .toList();
 
   List<String> get clicks => events
-      .where((e) => e.type == GameballMessageEventType.buttonClick)
-      .map((e) => '${e.campaignId}/${e.messageId}/${e.buttonId}')
+      .where((e) =>
+          e.type == GameballMessageEventType.click && e.buttonId != null)
+      .map((e) => '${labelOf(e.campaignId)}/${e.buttonId}')
       .toList();
 
   @override
@@ -133,21 +149,36 @@ class RecordingAnalytics implements MessageAnalytics {
 
 final DateTime t0 = DateTime.utc(2026, 8, 5, 12);
 
+/// Campaigns are keyed by the backend's numeric id, but these tests read better
+/// with names. [idFor] hands out a stable id per label, and [labelOf] maps back so
+/// analytics assertions can name the campaign they mean.
+final Map<String, int> _idsByLabel = <String, int>{};
+int idFor(String label) =>
+    _idsByLabel.putIfAbsent(label, () => 2000 + _idsByLabel.length);
+String labelOf(int campaignId) => _idsByLabel.entries
+    .firstWhere((e) => e.value == campaignId,
+        orElse: () => MapEntry('#$campaignId', campaignId))
+    .key;
+
 InAppMessageCampaign campaign(
-  String id, {
+  String label, {
   GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
   int priority = 0,
   List<GameballMessageButton> buttons = const <GameballMessageButton>[],
   GameballClickAction? clickAction,
-  String? analyticsToken,
+  String? dispatchId,
+  bool isTest = false,
+  DateTime? expiresAt,
 }) {
   return InAppMessageCampaign(
-    id: id,
+    campaignId: idFor(label),
     trigger: trigger,
     priority: priority,
-    analyticsToken: analyticsToken,
+    dispatchId: dispatchId,
+    isTest: isTest,
+    expiresAt: expiresAt,
     message: GameballInAppMessage(
-      id: 'msg_$id',
+      id: 'msg_$label',
       type: GameballMessageType.modal,
       body: 'body',
       buttons: buttons,
@@ -220,8 +251,8 @@ void main() {
 
       await h.service.start(customerId: 'c1');
 
-      expect(h.analytics.impressions, ['a/msg_a']);
-      expect(h.cap.snapshot().shownCampaignIds, {'a'});
+      expect(h.analytics.impressions, ['a']);
+      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
       expect(h.cap.snapshot().lastDisplayAt, t0);
     });
 
@@ -297,7 +328,7 @@ void main() {
       h.service.onCustomEvent('add_to_cart');
 
       expect(h.presenter.shownMessageIds, isEmpty);
-      expect(h.service.pendingCampaign?.id, 'cart');
+      expect(h.service.pendingCampaign?.campaignId, idFor('cart'));
     });
 
     test('displays the pending message once the widget closes', () async {
@@ -345,10 +376,10 @@ void main() {
       h.setNow(t0.add(const Duration(seconds: 31)));
       h.setWidgetOpen(true);
       h.service.onCustomEvent('add_to_cart');
-      expect(h.service.pendingCampaign?.id, 'cart');
+      expect(h.service.pendingCampaign?.campaignId, idFor('cart'));
 
       // Another message lands while 'cart' waits, moving the floor forward.
-      h.cap.recordDisplay('other', t0.add(const Duration(seconds: 40)));
+      h.cap.recordDisplay(idFor('other'), t0.add(const Duration(seconds: 40)));
       h.setNow(t0.add(const Duration(seconds: 45)));
 
       h.setWidgetOpen(false);
@@ -356,7 +387,7 @@ void main() {
 
       expect(h.presenter.shownMessageIds, ['msg_first'],
           reason: 'only 5s since the intervening display, so the floor holds');
-      expect(h.service.pendingCampaign?.id, 'cart', reason: 'it stays pending');
+      expect(h.service.pendingCampaign?.campaignId, idFor('cart'), reason: 'it stays pending');
 
       // Once the new floor has elapsed, the same retry path displays it.
       h.setNow(t0.add(const Duration(seconds: 75)));
@@ -410,7 +441,7 @@ void main() {
       h.service.onCustomEvent('add_to_cart');
 
       expect(h.presenter.shownMessageIds, ['msg_first']);
-      expect(h.service.pendingCampaign?.id, 'cart');
+      expect(h.service.pendingCampaign?.campaignId, idFor('cart'));
     });
 
     test('the pending message displays when the current one is dismissed', () async {
@@ -438,7 +469,7 @@ void main() {
       h.service.onCustomEvent('e1');
       h.service.onCustomEvent('e2');
 
-      expect(h.service.pendingCampaign?.id, 'two');
+      expect(h.service.pendingCampaign?.campaignId, idFor('two'));
     });
   });
 
@@ -464,7 +495,7 @@ void main() {
       );
 
       expect(h.presenter.shownMessageIds, isEmpty);
-      expect(h.service.pendingCampaign?.id, 'a');
+      expect(h.service.pendingCampaign?.campaignId, idFor('a'));
     });
 
     test('show displays as normal', () async {
@@ -510,18 +541,18 @@ void main() {
     test('a tap logs a click and dismisses', () async {
       final h = build(campaigns: [
         campaign('a', buttons: const [
-          GameballMessageButton(id: 4, text: 'Go', action: GameballDismissAction()),
+          GameballMessageButton(id: 'b5', text: 'Go', action: GameballDismissAction()),
         ]),
       ]);
       await h.service.start(customerId: 'c1');
 
       h.presenter.tapButton(const GameballMessageButton(
-        id: 4,
+        id: 'b5',
         text: 'Go',
         action: GameballDismissAction(),
       ));
 
-      expect(h.analytics.clicks, ['a/msg_a/4']);
+      expect(h.analytics.clicks, ['a/b5']);
       expect(h.presenter.isShowing, isFalse);
     });
   });
@@ -533,19 +564,19 @@ void main() {
 
       h.presenter.dismiss();
 
-      expect(h.analytics.impressions, ['a/msg_a']);
-      expect(h.analytics.dismissals, ['a/msg_a']);
+      expect(h.analytics.impressions, ['a']);
+      expect(h.analytics.dismissals, ['a']);
     });
 
     test('a button tap suppresses the dismiss that follows it', () async {
       const button =
-          GameballMessageButton(id: 0, text: 'Go', action: GameballDismissAction());
+          GameballMessageButton(id: 'b1', text: 'Go', action: GameballDismissAction());
       final h = build(campaigns: [campaign('a', buttons: const [button])]);
       await h.service.start(customerId: 'c1');
 
       h.presenter.tapButton(button);
 
-      expect(h.analytics.clicks, ['a/msg_a/0']);
+      expect(h.analytics.clicks, ['a/b1']);
       expect(h.analytics.dismissals, isEmpty,
           reason: 'a tapped message was not ignored. Keeping these disjoint is '
               'what makes impressions = clicks + dismissals an identity the '
@@ -560,17 +591,17 @@ void main() {
 
       h.presenter.tapMessage();
 
-      expect(h.analytics.bodyClicks, ['a/msg_a']);
+      expect(h.analytics.bodyClicks, ['a']);
       expect(h.analytics.dismissals, isEmpty);
     });
 
     test('every event carries the campaign token and the injected clock',
         () async {
-      final h = build(campaigns: [campaign('a', analyticsToken: 'tok_a')]);
+      final h = build(campaigns: [campaign('a', dispatchId: 'tok_a')]);
       await h.service.start(customerId: 'c1');
       h.presenter.dismiss();
 
-      expect(h.analytics.events.map((e) => e.analyticsToken),
+      expect(h.analytics.events.map((e) => e.dispatchId),
           ['tok_a', 'tok_a'],
           reason: 'the token has to ride every event, not just the impression — '
               'a click the backend cannot attribute to a variant is no better '
@@ -615,7 +646,7 @@ void main() {
       final h = build(campaigns: [
         campaign('a', buttons: const [
           GameballMessageButton(
-            id: 0,
+            id: 'b1',
             text: 'View cart',
             action: GameballNavigateAction('/cart', arguments: {'from': 'iam'}),
           ),
@@ -624,7 +655,7 @@ void main() {
       await h.service.start(customerId: 'c1');
 
       h.presenter.tapButton(const GameballMessageButton(
-        id: 0,
+        id: 'b1',
         text: 'View cart',
         action: GameballNavigateAction('/cart', arguments: {'from': 'iam'}),
       ));
@@ -716,7 +747,7 @@ void main() {
       );
       h.presenter.tapMessage();
 
-      expect(h.analytics.bodyClicks, ['a/msg_a'],
+      expect(h.analytics.bodyClicks, ['a'],
           reason: 'the hook replaces the action, not the bookkeeping');
       expect(h.presenter.isShowing, isFalse);
     });
@@ -738,12 +769,12 @@ void main() {
 
     test('the hook receives the button for a button tap', () async {
       const button = GameballMessageButton(
-        id: 3,
+        id: 'b4',
         text: 'Go',
         action: GameballDismissAction(),
       );
       final h = build(campaigns: [campaign('a', buttons: const [button])]);
-      final seen = <int?>[];
+      final seen = <String?>[];
 
       await h.service.start(
         customerId: 'c1',
@@ -754,7 +785,7 @@ void main() {
       );
       h.presenter.tapButton(button);
 
-      expect(seen, [3]);
+      expect(seen, ['b4']);
     });
   });
 
@@ -767,7 +798,7 @@ void main() {
 
       h.presenter.tapMessage();
 
-      expect(h.analytics.bodyClicks, ['a/msg_a']);
+      expect(h.analytics.bodyClicks, ['a']);
       expect(h.analytics.clicks, isEmpty,
           reason: 'a body click is not a button click');
       expect(h.presenter.isShowing, isFalse);
@@ -788,7 +819,7 @@ void main() {
   group('purchase triggers', () {
     test('any purchase displays regardless of the product', () async {
       final h = build(campaigns: [
-        campaign('promo', trigger: const GameballAnyPurchaseTrigger()),
+        campaign('promo', trigger: const GameballCustomEventTrigger(gameballPurchaseEventName)),
       ]);
       await h.service.start(customerId: 'c1');
 
@@ -803,8 +834,19 @@ void main() {
 
     test('specific purchase matches only its product', () async {
       final h = build(campaigns: [
-        campaign('acc',
-            trigger: const GameballSpecificPurchaseTrigger(productId: 'sku-001')),
+        campaign(
+          'acc',
+          trigger: const GameballCustomEventTrigger(
+            gameballPurchaseEventName,
+            filters: [
+              GameballPropertyFilter(
+                property: 'productId',
+                operator: GameballFilterOperator.equals,
+                value: 'sku-001',
+              ),
+            ],
+          ),
+        ),
       ]);
       await h.service.start(customerId: 'c1');
 
@@ -817,7 +859,7 @@ void main() {
 
     test('a price filter narrows a purchase trigger', () async {
       final h = build(campaigns: [
-        campaign('big', trigger: const GameballSpecificPurchaseTrigger(filters: [
+        campaign('big', trigger: const GameballCustomEventTrigger(gameballPurchaseEventName, filters: [
           GameballPropertyFilter(
             property: 'price',
             operator: GameballFilterOperator.greaterThan,
@@ -905,7 +947,7 @@ void main() {
     test('a new customer refetches and resets caps', () async {
       final h = build();
       await h.service.start(customerId: 'c1');
-      expect(h.cap.snapshot().shownCampaignIds, {'a'});
+      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
 
       h.service.onCustomerChanged('c2');
       await Future<void>.delayed(Duration.zero);
@@ -974,7 +1016,7 @@ void main() {
       await h.service.start(customerId: 'c1');
 
       expect(h.presenter.shownMessageIds, isEmpty);
-      expect(h.service.pendingCampaign?.id, 'a');
+      expect(h.service.pendingCampaign?.campaignId, idFor('a'));
     });
 
     testWidgets('displays on retry once a surface appears', (tester) async {

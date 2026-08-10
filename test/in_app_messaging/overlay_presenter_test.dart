@@ -135,11 +135,11 @@ void main() {
   testWidgets('tapping a button reports it without dismissing', (tester) async {
     final key = await pumpHost(tester);
     final presenter = OverlayPresenter(key);
-    final tapped = <int>[];
+    final tapped = <String>[];
 
     presenter.present(
       message: message(buttons: const [
-        GameballMessageButton(id: 3, text: 'Go', action: GameballDismissAction()),
+        GameballMessageButton(id: 'b4', text: 'Go', action: GameballDismissAction()),
       ]),
       onShown: () {},
       onButtonPressed: (b) => tapped.add(b.id),
@@ -151,7 +151,7 @@ void main() {
     await tester.tap(find.text('Go'));
     await tester.pump();
 
-    expect(tapped, [3],
+    expect(tapped, ['b4'],
         reason: 'the service decides what a tap means; the presenter only reports it');
   });
 

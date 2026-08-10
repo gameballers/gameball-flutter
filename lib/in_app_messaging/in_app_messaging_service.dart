@@ -59,13 +59,17 @@ typedef GameballOnAction = bool Function(
 /// How long the app must be backgrounded before returning counts as a new
 /// session.
 ///
-/// Matched to [minimumIntervalBetweenDisplays] on purpose. A shorter timeout
-/// would create sessions that fire the session-start trigger while the display
-/// floor is still blocking, producing a dead zone where a message is selected and
-/// then silently suppressed. Braze's default is shorter than its floor and
-/// accepts that; here they are aligned so a new session can always show
-/// something.
-const Duration defaultSessionTimeout = minimumIntervalBetweenDisplays;
+/// Matched to [defaultDisplayCooldown] on purpose. Because a message can only be
+/// shown while the app is in the foreground, time-since-last-display is always at
+/// least time-spent-in-background — so aligning the two guarantees the cooldown
+/// can never block a warm session-start message. A shorter timeout reintroduces
+/// the gap Braze lives with, where a session-start campaign is selected and then
+/// silently suppressed.
+///
+/// The cooldown is now server-driven, so a backend that raises it above this
+/// value reopens that gap. Deliberately not chased: the alternative is a session
+/// timeout that changes under the host's feet.
+const Duration defaultSessionTimeout = defaultDisplayCooldown;
 
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
@@ -110,6 +114,9 @@ class InAppMessagingService {
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
+
+  /// Minimum gap between any two displays, as the last sync reported it.
+  Duration _cooldown = defaultDisplayCooldown;
 
   /// The one message waiting for a display opportunity, if any.
   ///
@@ -211,7 +218,10 @@ class InAppMessagingService {
     Map<String, Object>? properties,
   }) {
     if (!isStarted) return;
-    _evaluate(GameballPurchaseOccurrence(
+    // A purchase is an event named `purchase`, not a trigger type of its own:
+    // the backend models it that way, so a campaign targeting purchases is
+    // authored as an event trigger and filters on productId or price.
+    _evaluate(GameballCustomEventOccurrence.purchase(
       productId: productId,
       price: price,
       currency: currency,
@@ -278,11 +288,14 @@ class InAppMessagingService {
     // disk read — and a plugin dependency — on the path to the first display.
     unawaited(_analytics.load());
     try {
-      _campaigns = await _source.fetch(audience);
-      iamLog('fetched ${_campaigns.length} campaign(s)');
+      final synced = await _source.fetch(audience);
+      _campaigns = synced.campaigns;
+      _cooldown = synced.cooldown;
+      iamLog('synced ${_campaigns.length} campaign(s), '
+          'cooldown ${_cooldown.inSeconds}s');
     } catch (error) {
       _campaigns = const <InAppMessageCampaign>[];
-      iamLog('fetch failed; no campaigns available for this session ($error)');
+      iamLog('sync failed; no campaigns available for this session ($error)');
       return;
     }
 
@@ -300,6 +313,7 @@ class InAppMessagingService {
       campaigns: _campaigns,
       capState: _cap.snapshot(),
       now: _clock(),
+      cooldown: _cooldown,
     );
     if (campaign == null) return;
 
@@ -308,7 +322,7 @@ class InAppMessagingService {
 
     switch (_decide(campaign.message)) {
       case GameballDisplayDecision.discard:
-        iamLog('campaign "${campaign.id}" discarded by beforeDisplay');
+        iamLog('campaign "${campaign.campaignId}" discarded by beforeDisplay');
       case GameballDisplayDecision.later:
         _defer(campaign, 'the host asked to display it later');
       case GameballDisplayDecision.show:
@@ -353,15 +367,19 @@ class InAppMessagingService {
         shown = true;
         // Recorded at impression, never at selection, so a deferred or
         // suppressed message does not burn its slot.
-        _cap.recordDisplay(campaign.id, _clock());
+        _cap.recordDisplay(campaign.campaignId, _clock());
         _logEvent(campaign, GameballMessageEventType.impression);
       },
       onButtonPressed: (button) {
         engaged = true;
+        // A button tap is a click carrying the button's id — the backend has no
+        // separate button-click type, and `buttonId` presence is what
+        // distinguishes it from a tap on the message surface.
         _logEvent(
           campaign,
-          GameballMessageEventType.buttonClick,
+          GameballMessageEventType.click,
           buttonId: button.id,
+          url: _urlOf(button.action),
         );
         _act(campaign.message, button, button.action);
       },
@@ -369,7 +387,7 @@ class InAppMessagingService {
         final action = campaign.message.clickAction;
         if (action == null) return;
         engaged = true;
-        _logEvent(campaign, GameballMessageEventType.click);
+        _logEvent(campaign, GameballMessageEventType.click, url: _urlOf(action));
         _act(campaign.message, null, action);
       },
       onDismissed: () {
@@ -398,11 +416,11 @@ class InAppMessagingService {
 
   void _defer(InAppMessageCampaign campaign, String reason) {
     final displaced = _pending;
-    if (displaced != null && displaced.id != campaign.id) {
-      iamLog('pending campaign "${displaced.id}" displaced by "${campaign.id}"');
+    if (displaced != null && displaced.campaignId != campaign.campaignId) {
+      iamLog('pending campaign "${displaced.campaignId}" displaced by "${campaign.campaignId}"');
     }
     _pending = campaign;
-    iamLog('campaign "${campaign.id}" deferred: $reason');
+    iamLog('campaign "${campaign.campaignId}" deferred: $reason');
   }
 
   /// Builds and records one analytics event for [campaign].
@@ -413,18 +431,28 @@ class InAppMessagingService {
   void _logEvent(
     InAppMessageCampaign campaign,
     GameballMessageEventType type, {
-    int? buttonId,
+    String? buttonId,
+    String? url,
   }) {
+    // A dashboard test send displays normally and reports nothing, so a
+    // marketer's testing never reaches campaign statistics.
+    if (campaign.isTest) return;
+
     _analytics.log(GameballMessageEvent(
       type: type,
-      campaignId: campaign.id,
-      messageId: campaign.message.id,
+      campaignId: campaign.campaignId,
+      variationId: campaign.variationId,
+      dispatchId: campaign.dispatchId,
       occurredAt: _clock(),
-      analyticsToken: campaign.analyticsToken,
       buttonId: buttonId,
-      isTestSend: campaign.message.isTestSend,
+      url: url,
     ));
   }
+
+  /// The destination of an action, when it has one. Reported alongside a click so
+  /// the backend can attribute outbound traffic without re-deriving it.
+  static String? _urlOf(GameballClickAction action) =>
+      action is GameballOpenUrlAction ? action.url : null;
 
   void _retryPending() {
     final campaign = _pending;
@@ -432,13 +460,13 @@ class InAppMessagingService {
     _pending = null;
 
     final capState = _cap.snapshot();
-    if (capState.shownCampaignIds.contains(campaign.id)) {
-      iamLog('pending campaign "${campaign.id}" dropped: already shown');
+    if (capState.shownCampaignIds.contains(campaign.campaignId)) {
+      iamLog('pending campaign "${campaign.campaignId}" dropped: already shown');
       return;
     }
     // Re-validated so a message deferred before another was displayed cannot
     // slip through inside the floor.
-    if (isWithinFloor(capState: capState, now: _clock())) {
+    if (isWithinFloor(capState: capState, now: _clock(), cooldown: _cooldown)) {
       _pending = campaign;
       return;
     }

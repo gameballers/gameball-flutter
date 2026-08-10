@@ -27,7 +27,7 @@ Two facts frame the work:
 | 1 | **Identity** | V1 convention: `?playerUniqueId={customerId}` | The SDK already holds the external customer id. Verified equivalent to the backend's `PlayerUniqueId` (`OrderPointsV4.cs:13-18` aliases the two). Avoids coupling messaging to `initializeCustomer` completing |
 | 2 | **Encrypted playerId** | Not used | Verified unobtainable: it is a TripleDES hex string keyed by a server secret (`Cipher.cs:16`), produced only into server-generated URLs, and never returned in any JSON response. `initializeCustomer` returns the **raw** `long` (`CustomerCreationResponse.cs:12`) |
 | 3 | **Auth** | `APIKey` always; `X-GB-TOKEN` when the integration has a session token | Already plumbed. See open item O2 |
-| 4 | **Trigger matching** | By `eventName`, which the backend is adding | Numeric `eventId` is unresolvable on-device. See open item O1 for the filter equivalent |
+| 4 | **Trigger matching** | By name, for both the event and each metadata filter — the backend is adding both | Numeric `eventId` and `metadataId` are unresolvable on-device: the mapping lives only in the backend's database, and a client-side matcher has to work offline in microseconds |
 | 5 | **Purchases** | Treated as the `purchase` event | The backend model has no purchase trigger type |
 | 6 | **Analytics identity** | `dispatchId` replaces our `analyticsToken` | Same concept, their name |
 
@@ -157,6 +157,13 @@ positional `"0"`/`"1"` convention.
 - `event` → `GameballCustomEventTrigger(eventName, filters)`
 - Numeric `eventId` / `metadataId` are **parsed and discarded**. They are the backend's keys; the
   SDK matches on names.
+- **Field spelling is read tolerantly.** The metadata name was agreed verbally, so the parser
+  accepts `metadataKey` *or* `metadataName`, and the same for `eventName`. This follows the MVP
+  spec's existing principle of not forcing the backend into one spelling, and costs one `??` per
+  field. Whichever they ship, it parses.
+- A filter whose name is missing → **the campaign is skipped** with a log naming it. Silently
+  matching on an absent property is how filters become decorative; skipping is loud enough to
+  notice and safe enough to ship.
 - `metadataLogicalOperator` other than `And` → skip the campaign with a log, until O4 is settled.
 - **`GameballAnyPurchaseTrigger` and `GameballSpecificPurchaseTrigger` become unreachable** from
   this backend and are removed. Instead `logPurchase` must produce an occurrence that satisfies
@@ -326,7 +333,7 @@ Each has a fallback so none blocks starting.
 
 | # | Item | Fallback if unanswered |
 | --- | --- | --- |
-| **O1** | **`metadataKey` on `metadataFilters`.** Confirmed for `eventName`; unconfirmed for filters. Without it a numeric `metadataId` is as unresolvable as a numeric `eventId` was, and **filtered campaigns are silently inert** | Skip campaigns carrying `metadataFilters`, with a log naming the campaign. Unfiltered event triggers still work |
+| ~~O1~~ | ~~`metadataKey` on `metadataFilters`~~ — **resolved.** The backend is adding the metadata name alongside `eventName`. Numbering kept stable for anything already citing O2–O7 | — |
 | **O2** | Does V1 honour `X-GB-TOKEN` when present? V1 is documented as `APIKey` only, and the API key ships in the app binary — so without a token cross-check, anyone holding it can read every campaign's content and post telemetry for arbitrary customers | Send it anyway; harmless if ignored. Record the exposure |
 | **O3** | Is `autoDismissSeconds` valid on Modal? Their doc lists it under Slideup | Honour it on Modal if present |
 | **O4** | Full `metadataFilters.operator` vocabulary. Only `"Is"` is documented; we implement seven | Map `Is` → equals; skip campaigns using unknown operators |

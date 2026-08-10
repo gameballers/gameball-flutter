@@ -1,467 +1,685 @@
-import 'dart:ui' show Color, TextAlign;
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
+import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
+import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
-/// Builds a payload with one campaign, letting each test override just the
-/// fields it cares about.
-String payload({String campaigns = _oneModalCampaign}) => '{"campaigns":[$campaigns]}';
-
-const _oneModalCampaign = '''
-{
-  "id": "cmp_a",
-  "priority": 10,
-  "trigger": { "type": "session_start" },
-  "message": { "id": "msg_a", "type": "modal", "body": "hello" }
+/// Wraps one or more campaigns in the bots envelope the backend sends.
+GameballSyncResult parse(String campaignsJson, {String payloadExtras = ''}) {
+  return parseSyncResponse(
+    '{"success":true,"errorCode":0,"response":{$payloadExtras'
+    '"messages":[$campaignsJson]}}',
+  );
 }
-''';
+
+/// The single campaign a payload produced, or null when it was dropped.
+InAppMessageCampaign? one(String campaignJson) {
+  final campaigns = parse(campaignJson).campaigns;
+  return campaigns.isEmpty ? null : campaigns.single;
+}
+
+/// A campaign with only what the parser insists on, so each test adds just the
+/// field it is about.
+String minimal({
+  int campaignId = 2041,
+  String trigger = '{"type":"session_start"}',
+  String content = '{}',
+  String locale = '{"message":"body"}',
+  String extras = '',
+}) {
+  return '''
+  { "campaignId": $campaignId, "messageType": 2, $extras
+    "trigger": $trigger, "content": $content, "locale": $locale }
+  ''';
+}
 
 void main() {
-  group('parseCampaignsJson — happy path', () {
-    test('parses a minimal modal campaign', () {
-      final campaigns = parseCampaignsJson(payload());
+  group('the bots envelope', () {
+    test('unwraps response.messages', () {
+      final result = parse(minimal());
 
-      expect(campaigns, hasLength(1));
-      final c = campaigns.single;
-      expect(c.id, 'cmp_a');
-      expect(c.priority, 10);
-      expect(c.trigger, isA<GameballSessionStartTrigger>());
-      expect(c.message.id, 'msg_a');
-      expect(c.message.type, GameballMessageType.modal);
-      expect(c.message.body, 'hello');
-      expect(c.message.showCloseButton, isTrue);
-      expect(c.message.autoDismissAfter, isNull);
-      expect(c.message.isTestSend, isFalse);
-      expect(c.message.buttons, isEmpty);
+      expect(result.campaigns.single.campaignId, 2041);
     });
 
-    test('parses a fully populated campaign', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        {
-          "id": "cmp_full",
-          "priority": 100,
-          "trigger": { "type": "custom_event", "eventName": "add_to_cart" },
-          "message": {
-            "id": "msg_full",
-            "type": "modal",
-            "header": "Welcome",
-            "body": "You have points",
-            "imageUrl": "https://cdn.example.com/a.png",
-            "showCloseButton": false,
-            "autoDismissAfterMs": 4000,
-            "isTestSend": true,
-            "buttons": [
-              { "id": 7, "text": "Go", "action": { "type": "open_url", "url": "app://x", "external": true },
-                "style": { "backgroundColor": "#6C4DF6", "textColor": "#FFFFFF", "borderColor": "#000000" } }
-            ],
-            "style": { "backgroundColor": "#FFFFFF", "headerColor": "#111111",
-                       "bodyColor": "#444444", "scrimColor": "#99000000",
-                       "headerAlign": "center", "bodyAlign": "start" },
-            "extras": { "source": "q3" }
-          }
-        }
-      '''));
+    test('success:false yields nothing, even at HTTP 200', () {
+      final result = parseSyncResponse('''
+        { "success": false, "errorMsg": "PlayerInactive", "errorCode": 7,
+          "response": { "messages": [ ${minimal()} ] } }
+      ''');
 
-      final m = campaigns.single.message;
-      expect(campaigns.single.trigger,
-          isA<GameballCustomEventTrigger>().having((t) => t.eventName, 'eventName', 'add_to_cart'));
-      expect(m.header, 'Welcome');
-      expect(m.imageUrl, 'https://cdn.example.com/a.png');
-      expect(m.showCloseButton, isFalse);
-      expect(m.autoDismissAfter, const Duration(milliseconds: 4000));
-      expect(m.isTestSend, isTrue);
-      expect(m.extras, {'source': 'q3'});
-      expect(m.style.backgroundColor, const Color(0xFFFFFFFF));
-      expect(m.style.scrimColor, const Color(0x99000000));
-      expect(m.style.headerAlign, TextAlign.center);
-      expect(m.style.bodyAlign, TextAlign.start);
+      expect(result.campaigns, isEmpty,
+          reason: 'the envelope reports failure inside a 200, so trusting the '
+              'status code alone would treat a rejection as a success');
+    });
 
-      final b = m.buttons.single;
-      expect(b.id, 7);
-      expect(b.text, 'Go');
-      expect(b.style.backgroundColor, const Color(0xFF6C4DF6));
-      final action = b.action;
-      expect(action, isA<GameballOpenUrlAction>());
-      action as GameballOpenUrlAction;
-      expect(action.url, 'app://x');
-      expect(action.external, isTrue);
+    test('takes cooldownSeconds from the payload', () {
+      final result = parse(minimal(), payloadExtras: '"cooldownSeconds": 90,');
+
+      expect(result.cooldown, const Duration(seconds: 90));
+    });
+
+    test('falls back to 30 seconds when cooldownSeconds is absent', () {
+      expect(parse(minimal()).cooldown, defaultDisplayCooldown);
+    });
+
+    test('ignores a negative cooldown', () {
+      final result = parse(minimal(), payloadExtras: '"cooldownSeconds": -5,');
+
+      expect(result.cooldown, defaultDisplayCooldown);
+    });
+
+    test('accepts an unwrapped payload, for fixtures', () {
+      final result = parseSyncResponse('{"messages":[${minimal()}]}');
+
+      expect(result.campaigns, hasLength(1));
     });
   });
 
-  group('parseCampaignsJson — leniency', () {
-    test('matches enum-ish values case-insensitively', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "SESSION_START" },
-          "message": { "id": "m", "type": "MODAL", "body": "b",
-                       "buttons": [ { "text": "x", "action": { "type": "DISMISS" } } ] } }
-      '''));
+  group('happy path', () {
+    test('parses a fully populated campaign', () {
+      final campaign = one('''
+        {
+          "campaignId": 2041, "variationId": 4, "dispatchId": "d-abc",
+          "name": "Welcome back", "priority": 100, "messageType": 2,
+          "contentMode": "prerendered",
+          "expiresAt": "2026-09-30T21:59:59Z", "isTest": false,
+          "trigger": { "type": "session_start", "repeatable": true,
+                       "minIntervalSeconds": 120 },
+          "content": {
+            "colors": { "background": "#FFFFFF", "header": "#111111",
+                        "text": "#444444", "frame": "#99000000",
+                        "closeButton": "#FEFEFE" },
+            "textAlignment": { "header": "center", "body": "left" },
+            "closeBehaviour": "both",
+            "imageUrl": "https://cdn/hero.png",
+            "autoDismissSeconds": 6,
+            "extras": { "campaignSource": "q3" },
+            "action": { "type": "navigate", "route": "/rewards" },
+            "buttons": [
+              { "id": "b1", "action": { "type": "dismiss" },
+                "colors": { "background": "#EEEEEE", "text": "#111111",
+                            "border": "#DDDDDD" } }
+            ]
+          },
+          "locale": {
+            "header": "Welcome back!", "message": "1,250 points waiting.",
+            "buttons": [ { "id": "b1", "text": "Later" } ]
+          }
+        }
+      ''')!;
 
-      expect(campaigns.single.message.type, GameballMessageType.modal);
-      expect(campaigns.single.trigger, isA<GameballSessionStartTrigger>());
-      expect(campaigns.single.message.buttons.single.action, isA<GameballDismissAction>());
+      expect(campaign.campaignId, 2041);
+      expect(campaign.variationId, 4);
+      expect(campaign.dispatchId, 'd-abc');
+      expect(campaign.name, 'Welcome back');
+      expect(campaign.priority, 100);
+      expect(campaign.repeatable, isTrue);
+      expect(campaign.minInterval, const Duration(seconds: 120));
+      expect(campaign.expiresAt, DateTime.utc(2026, 9, 30, 21, 59, 59));
+      expect(campaign.isTest, isFalse);
+
+      final message = campaign.message;
+      expect(message.type, GameballMessageType.modal);
+      expect(message.header, 'Welcome back!');
+      expect(message.body, '1,250 points waiting.');
+      expect(message.imageUrl, 'https://cdn/hero.png');
+      expect(message.autoDismissAfter, const Duration(seconds: 6));
+      expect(message.showCloseButton, isTrue);
+      expect(message.dismissOnScrimTap, isTrue);
+      expect(message.extras, {'campaignSource': 'q3'});
+      expect(message.clickAction, isA<GameballNavigateAction>());
+      expect(message.style.backgroundColor, const Color(0xFFFFFFFF));
+      expect(message.style.headerColor, const Color(0xFF111111));
+      expect(message.style.bodyColor, const Color(0xFF444444));
+      expect(message.style.scrimColor, const Color(0x99000000));
+      expect(message.style.closeButtonColor, const Color(0xFFFEFEFE));
+      expect(message.style.headerAlign, TextAlign.center);
+      expect(message.style.bodyAlign, TextAlign.left);
+      expect(message.buttons.single.id, 'b1');
+      expect(message.buttons.single.text, 'Later');
+      expect(message.buttons.single.style.backgroundColor,
+          const Color(0xFFEEEEEE));
     });
 
-    test('accepts a colour as a packed ARGB int', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b",
-                       "style": { "backgroundColor": 4294967295 } } }
-      '''));
+    test('a minimal campaign needs only an id, type, trigger and some text', () {
+      final campaign = one(minimal())!;
 
-      expect(campaigns.single.message.style.backgroundColor, const Color(0xFFFFFFFF));
+      expect(campaign.message.body, 'body');
+      expect(campaign.priority, 0);
+      expect(campaign.repeatable, isFalse);
+      expect(campaign.expiresAt, isNull);
+      expect(campaign.dispatchId, isNull);
+    });
+  });
+
+  group('the content and locale split', () {
+    test('pairs buttons by id across the two blocks', () {
+      final buttons = one(minimal(
+        content: '''
+          { "buttons": [ { "id": "b1", "action": {"type":"dismiss"} },
+                         { "id": "b2", "action": {"type":"dismiss"} } ] }
+        ''',
+        locale: '''
+          { "message": "body",
+            "buttons": [ { "id": "b2", "text": "Second" },
+                         { "id": "b1", "text": "First" } ] }
+        ''',
+      ))!.message.buttons;
+
+      expect(buttons.map((b) => b.id), ['b1', 'b2'],
+          reason: 'content order decides layout order, not locale order');
+      expect(buttons.map((b) => b.text), ['First', 'Second']);
     });
 
-    test('coerces non-string extras rather than dropping them', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b",
-                       "extras": { "n": 42, "b": true, "s": "x" } } }
-      '''));
+    test('drops a styled button with no translated label', () {
+      final buttons = one(minimal(
+        content: '''
+          { "buttons": [ { "id": "b1", "action": {"type":"dismiss"} },
+                         { "id": "b2", "action": {"type":"dismiss"} } ] }
+        ''',
+        locale: '{"message":"body","buttons":[{"id":"b1","text":"Only"}]}',
+      ))!.message.buttons;
 
-      expect(campaigns.single.message.extras, {'n': '42', 'b': 'true', 's': 'x'});
+      expect(buttons.map((b) => b.id), ['b1'],
+          reason: 'a button with no text has nothing to render');
+    });
+
+    test('drops a button with no id, which could never be reported', () {
+      final buttons = one(minimal(
+        content: '{"buttons":[{"action":{"type":"dismiss"}}]}',
+        locale: '{"message":"body","buttons":[{"id":"b1","text":"x"}]}',
+      ))!.message.buttons;
+
+      expect(buttons, isEmpty);
     });
 
     test('keeps the first two buttons when more are provided', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b", "buttons": [
-            { "text": "one", "action": { "type": "dismiss" } },
-            { "text": "two", "action": { "type": "dismiss" } },
-            { "text": "three", "action": { "type": "dismiss" } } ] } }
-      '''));
+      final buttons = one(minimal(
+        content: '''
+          { "buttons": [ {"id":"b1","action":{"type":"dismiss"}},
+                         {"id":"b2","action":{"type":"dismiss"}},
+                         {"id":"b3","action":{"type":"dismiss"}} ] }
+        ''',
+        locale: '''
+          { "message": "body", "buttons": [ {"id":"b1","text":"1"},
+            {"id":"b2","text":"2"}, {"id":"b3","text":"3"} ] }
+        ''',
+      ))!.message.buttons;
 
-      expect(campaigns.single.message.buttons.map((b) => b.text), ['one', 'two']);
+      expect(buttons.map((b) => b.id), ['b1', 'b2']);
     });
 
-    test('defaults a button id to its position when absent', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b", "buttons": [
-            { "text": "one", "action": { "type": "dismiss" } },
-            { "text": "two", "action": { "type": "dismiss" } } ] } }
-      '''));
-
-      expect(campaigns.single.message.buttons.map((b) => b.id), [0, 1]);
-    });
-
-    test('degrades an unknown action type to dismiss', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b", "buttons": [
-            { "text": "x", "action": { "type": "send_telepathy" } } ] } }
-      '''));
-
-      expect(campaigns.single.message.buttons.single.action, isA<GameballDismissAction>());
-    });
-
-    test('degrades open_url with no url to dismiss', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b", "buttons": [
-            { "text": "x", "action": { "type": "open_url" } } ] } }
-      '''));
-
-      expect(campaigns.single.message.buttons.single.action, isA<GameballDismissAction>());
-    });
-
-    test('ignores a malformed colour and leaves the field null', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b",
-                       "style": { "backgroundColor": "not-a-colour" } } }
-      '''));
-
-      expect(campaigns.single.message.style.backgroundColor, isNull);
-    });
-
-    test('treats a non-positive autoDismissAfterMs as no auto-dismiss', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b", "autoDismissAfterMs": 0 } }
-      '''));
-
-      expect(campaigns.single.message.autoDismissAfter, isNull);
+    test('reads the message body from locale.message', () {
+      expect(one(minimal(locale: '{"message":"from message"}'))!.message.body,
+          'from message');
     });
   });
 
-  group('parseCampaignsJson — Braze modal layouts', () {
-    test('image-only: an imageUrl alone is enough, with no text at all', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal",
-                       "imageUrl": "https://cdn.example.com/promo.png",
-                       "action": { "type": "open_url", "url": "app://sale" } } }
-      '''));
-
-      final m = campaigns.single.message;
-      expect(m.imageUrl, 'https://cdn.example.com/promo.png');
-      expect(m.body, isNull);
-      expect(m.header, isNull);
-      expect(m.clickAction, isA<GameballOpenUrlAction>());
+  group('messageType', () {
+    test('2 is a modal', () {
+      expect(one(minimal())!.message.type, GameballMessageType.modal);
     });
 
-    test('a header with no body is enough to render', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "header": "Gold unlocked" } }
-      '''));
+    for (final (number, name) in [(1, 'slideup'), (3, 'fullscreen'),
+        (4, 'htmlFullscreen'), (5, 'emailCapture'), (99, 'unknown')]) {
+      test('$number ($name) is kept as unsupported, not dropped', () {
+        final campaign = parse('''
+          { "campaignId": 1, "messageType": $number,
+            "trigger": {"type":"session_start"},
+            "content": {}, "locale": {"message":"body"} }
+        ''').campaigns.single;
 
-      expect(campaigns.single.message.header, 'Gold unlocked');
-      expect(campaigns.single.message.body, isNull);
+        expect(campaign.message.type, GameballMessageType.unsupported,
+            reason: 'kept so the evaluator can skip it and let a usable '
+                'lower-priority campaign win');
+      });
+    }
+  });
+
+  group('contentMode', () {
+    test('prerendered is accepted', () {
+      expect(one(minimal(extras: '"contentMode": "prerendered",')), isNotNull);
     });
 
-    test('text layout: no message action means the surface is not tappable', () {
-      final campaigns = parseCampaignsJson(payload());
-
-      expect(campaigns.single.message.clickAction, isNull);
+    test('an absent mode is accepted', () {
+      expect(one(minimal()), isNotNull);
     });
 
-    test('a message-level dismiss action is honoured', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b",
-                       "action": { "type": "dismiss" } } }
-      '''));
+    test('an unknown mode drops the campaign', () {
+      expect(one(minimal(extras: '"contentMode": "server_rendered",')), isNull,
+          reason: 'a future mode would make every content field mean something '
+              'else, so rendering it as if it were prerendered would be wrong');
+    });
+  });
 
-      expect(campaigns.single.message.clickAction, isA<GameballDismissAction>());
+  group('closeBehaviour', () {
+    test('both offers the close button and the scrim', () {
+      final m = one(minimal(content: '{"closeBehaviour":"both"}'))!.message;
+
+      expect(m.showCloseButton, isTrue);
+      expect(m.dismissOnScrimTap, isTrue);
     });
 
-    test('an unusable message action leaves the surface untappable', () {
-      // Unlike a button, where an unusable action degrades to dismiss: silently
-      // turning the whole message into a close button would be worse.
-      for (final action in <String>[
-        '{ "type": "open_url" }',
-        '{ "type": "send_telepathy" }',
-        '"not-an-object"',
-      ]) {
-        final campaigns = parseCampaignsJson(payload(campaigns: '''
-          { "id": "c", "trigger": { "type": "session_start" },
-            "message": { "id": "m", "type": "modal", "body": "b",
-                         "action": $action } }
-        '''));
+    test('button offers only the close button', () {
+      final m = one(minimal(content: '{"closeBehaviour":"button"}'))!.message;
 
-        expect(campaigns.single.message.clickAction, isNull,
-            reason: 'action $action must not make the message tappable');
+      expect(m.showCloseButton, isTrue);
+      expect(m.dismissOnScrimTap, isFalse);
+    });
+
+    test('swipe offers only the scrim', () {
+      final m = one(minimal(content: '{"closeBehaviour":"swipe"}'))!.message;
+
+      expect(m.showCloseButton, isFalse);
+      expect(m.dismissOnScrimTap, isTrue);
+    });
+
+    test('an absent or unknown value offers both', () {
+      expect(one(minimal())!.message.showCloseButton, isTrue);
+      final unknown =
+          one(minimal(content: '{"closeBehaviour":"telepathy"}'))!.message;
+      expect(unknown.showCloseButton, isTrue);
+      expect(unknown.dismissOnScrimTap, isTrue,
+          reason: 'a message offering no way out traps the user in the app');
+    });
+  });
+
+  group('triggers', () {
+    test('parses session_start', () {
+      expect(one(minimal())!.trigger, isA<GameballSessionStartTrigger>());
+    });
+
+    test('parses an event trigger by name, ignoring the numeric id', () {
+      final trigger = one(minimal(
+        trigger: '{"type":"event","eventId":812,"eventName":"add_to_cart"}',
+      ))!.trigger as GameballCustomEventTrigger;
+
+      expect(trigger.eventName, 'add_to_cart');
+    });
+
+    test('accepts custom_event as an alias for event', () {
+      final trigger = one(minimal(
+        trigger: '{"type":"custom_event","eventName":"x"}',
+      ))!.trigger as GameballCustomEventTrigger;
+
+      expect(trigger.eventName, 'x');
+    });
+
+    test('drops an event trigger with only a numeric id', () {
+      expect(
+        one(minimal(trigger: '{"type":"event","eventId":812}')),
+        isNull,
+        reason: 'the id is meaningless on the device — there is nothing to match '
+            'a locally logged event name against',
+      );
+    });
+
+    test('drops an unknown trigger type', () {
+      expect(one(minimal(trigger: '{"type":"push_click"}')), isNull);
+    });
+
+    test('drops a campaign with no trigger', () {
+      expect(one('{"campaignId":1,"messageType":2,"locale":{"message":"b"}}'),
+          isNull);
+    });
+
+    test('reads repeatable and minIntervalSeconds', () {
+      final campaign = one(minimal(
+        trigger: '{"type":"session_start","repeatable":true,'
+            '"minIntervalSeconds":45}',
+      ))!;
+
+      expect(campaign.repeatable, isTrue);
+      expect(campaign.minInterval, const Duration(seconds: 45));
+    });
+
+    test('treats a zero interval as none', () {
+      final campaign = one(minimal(
+        trigger: '{"type":"session_start","repeatable":true,'
+            '"minIntervalSeconds":0}',
+      ))!;
+
+      expect(campaign.minInterval, isNull,
+          reason: 'zero means every occurrence may display');
+    });
+  });
+
+  group('metadata filters', () {
+    GameballCustomEventTrigger? eventTrigger(String filters) {
+      final campaign = one(minimal(
+        trigger: '{"type":"event","eventName":"e","metadataFilters":$filters}',
+      ));
+      return campaign?.trigger as GameballCustomEventTrigger?;
+    }
+
+    test('reads the property name from metadataKey', () {
+      final t = eventTrigger(
+          '[{"metadataId":1,"metadataKey":"price","operator":"greaterThan",'
+          '"value":100}]')!;
+
+      expect(t.filters.single.property, 'price');
+      expect(t.filters.single.operator, GameballFilterOperator.greaterThan);
+      expect(t.filters.single.value, 100);
+    });
+
+    test('reads it from metadataName too, since the spelling was agreed verbally',
+        () {
+      final t = eventTrigger(
+          '[{"metadataId":1,"metadataName":"price","operator":"is",'
+          '"value":"x"}]')!;
+
+      expect(t.filters.single.property, 'price');
+    });
+
+    test('drops the whole campaign when a filter has no name', () {
+      expect(
+        eventTrigger('[{"metadataId":4051,"operator":"is","value":"x"}]'),
+        isNull,
+        reason: 'dropping only the filter would widen the campaign — showing a '
+            '"spent over \$100" message to everyone — which is worse than not '
+            'showing it at all',
+      );
+    });
+
+    test('maps the backend operator names', () {
+      expect(
+        eventTrigger('[{"metadataKey":"a","operator":"Is","value":1}]')!
+            .filters
+            .single
+            .operator,
+        GameballFilterOperator.equals,
+      );
+      expect(
+        eventTrigger('[{"metadataKey":"a","operator":"IsNot","value":1}]')!
+            .filters
+            .single
+            .operator,
+        GameballFilterOperator.notEquals,
+      );
+    });
+
+    test('accepts our own operator aliases', () {
+      for (final alias in ['equals', 'eq', '==']) {
+        expect(
+          eventTrigger('[{"metadataKey":"a","operator":"$alias","value":1}]')!
+              .filters
+              .single
+              .operator,
+          GameballFilterOperator.equals,
+          reason: 'alias "$alias" should parse',
+        );
       }
     });
 
+    test('drops a filter with an unusable operator, widening the campaign', () {
+      final t = eventTrigger(
+          '[{"metadataKey":"a","operator":"sounds_like","value":1}]')!;
+
+      expect(t.filters, isEmpty,
+          reason: 'a typo in one operator should not hide the campaign entirely');
+    });
+
+    test('drops a filter with no value', () {
+      expect(eventTrigger('[{"metadataKey":"a","operator":"is"}]')!.filters,
+          isEmpty);
+    });
+
+    test('drops the campaign when the logical operator is not AND', () {
+      final campaign = one(minimal(
+        trigger: '{"type":"event","eventName":"e",'
+            '"metadataLogicalOperator":"Or",'
+            '"metadataFilters":[{"metadataKey":"a","operator":"is","value":1}]}',
+      ));
+
+      expect(campaign, isNull,
+          reason: 'evaluating OR as AND would silently narrow the audience');
+    });
+
+    test('accepts an explicit And', () {
+      expect(
+        one(minimal(
+          trigger: '{"type":"event","eventName":"e",'
+              '"metadataLogicalOperator":"And",'
+              '"metadataFilters":[{"metadataKey":"a","operator":"is","value":1}]}',
+        )),
+        isNotNull,
+      );
+    });
+  });
+
+  group('expiry', () {
+    test('parses expiresAt as UTC', () {
+      final campaign =
+          one(minimal(extras: '"expiresAt": "2026-09-30T21:59:59Z",'))!;
+
+      expect(campaign.expiresAt, DateTime.utc(2026, 9, 30, 21, 59, 59));
+      expect(campaign.expiresAt!.isUtc, isTrue);
+    });
+
+    test('normalises a zoned timestamp to UTC', () {
+      final campaign =
+          one(minimal(extras: '"expiresAt": "2026-09-30T23:59:59+02:00",'))!;
+
+      expect(campaign.expiresAt, DateTime.utc(2026, 9, 30, 21, 59, 59));
+    });
+
+    test('a null or unparseable expiry means no expiry', () {
+      expect(one(minimal(extras: '"expiresAt": null,'))!.expiresAt, isNull);
+      expect(one(minimal(extras: '"expiresAt": "soon",'))!.expiresAt, isNull);
+    });
+
+    test('hasExpiredAt is inclusive of the expiry instant', () {
+      final campaign =
+          one(minimal(extras: '"expiresAt": "2026-09-30T21:59:59Z",'))!;
+
+      expect(campaign.hasExpiredAt(DateTime.utc(2026, 9, 30, 21, 59, 58)),
+          isFalse);
+      expect(campaign.hasExpiredAt(DateTime.utc(2026, 9, 30, 21, 59, 59)),
+          isTrue);
+    });
+  });
+
+  group('leniency', () {
+    test('matches enum-ish values case-insensitively', () {
+      final m = one(minimal(
+        trigger: '{"type":"SESSION_START"}',
+        content: '{"closeBehaviour":"BOTH","textAlignment":{"header":"CENTER"}}',
+      ))!.message;
+
+      expect(m.style.headerAlign, TextAlign.center);
+    });
+
+    test('accepts a colour as a packed ARGB int', () {
+      final m = one(minimal(content: '{"colors":{"background":4294967295}}'))!
+          .message;
+
+      expect(m.style.backgroundColor, const Color(0xFFFFFFFF));
+    });
+
+    test('ignores a malformed colour', () {
+      final m =
+          one(minimal(content: '{"colors":{"background":"not-a-colour"}}'))!
+              .message;
+
+      expect(m.style.backgroundColor, isNull);
+    });
+
+    test('coerces non-string extras rather than dropping them', () {
+      final m = one(minimal(
+        content: '{"extras":{"count":3,"flag":true,"name":"x"}}',
+      ))!.message;
+
+      expect(m.extras, {'count': '3', 'flag': 'true', 'name': 'x'});
+    });
+
+    test('treats a non-positive autoDismissSeconds as no auto-dismiss', () {
+      expect(one(minimal(content: '{"autoDismissSeconds":0}'))!
+          .message
+          .autoDismissAfter, isNull);
+      expect(one(minimal(content: '{"autoDismissSeconds":-3}'))!
+          .message
+          .autoDismissAfter, isNull);
+    });
+
+    test('rounds a fractional autoDismissSeconds', () {
+      expect(
+        one(minimal(content: '{"autoDismissSeconds":1.5}'))!
+            .message
+            .autoDismissAfter,
+        const Duration(milliseconds: 1500),
+      );
+    });
+
+    test('degrades an unknown button action to dismiss', () {
+      final button = one(minimal(
+        content: '{"buttons":[{"id":"b1","action":{"type":"teleport"}}]}',
+        locale: '{"message":"b","buttons":[{"id":"b1","text":"Go"}]}',
+      ))!.message.buttons.single;
+
+      expect(button.action, isA<GameballDismissAction>(),
+          reason: 'a working close beats a dead button');
+    });
+
+    test('degrades open_url with no url to dismiss', () {
+      final button = one(minimal(
+        content: '{"buttons":[{"id":"b1","action":{"type":"open_url"}}]}',
+        locale: '{"message":"b","buttons":[{"id":"b1","text":"Go"}]}',
+      ))!.message.buttons.single;
+
+      expect(button.action, isA<GameballDismissAction>());
+    });
+  });
+
+  group('modal layouts', () {
+    test('image-only: an imageUrl alone is enough, with no text', () {
+      final m = one(minimal(
+        content: '{"imageUrl":"https://cdn/promo.png"}',
+        locale: '{}',
+      ))!.message;
+
+      expect(m.header, isNull);
+      expect(m.body, isNull);
+      expect(m.imageUrl, 'https://cdn/promo.png');
+    });
+
+    test('a header with no body is enough to render', () {
+      expect(one(minimal(locale: '{"header":"Only a header"}'))!.message.header,
+          'Only a header');
+    });
+
+    test('no message action means the surface is not tappable', () {
+      expect(one(minimal())!.message.clickAction, isNull);
+    });
+
+    test('a message-level dismiss action is honoured', () {
+      expect(one(minimal(content: '{"action":{"type":"dismiss"}}'))!
+          .message
+          .clickAction, isA<GameballDismissAction>());
+    });
+
+    test('an unusable message action leaves the surface untappable', () {
+      expect(
+        one(minimal(content: '{"action":{"type":"navigate"}}'))!
+            .message
+            .clickAction,
+        isNull,
+        reason: 'silently turning the whole message into a close button would be '
+            'worse than doing nothing',
+      );
+    });
+
     test('the message action is independent of button actions', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b",
-                       "action": { "type": "open_url", "url": "app://body" },
-                       "buttons": [ { "text": "Go",
-                         "action": { "type": "open_url", "url": "app://button" } } ] } }
-      '''));
+      final m = one(minimal(
+        content: '''
+          { "action": {"type":"navigate","route":"/a"},
+            "buttons": [{"id":"b1","action":{"type":"open_url",
+                         "url":"https://b"}}] }
+        ''',
+        locale: '{"message":"b","buttons":[{"id":"b1","text":"Go"}]}',
+      ))!.message;
 
-      final m = campaigns.single.message;
-      expect((m.clickAction! as GameballOpenUrlAction).url, 'app://body');
-      expect((m.buttons.single.action as GameballOpenUrlAction).url, 'app://button');
+      expect((m.clickAction! as GameballNavigateAction).route, '/a');
+      expect((m.buttons.single.action as GameballOpenUrlAction).url,
+          'https://b');
     });
   });
 
-  group('parseCampaignsJson — purchase triggers and filters', () {
-    test('parses any_purchase', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "any_purchase" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      '''));
-
-      expect(campaigns.single.trigger, isA<GameballAnyPurchaseTrigger>());
+  group('drop what can never work', () {
+    test('drops a campaign with no campaignId', () {
+      expect(
+        one('{"messageType":2,"trigger":{"type":"session_start"},'
+            '"locale":{"message":"b"}}'),
+        isNull,
+      );
     });
 
-    test('parses specific_purchase with a productId', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "specific_purchase", "productId": "sku-001" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      '''));
-
-      final trigger = campaigns.single.trigger as GameballSpecificPurchaseTrigger;
-      expect(trigger.productId, 'sku-001');
-      expect(trigger.filters, isEmpty);
-    });
-
-    test('parses specific_purchase with only filters', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "specific_purchase", "filters": [
-            { "property": "price", "operator": "greater_than", "value": 100 } ] },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      '''));
-
-      final trigger = campaigns.single.trigger as GameballSpecificPurchaseTrigger;
-      expect(trigger.productId, isNull);
-      expect(trigger.filters.single.property, 'price');
-      expect(trigger.filters.single.operator, GameballFilterOperator.greaterThan);
-      expect(trigger.filters.single.value, 100);
-    });
-
-    test('drops specific_purchase with neither productId nor filters', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "specific_purchase" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      ''')), isEmpty,
-          reason: 'it would be indistinguishable from any_purchase');
-    });
-
-    test('parses filters on a custom event too', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "custom_event", "eventName": "add_to_cart",
-            "filters": [ { "property": "price", "operator": ">", "value": 100 } ] },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      '''));
-
-      final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
-      expect(trigger.filters.single.operator, GameballFilterOperator.greaterThan);
-    });
-
-    test('accepts operator aliases', () {
-      const aliases = <String, GameballFilterOperator>{
-        'equals': GameballFilterOperator.equals,
-        'eq': GameballFilterOperator.equals,
-        '==': GameballFilterOperator.equals,
-        'not_equals': GameballFilterOperator.notEquals,
-        'gt': GameballFilterOperator.greaterThan,
-        'gte': GameballFilterOperator.greaterThanOrEqual,
-        '<': GameballFilterOperator.lessThan,
-        'lte': GameballFilterOperator.lessThanOrEqual,
-        'CONTAINS': GameballFilterOperator.contains,
-      };
-
-      aliases.forEach((alias, expected) {
-        final campaigns = parseCampaignsJson(payload(campaigns: '''
-          { "id": "c", "trigger": { "type": "custom_event", "eventName": "e",
-              "filters": [ { "property": "p", "operator": "$alias", "value": 1 } ] },
-            "message": { "id": "m", "type": "modal", "body": "b" } }
-        '''));
-
-        final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
-        expect(trigger.filters.single.operator, expected,
-            reason: 'alias "$alias"');
-      });
-    });
-
-    test('an unusable filter is dropped, widening rather than narrowing', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "custom_event", "eventName": "e",
-            "filters": [
-              { "property": "p", "operator": "sorta_equals", "value": 1 },
-              { "operator": "eq", "value": 1 },
-              { "property": "q", "operator": "eq" },
-              { "property": "ok", "operator": "eq", "value": 5 } ] },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      '''));
-
-      final trigger = campaigns.single.trigger as GameballCustomEventTrigger;
-      expect(trigger.filters, hasLength(1),
-          reason: 'dropping the whole campaign would hide one typo behind a '
-              'message that simply never appears');
-      expect(trigger.filters.single.property, 'ok');
-    });
-  });
-
-  group('parseCampaignsJson — keep but skip', () {
-    test('keeps an unknown message type as unsupported', () {
-      final campaigns = parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "hologram", "body": "b" } }
-      '''));
-
-      expect(campaigns, hasLength(1));
-      expect(campaigns.single.message.type, GameballMessageType.unsupported);
-    });
-  });
-
-  group('parseCampaignsJson — drop what can never work', () {
-    test('drops a campaign with an unknown trigger type', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "push_click" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      ''')), isEmpty);
-    });
-
-    test('drops a custom_event trigger with no eventName', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "custom_event" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      ''')), isEmpty);
-    });
-
-    test('drops a campaign with no id', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "body": "b" } }
-      ''')), isEmpty);
+    test('drops a campaign whose campaignId is not a number', () {
+      expect(
+        one('{"campaignId":"abc","messageType":2,'
+            '"trigger":{"type":"session_start"},"locale":{"message":"b"}}'),
+        isNull,
+      );
     });
 
     test('drops a message with nothing to render', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal" } }
-      ''')), isEmpty);
+      expect(one(minimal(locale: '{}')), isNull);
     });
 
     test('drops a message whose only text fields are empty strings', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "id": "m", "type": "modal", "header": "", "body": "",
-                       "imageUrl": "" } }
-      ''')), isEmpty);
-    });
-
-    test('drops a message with no id', () {
-      expect(parseCampaignsJson(payload(campaigns: '''
-        { "id": "c", "trigger": { "type": "session_start" },
-          "message": { "type": "modal", "body": "b" } }
-      ''')), isEmpty);
+      expect(one(minimal(locale: '{"header":"","message":""}')), isNull);
     });
 
     test('keeps valid campaigns alongside dropped ones', () {
-      final campaigns = parseCampaignsJson(
-        '{"campaigns":[$_oneModalCampaign,'
-        '{"id":"bad","trigger":{"type":"push_click"},'
-        '"message":{"id":"m","type":"modal","body":"b"}}]}',
-      );
+      final campaigns = parse(
+        '${minimal(campaignId: 1)},'
+        '{"campaignId":2,"messageType":2,"trigger":{"type":"nope"},'
+        '"locale":{"message":"b"}},'
+        '${minimal(campaignId: 3)}',
+      ).campaigns;
 
-      expect(campaigns.map((c) => c.id), ['cmp_a']);
+      expect(campaigns.map((c) => c.campaignId), [1, 3]);
     });
   });
 
-  group('parseCampaignsJson — never throws', () {
+  group('never throws', () {
     test('returns empty for invalid JSON', () {
-      expect(parseCampaignsJson('not json at all'), isEmpty);
+      expect(parseSyncResponse('{oh no').campaigns, isEmpty);
     });
 
     test('returns empty when the root is not an object', () {
-      expect(parseCampaignsJson('[1,2,3]'), isEmpty);
+      expect(parseSyncResponse('[1,2,3]').campaigns, isEmpty);
     });
 
-    test('returns empty when campaigns is missing', () {
-      expect(parseCampaignsJson('{}'), isEmpty);
+    test('returns empty when messages is missing', () {
+      expect(parseSyncResponse('{"response":{}}').campaigns, isEmpty);
     });
 
-    test('returns empty when campaigns is not a list', () {
-      expect(parseCampaignsJson('{"campaigns": 5}'), isEmpty);
+    test('returns empty when messages is not a list', () {
+      expect(
+          parseSyncResponse('{"response":{"messages":"x"}}').campaigns, isEmpty);
     });
 
-    test('skips non-object entries in campaigns', () {
-      expect(parseCampaignsJson('{"campaigns": [1, "two", null]}'), isEmpty);
+    test('skips non-object entries in messages', () {
+      expect(parseSyncResponse('{"response":{"messages":[1,"x",null]}}')
+          .campaigns, isEmpty);
     });
   });
 
   group('parseColor', () {
     test('parses 6-digit hex as fully opaque', () {
-      expect(parseColor('#6C4DF6'), const Color(0xFF6C4DF6));
+      expect(parseColor('#112233'), const Color(0xFF112233));
     });
 
     test('parses 8-digit hex with alpha', () {
-      expect(parseColor('#8000FF00'), const Color(0x8000FF00));
+      expect(parseColor('#80112233'), const Color(0x80112233));
     });
 
     test('parses hex without a leading hash', () {
-      expect(parseColor('FFFFFF'), const Color(0xFFFFFFFF));
+      expect(parseColor('112233'), const Color(0xFF112233));
     });
 
     test('parses a packed ARGB int', () {
@@ -469,166 +687,138 @@ void main() {
     });
 
     test('returns null for junk', () {
-      expect(parseColor('zzz'), isNull);
-      expect(parseColor('#12345'), isNull);
+      expect(parseColor('nope'), isNull);
       expect(parseColor(null), isNull);
-      expect(parseColor(true), isNull);
+      expect(parseColor('#12345'), isNull);
     });
   });
 
   group('triggerMatches', () {
     test('matches session start to session start', () {
       expect(
-        triggerMatches(const GameballSessionStartTrigger(), const GameballSessionStartOccurrence()),
+        triggerMatches(const GameballSessionStartTrigger(),
+            const GameballSessionStartOccurrence()),
         isTrue,
       );
     });
 
-    test('matches custom events with the same name', () {
+    test('matches events with the same name', () {
       expect(
-        triggerMatches(
-          const GameballCustomEventTrigger('a'),
-          const GameballCustomEventOccurrence('a'),
-        ),
+        triggerMatches(const GameballCustomEventTrigger('a'),
+            const GameballCustomEventOccurrence('a')),
         isTrue,
       );
     });
 
-    test('does not match custom events with different names', () {
+    test('does not match events with different names', () {
       expect(
-        triggerMatches(
-          const GameballCustomEventTrigger('a'),
-          const GameballCustomEventOccurrence('b'),
-        ),
+        triggerMatches(const GameballCustomEventTrigger('a'),
+            const GameballCustomEventOccurrence('b')),
         isFalse,
       );
     });
 
     test('does not match across trigger types', () {
       expect(
-        triggerMatches(
-          const GameballSessionStartTrigger(),
-          const GameballCustomEventOccurrence('a'),
-        ),
+        triggerMatches(const GameballSessionStartTrigger(),
+            const GameballCustomEventOccurrence('a')),
         isFalse,
       );
     });
 
-    test('any purchase matches any purchase occurrence', () {
-      expect(
-        triggerMatches(
-          const GameballAnyPurchaseTrigger(),
-          const GameballPurchaseOccurrence(
-            productId: 'sku-001',
-            price: 10,
-            currency: 'USD',
-          ),
-        ),
-        isTrue,
-      );
-    });
-
-    test('specific purchase matches on productId', () {
-      const occurrence = GameballPurchaseOccurrence(
-        productId: 'sku-001',
-        price: 10,
-        currency: 'USD',
-      );
-
-      expect(
-        triggerMatches(
-          const GameballSpecificPurchaseTrigger(productId: 'sku-001'),
-          occurrence,
-        ),
-        isTrue,
-      );
-      expect(
-        triggerMatches(
-          const GameballSpecificPurchaseTrigger(productId: 'sku-999'),
-          occurrence,
-        ),
-        isFalse,
-      );
-    });
-
-    test('purchase built-ins are filterable like any other property', () {
-      const occurrence = GameballPurchaseOccurrence(
-        productId: 'sku-001',
-        price: 189.0,
-        currency: 'USD',
-        quantity: 2,
-      );
-
-      expect(
-        triggerMatches(
-          const GameballSpecificPurchaseTrigger(filters: [
-            GameballPropertyFilter(
-              property: 'price',
-              operator: GameballFilterOperator.greaterThan,
-              value: 100,
-            ),
-          ]),
-          occurrence,
-        ),
-        isTrue,
-      );
-      expect(
-        triggerMatches(
-          const GameballSpecificPurchaseTrigger(filters: [
-            GameballPropertyFilter(
-              property: 'price',
-              operator: GameballFilterOperator.greaterThan,
-              value: 500,
-            ),
-          ]),
-          occurrence,
-        ),
-        isFalse,
-      );
-    });
-
-    test('a custom event filter narrows an otherwise matching name', () {
-      const trigger = GameballCustomEventTrigger('add_to_cart', filters: [
+    test('a filter narrows an otherwise matching name', () {
+      const trigger = GameballCustomEventTrigger('cart', filters: [
         GameballPropertyFilter(
-          property: 'price',
+          property: 'value',
           operator: GameballFilterOperator.greaterThan,
           value: 100,
         ),
       ]);
 
       expect(
-        triggerMatches(
-          trigger,
-          const GameballCustomEventOccurrence('add_to_cart',
-              properties: <String, Object>{'price': 189.0}),
-        ),
+        triggerMatches(trigger,
+            const GameballCustomEventOccurrence('cart',
+                properties: {'value': 200})),
         isTrue,
       );
       expect(
-        triggerMatches(
-          trigger,
-          const GameballCustomEventOccurrence('add_to_cart',
-              properties: <String, Object>{'price': 12.99}),
-        ),
+        triggerMatches(trigger,
+            const GameballCustomEventOccurrence('cart',
+                properties: {'value': 50})),
         isFalse,
       );
     });
 
     test('a filter on a property the occurrence lacks never matches', () {
+      const trigger = GameballCustomEventTrigger('cart', filters: [
+        GameballPropertyFilter(
+          property: 'missing',
+          operator: GameballFilterOperator.equals,
+          value: 1,
+        ),
+      ]);
+
+      expect(
+        triggerMatches(trigger, const GameballCustomEventOccurrence('cart')),
+        isFalse,
+      );
+    });
+  });
+
+  group('purchases are events', () {
+    test('a purchase occurrence matches an event trigger named purchase', () {
+      final occurrence = GameballCustomEventOccurrence.purchase(
+        productId: 'sku-1',
+        price: 42.0,
+        currency: 'USD',
+      );
+
       expect(
         triggerMatches(
-          const GameballCustomEventTrigger('e', filters: [
-            GameballPropertyFilter(
-              property: 'tier',
-              operator: GameballFilterOperator.equals,
-              value: 'gold',
-            ),
-          ]),
-          const GameballCustomEventOccurrence('e'),
-        ),
-        isFalse,
-        reason: 'a filter is a requirement, so a missing property is a failure',
+            const GameballCustomEventTrigger(gameballPurchaseEventName),
+            occurrence),
+        isTrue,
+        reason: 'the backend has no purchase trigger type, so a purchase must '
+            'satisfy an event trigger or purchase campaigns never fire',
       );
+    });
+
+    test('built-ins are filterable like any other property', () {
+      final occurrence = GameballCustomEventOccurrence.purchase(
+        productId: 'sku-1',
+        price: 150.0,
+        currency: 'USD',
+        quantity: 2,
+      );
+
+      expect(occurrence.filterableProperties, {
+        'productId': 'sku-1',
+        'price': 150.0,
+        'currency': 'USD',
+        'quantity': 2,
+      });
+
+      const overHundred =
+          GameballCustomEventTrigger(gameballPurchaseEventName, filters: [
+        GameballPropertyFilter(
+          property: 'price',
+          operator: GameballFilterOperator.greaterThan,
+          value: 100,
+        ),
+      ]);
+      expect(triggerMatches(overHundred, occurrence), isTrue);
+    });
+
+    test('a caller property of the same name wins over a built-in', () {
+      final occurrence = GameballCustomEventOccurrence.purchase(
+        productId: 'sku-1',
+        price: 10.0,
+        currency: 'USD',
+        properties: const {'price': 999},
+      );
+
+      expect(occurrence.filterableProperties['price'], 999,
+          reason: 'the caller\'s data is the more specific of the two');
     });
   });
 }
