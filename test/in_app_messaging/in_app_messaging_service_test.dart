@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
+import 'package:gameball_sdk/in_app_messaging/analytics/message_event.dart';
 import 'package:gameball_sdk/in_app_messaging/evaluation/frequency_cap.dart';
 import 'package:gameball_sdk/in_app_messaging/in_app_messaging_service.dart';
 import 'package:gameball_sdk/in_app_messaging/models/gameball_audience.dart';
@@ -95,28 +96,37 @@ class RecordingNavigator implements MessageNavigator {
 }
 
 class RecordingAnalytics implements MessageAnalytics {
-  final List<String> impressions = <String>[];
-  final List<String> clicks = <String>[];
-  final List<String> bodyClicks = <String>[];
+  final List<GameballMessageEvent> events = <GameballMessageEvent>[];
+  int flushes = 0;
+  int loads = 0;
+
+  List<String> _ids(GameballMessageEventType type) => events
+      .where((e) => e.type == type)
+      .map((e) => '${e.campaignId}/${e.messageId}')
+      .toList();
+
+  List<String> get impressions => _ids(GameballMessageEventType.impression);
+  List<String> get bodyClicks => _ids(GameballMessageEventType.click);
+  List<String> get dismissals => _ids(GameballMessageEventType.dismiss);
+
+  List<String> get clicks => events
+      .where((e) => e.type == GameballMessageEventType.buttonClick)
+      .map((e) => '${e.campaignId}/${e.messageId}/${e.buttonId}')
+      .toList();
 
   @override
-  void logImpression(GameballInAppMessage message, {required String campaignId}) {
-    impressions.add('$campaignId/${message.id}');
-  }
+  Future<void> load() async => loads++;
 
   @override
-  void logClick(GameballInAppMessage message, {required String campaignId}) {
-    bodyClicks.add('$campaignId/${message.id}');
-  }
+  void log(GameballMessageEvent event) => events.add(event);
 
   @override
-  void logButtonClick(
-    GameballInAppMessage message, {
-    required String campaignId,
-    required int buttonId,
-  }) {
-    clicks.add('$campaignId/${message.id}/$buttonId');
-  }
+  Future<void> flush() async => flushes++;
+
+  @override
+  void dispose() => disposals++;
+
+  int disposals = 0;
 }
 
 // ------------------------------------------------------------------- fixtures
@@ -129,11 +139,13 @@ InAppMessageCampaign campaign(
   int priority = 0,
   List<GameballMessageButton> buttons = const <GameballMessageButton>[],
   GameballClickAction? clickAction,
+  String? analyticsToken,
 }) {
   return InAppMessageCampaign(
     id: id,
     trigger: trigger,
     priority: priority,
+    analyticsToken: analyticsToken,
     message: GameballInAppMessage(
       id: 'msg_$id',
       type: GameballMessageType.modal,
@@ -511,6 +523,90 @@ void main() {
 
       expect(h.analytics.clicks, ['a/msg_a/4']);
       expect(h.presenter.isShowing, isFalse);
+    });
+  });
+
+  group('dismissal — the event Braze has no equivalent of', () {
+    test('closing without interacting logs a dismiss', () async {
+      final h = build(campaigns: [campaign('a')]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.dismiss();
+
+      expect(h.analytics.impressions, ['a/msg_a']);
+      expect(h.analytics.dismissals, ['a/msg_a']);
+    });
+
+    test('a button tap suppresses the dismiss that follows it', () async {
+      const button =
+          GameballMessageButton(id: 0, text: 'Go', action: GameballDismissAction());
+      final h = build(campaigns: [campaign('a', buttons: const [button])]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapButton(button);
+
+      expect(h.analytics.clicks, ['a/msg_a/0']);
+      expect(h.analytics.dismissals, isEmpty,
+          reason: 'a tapped message was not ignored. Keeping these disjoint is '
+              'what makes impressions = clicks + dismissals an identity the '
+              'backend can rely on');
+    });
+
+    test('tapping the surface suppresses the dismiss too', () async {
+      final h = build(campaigns: [
+        campaign('a', clickAction: const GameballDismissAction()),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.presenter.tapMessage();
+
+      expect(h.analytics.bodyClicks, ['a/msg_a']);
+      expect(h.analytics.dismissals, isEmpty);
+    });
+
+    test('every event carries the campaign token and the injected clock',
+        () async {
+      final h = build(campaigns: [campaign('a', analyticsToken: 'tok_a')]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      expect(h.analytics.events.map((e) => e.analyticsToken),
+          ['tok_a', 'tok_a'],
+          reason: 'the token has to ride every event, not just the impression — '
+              'a click the backend cannot attribute to a variant is no better '
+              'than no click');
+      expect(h.analytics.events.map((e) => e.occurredAt), [t0, t0],
+          reason: 'timestamps come from the service clock, not the transport, so '
+              'they are the moment it happened and are testable');
+    });
+  });
+
+  group('analytics lifecycle', () {
+    test('pausing flushes, because the app may never resume', () async {
+      final h = build(campaigns: [campaign('a')]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.onAppPaused();
+
+      expect(h.analytics.flushes, 1);
+    });
+
+    test('stopping flushes and then stops scheduling', () async {
+      final h = build(campaigns: [campaign('a')]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.stop();
+
+      expect(h.analytics.flushes, 1);
+      expect(h.analytics.disposals, 1);
+    });
+
+    test('start recovers a previous run\'s unsent events', () async {
+      final h = build(campaigns: [campaign('a')]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.analytics.loads, 1);
     });
   });
 

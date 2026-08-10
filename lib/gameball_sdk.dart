@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
+import 'package:gameball_sdk/network/request_calls/send_message_events_request.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
 import 'package:gameball_sdk/utils/gameball_logger.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
@@ -13,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'in_app_messaging/analytics/batched_message_analytics.dart';
 import 'in_app_messaging/analytics/message_analytics.dart';
 import 'in_app_messaging/evaluation/frequency_cap.dart';
 import 'in_app_messaging/iam_log.dart';
@@ -60,6 +62,13 @@ class GameballApp extends StatelessWidget {
   /// The navigator key the current presenter is bound to, so a changed key can
   /// be detected and the presenter rebuilt.
   static GlobalKey<NavigatorState>? _inAppMessagingNavigatorKey;
+
+  /// Who analytics events are attributed to.
+  ///
+  /// Held here rather than captured in the sender closure because the analytics
+  /// buffer is built once, while `startInAppMessaging` may later run for a
+  /// different customer — a closure would keep sending under the first identity.
+  static String? _inAppMessagingCustomerId;
 
   /// Registered on first [startInAppMessaging] so warm resumes begin new
   /// sessions. Null for any client that never opts in.
@@ -277,6 +286,21 @@ class GameballApp extends StatelessWidget {
   /// [beforeDisplay] is consulted immediately before each message is shown, and
   /// can show, defer or discard it. Omit it to always show.
   ///
+  /// [sessionTimeout] is how long the app must be in the background before a
+  /// return to the foreground counts as a new session and fires the session-start
+  /// trigger again. Defaults to 30 seconds.
+  ///
+  /// Braze's native default is 10 seconds. Ours is deliberately longer, and
+  /// matched to the 30-second minimum interval between displays: because a message
+  /// can only be shown while the app is in the foreground, time-since-last-display
+  /// is always at least the time spent in the background, so aligning the two
+  /// guarantees a new session is never blocked by the display floor. Lowering this
+  /// below that floor reintroduces the gap Braze lives with, where a session-start
+  /// campaign is selected and then silently suppressed.
+  ///
+  /// Takes effect when messaging first starts. To change it later, call
+  /// [stopInAppMessaging] first.
+  ///
   /// Calling this again with a different [customerId] refetches campaigns and
   /// resets frequency caps. Calling it with the same one does nothing.
   void startInAppMessaging({
@@ -285,6 +309,7 @@ class GameballApp extends StatelessWidget {
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
     GameballOnNavigate? onNavigate,
+    Duration sessionTimeout = defaultSessionTimeout,
   }) {
     if (isNullOrEmpty(_apiKey)) {
       iamLog('startInAppMessaging ignored: API key is not initialized. '
@@ -301,12 +326,23 @@ class GameballApp extends StatelessWidget {
       _inAppMessaging = null;
     }
     _inAppMessagingNavigatorKey = navigatorKey;
+    // Read by the analytics sender on every batch rather than captured once, so a
+    // later start() for a different customer attributes events correctly.
+    _inAppMessagingCustomerId = customerId;
+
+    if (_inAppMessaging != null && sessionTimeout != _inAppMessaging!.sessionTimeout) {
+      iamLog('sessionTimeout ignored: messaging is already running with '
+          '${_inAppMessaging!.sessionTimeout.inSeconds}s. Call '
+          'stopInAppMessaging() first to change it');
+    }
 
     final service = _inAppMessaging ??= InAppMessagingService(
       source: StubMessageSource(),
       presenter: OverlayPresenter(navigatorKey),
       frequencyCap: InMemoryFrequencyCap(),
-      analytics: LoggingMessageAnalytics(),
+      analytics: debugAnalytics ??
+          BatchedMessageAnalytics(send: _sendInAppMessageEvents),
+      sessionTimeout: sessionTimeout,
       isHostWidgetOpen: () => _dismissActiveWidget != null,
       // The host routes when it told us how; otherwise fall back to named
       // routes, which is right for a plain MaterialApp but cannot see the routes
@@ -330,6 +366,47 @@ class GameballApp extends StatelessWidget {
       customerId: customerId,
       beforeDisplay: beforeDisplay,
       onAction: onAction,
+    );
+  }
+
+  /// Ships one batch of in-app message analytics events.
+  ///
+  /// A plain static function so it can be handed to the analytics buffer as a
+  /// value: the buffer owns batching, persistence and retry, and this owns nothing
+  /// but the request. Returning false leaves the batch queued, which is why an
+  /// unconfigured SDK is a false rather than a drop — the events go out once
+  /// [init] and [startInAppMessaging] have run.
+  /// Replaces the analytics implementation. Tests only — never set this in an app.
+  ///
+  /// The end-to-end tests drive the module through this class's public API, which
+  /// is the point of them. Left alone they would post batches to the live API and
+  /// leave the ten-second flush timer pending, which a widget test rightly rejects.
+  @visibleForTesting
+  static MessageAnalytics? debugAnalytics;
+
+  static Future<GameballAnalyticsSendResult> _sendInAppMessageEvents(
+    List<Map<String, dynamic>> events,
+  ) async {
+    final customerId = _inAppMessagingCustomerId;
+    if (isNullOrEmpty(_apiKey) || customerId == null) {
+      // Retry rather than discard: the events are valid, we just cannot address
+      // them yet. They go out once init() and startInAppMessaging() have run.
+      return GameballAnalyticsSendResult.retry;
+    }
+
+    final language = handleLanguage(_lang, _customerPreferredLanguage);
+    return sendMessageEventsRequest(
+      <String, dynamic>{
+        'audience': <String, dynamic>{
+          'type': 'customer',
+          'customerId': customerId,
+        },
+        'events': events,
+      },
+      _apiKey,
+      language,
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
     );
   }
 

@@ -288,20 +288,40 @@ are answered by looking at one session-start response and one campaign event.
 - **Button ids are stable and carried on the button**, not positional — better than Braze's
   "Identifier for Reporting" convention.
 
-### 9.2 What is missing
+### 9.2 The gaps this audit found, and what happened to them
 
-| # | Gap | Detail |
+All eight are now closed or reclassified. The wire contract they produced is
+specified for the backend in
+`docs/integration/in-app-message-analytics-backend-handoff.md`.
+
+| # | Gap | Outcome |
 | --- | --- | --- |
-| 1 | **No endpoint** | `LoggingMessageAnalytics` writes to the debug log and nowhere else (`analytics/message_analytics.dart:29-49`). Nothing reaches a backend |
-| 2 | **No timestamp** | The interface passes `message` and `campaignId` only. Unique-impression dedup and conversion attribution both need an `occurredAt` |
-| 3 | **No correlation identity** | No token, no variant id. Plain `campaignId` + `messageId` |
-| 4 | **No batching, no persistence** | Synchronous per event. An HTTP call in the same shape would block on a slow network and lose events on app kill |
-| 5 | **Impression fires one frame early** | `onShown()` is called immediately after `overlay.insert(entry)` (`presentation/overlay_presenter.dart:58-59`) — before the frame paints, and before the image resolves. Braze's rule is "only when the message becomes visible". A message whose image never loads still counts |
-| 6 | **No dismissal event** | Same as Braze, so no parity gap — but it is cheap here and would be more than Braze offers |
-| 7 | **Body click requires an action** | `onMessagePressed` returns early when `clickAction == null`, so no click is logged (`in_app_messaging_service.dart:336-341`). Braze logs a body click on a buttonless message regardless. A tapped-but-inert message is invisible |
-| 8 | **`sessionTimeout` is not configurable** | `InAppMessagingService` accepts it, but `startInAppMessaging` never passes it (`gameball_sdk.dart:305-318`), so every host gets the 30s default with no override |
+| 1 | **No endpoint** | **Built.** `POST /api/v4.0/integrations/mobile/in-app-messages/events`, with a status-code policy that distinguishes retry from discard |
+| 2 | **No timestamp** | **Built.** `occurredAt`, ISO-8601 UTC, taken from the service's injected clock — so it is the moment it happened, and testable |
+| 3 | **No correlation identity** | **Built.** `analyticsToken` on the campaign, echoed verbatim on every event, never parsed |
+| 4 | **No batching, no persistence** | **Built.** `BatchedMessageAnalytics`: 10s cadence, immediate at 20 events, forced flush on background and on stop, outbox mirrored to disk after every change, 500-event ceiling |
+| 5 | **Impression fired one frame early** | **Fixed.** `onShown` now runs from a post-frame callback, guarded so a message dismissed before it paints logs nothing |
+| 6 | **No dismissal event** | **Built.** `dismiss`, suppressed when the user tapped anything, which makes at-most-one-terminal-event-per-impression an identity |
+| 7 | **Body click requires an action** | **Not a defect — this audit was wrong.** `_wrapTappable` (`presentation/in_app_message_modal.dart:148-155`) returns the child unwrapped when `clickAction == null`, so an inert message never receives a surface tap at all. The early return in the service is unreachable defensiveness, not a dropped event |
+| 8 | **`sessionTimeout` not configurable** | **Fixed.** A named parameter on `startInAppMessaging`, defaulting to 30s, with the reasoning from §10 in its doc comment. Passing a different value while messaging is already running logs rather than silently no-opping |
 
-Items 1–4 are the backend contract. Items 5–8 are ours alone and need no agreement.
+Two things worth keeping from the exercise. Gap 7 is a reminder that an audit of
+one's own code is still a hypothesis until the call site is read — the defensive
+branch looked like a dropped metric and was nothing of the kind. And gap 5 was
+real but was not the whole story: fixing the timing does not fix the fact that a
+message whose image never loads still counts, because the frame paints with a
+placeholder. That belongs to asset prefetch, which is still open.
+
+### 9.3 Still open
+
+- **Asset prefetch.** Images load at display time, so a cold image pops in after
+  the modal, and an image that never loads still produces an impression. Braze
+  prefetches at sync and suppresses display on a failed download.
+- **Refetch at every session start.** A warm resume fires the session-start trigger
+  against the campaign list from the cold-start fetch.
+- **Device and app context on the request.** Neither the fetch nor the events
+  endpoint carries OS, OS version, app version or time zone, which is what platform
+  targeting and local-time dayparting need.
 
 ---
 
@@ -359,7 +379,9 @@ the display floor reintroduces the dead zone.
 
 ## 11. What the analytics contract needs
 
-Four decisions, all of which follow from §6 rather than from taste.
+All four are now implemented on the SDK side and specified for the backend in
+`docs/integration/in-app-message-analytics-backend-handoff.md`. They are kept here
+because the *reasons* live in §6, and the reasons are what a reviewer needs.
 
 1. **An opaque correlation token, echoed back verbatim.** Braze's `trigger_id`. One field that
    resolves server-side to campaign + variant + dispatch, closing variant attribution,

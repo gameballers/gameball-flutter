@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'analytics/message_analytics.dart';
+import 'analytics/message_event.dart';
 import 'evaluation/frequency_cap.dart';
 import 'evaluation/trigger_evaluator.dart';
 import 'iam_log.dart';
@@ -166,6 +169,15 @@ class InAppMessagingService {
     _audience = null;
     _beforeDisplay = null;
     _onAction = null;
+    // Logout is one of the two moments the process may not get another chance to
+    // send. Buffered events are already on disk, so a failure here only delays
+    // them; flushing now means they usually go out under the identity that
+    // produced them.
+    //
+    // Disposed immediately after, not on completion: that leaves the in-flight
+    // request to finish while guaranteeing a stopped module schedules nothing.
+    unawaited(_analytics.flush());
+    _analytics.dispose();
     iamLog('in-app messaging stopped');
   }
 
@@ -237,6 +249,10 @@ class InAppMessagingService {
   void onAppPaused() {
     if (!isStarted) return;
     _lastPausedAt = _clock();
+    // The last point at which the OS reliably gives us time. An app killed from
+    // the background never resumes, so anything still buffered would otherwise
+    // wait for the next launch.
+    unawaited(_analytics.flush());
   }
 
   /// Called when the Gameball profile widget closes, freeing the screen.
@@ -257,6 +273,10 @@ class InAppMessagingService {
     if (audience == null) return;
 
     await _cap.load();
+    // Deliberately not awaited. Recovering a previous run's unsent events has
+    // nothing to do with showing this session's message, and awaiting it puts a
+    // disk read — and a plugin dependency — on the path to the first display.
+    unawaited(_analytics.load());
     try {
       _campaigns = await _source.fetch(audience);
       iamLog('fetched ${_campaigns.length} campaign(s)');
@@ -317,18 +337,30 @@ class InAppMessagingService {
       return;
     }
 
+    // Both local to this presentation, so a campaign shown again starts clean.
+    //
+    // `shown` exists because a message can be dismissed before its first frame
+    // paints, and a dismissal without an impression would be nonsense. `engaged`
+    // exists so the dismissal that follows a tap is not also counted as "shown
+    // and ignored" — which is what makes `impressions = clicks + dismissals` hold
+    // as an identity the backend can rely on.
+    var shown = false;
+    var engaged = false;
+
     final presented = _presenter.present(
       message: campaign.message,
       onShown: () {
+        shown = true;
         // Recorded at impression, never at selection, so a deferred or
         // suppressed message does not burn its slot.
         _cap.recordDisplay(campaign.id, _clock());
-        _analytics.logImpression(campaign.message, campaignId: campaign.id);
+        _logEvent(campaign, GameballMessageEventType.impression);
       },
       onButtonPressed: (button) {
-        _analytics.logButtonClick(
-          campaign.message,
-          campaignId: campaign.id,
+        engaged = true;
+        _logEvent(
+          campaign,
+          GameballMessageEventType.buttonClick,
           buttonId: button.id,
         );
         _act(campaign.message, button, button.action);
@@ -336,10 +368,19 @@ class InAppMessagingService {
       onMessagePressed: () {
         final action = campaign.message.clickAction;
         if (action == null) return;
-        _analytics.logClick(campaign.message, campaignId: campaign.id);
+        engaged = true;
+        _logEvent(campaign, GameballMessageEventType.click);
         _act(campaign.message, null, action);
       },
-      onDismissed: _retryPending,
+      onDismissed: () {
+        // Braze has no dismissal event at all: closing the X, tapping outside and
+        // backgrounding the app all log nothing there, so "shown and ignored" is
+        // invisible in their reporting. It costs one event here.
+        if (shown && !engaged) {
+          _logEvent(campaign, GameballMessageEventType.dismiss);
+        }
+        _retryPending();
+      },
     );
 
     if (!presented) {
@@ -362,6 +403,27 @@ class InAppMessagingService {
     }
     _pending = campaign;
     iamLog('campaign "${campaign.id}" deferred: $reason');
+  }
+
+  /// Builds and records one analytics event for [campaign].
+  ///
+  /// The timestamp comes from the injected clock rather than the analytics
+  /// implementation's own, so it is the moment the thing happened and so tests
+  /// can assert it.
+  void _logEvent(
+    InAppMessageCampaign campaign,
+    GameballMessageEventType type, {
+    int? buttonId,
+  }) {
+    _analytics.log(GameballMessageEvent(
+      type: type,
+      campaignId: campaign.id,
+      messageId: campaign.message.id,
+      occurredAt: _clock(),
+      analyticsToken: campaign.analyticsToken,
+      buttonId: buttonId,
+      isTestSend: campaign.message.isTestSend,
+    ));
   }
 
   void _retryPending() {

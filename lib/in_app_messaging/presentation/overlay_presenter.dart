@@ -56,12 +56,26 @@ class OverlayPresenter implements GameballMessagePresenter {
     );
     _entry = entry;
     overlay.insert(entry);
-    onShown();
 
-    final autoDismissAfter = message.autoDismissAfter;
-    if (autoDismissAfter != null) {
-      _autoDismissTimer = Timer(autoDismissAfter, dismiss);
-    }
+    // `insert` only schedules a frame; nothing is on screen until that frame is
+    // painted. Both this interface's contract and Braze's definition of an
+    // impression are "when the message becomes visible", so the callback waits
+    // for the paint. Firing at insert time counts an impression for a message the
+    // user may never see — if the app is backgrounded in that instant, frames stop
+    // and the callback correctly never runs.
+    //
+    // The auto-dismiss timer starts here too, so a configured duration measures
+    // time the message was actually visible rather than time since insertion.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_entry != entry) return; // dismissed before it ever painted
+
+      onShown();
+
+      final autoDismissAfter = message.autoDismissAfter;
+      if (autoDismissAfter != null) {
+        _autoDismissTimer = Timer(autoDismissAfter, dismiss);
+      }
+    });
     return true;
   }
 

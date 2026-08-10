@@ -73,6 +73,10 @@ InAppMessageCampaign? _parseCampaign(Map<String, dynamic> json) {
     trigger: trigger,
     priority: _asInt(json['priority']) ?? 0,
     message: message,
+    // Never validated beyond "is it a non-empty string": the token is opaque by
+    // contract, so any check here would be this SDK asserting something about a
+    // format it has no business knowing.
+    analyticsToken: _asString(json['analyticsToken']),
   );
 }
 

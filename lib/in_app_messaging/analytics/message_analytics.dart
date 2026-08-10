@@ -1,49 +1,60 @@
 import '../iam_log.dart';
-import '../models/in_app_message.dart';
+import 'message_event.dart';
 
-/// Where impression and click events go.
+/// Where impression, click and dismissal events go.
 ///
 /// Called only from the display path inside the SDK. Hosts have no way to log
-/// these, by design — Braze exposes logging methods to app code, which makes
-/// double-counting easy when the SDK is already logging the same events.
+/// these, by design — Braze exposes logging methods to app code, and because
+/// their native layer logs the same events for any message it displayed, calling
+/// them double-counts. Their own example app ships that call site behind a
+/// `_automaticallyInteractIam = false` flag to avoid it. One owner, enforced by
+/// the API shape, removes the hazard instead of documenting it.
 abstract class MessageAnalytics {
-  void logImpression(GameballInAppMessage message, {required String campaignId});
+  /// Restores anything left unsent by a previous run. Called once at start.
+  Future<void> load();
 
-  /// A click on the message surface itself, with no button involved.
+  /// Records [event]. Must not throw, and must not block the caller on I/O.
+  void log(GameballMessageEvent event);
+
+  /// Sends whatever is buffered now.
   ///
-  /// Separate from [logButtonClick] so the two are distinguishable downstream —
-  /// Braze models the same distinction as one call with a null button id.
-  void logClick(GameballInAppMessage message, {required String campaignId});
+  /// Called when the app leaves the foreground and when messaging stops — the two
+  /// moments where the process might not get another chance.
+  Future<void> flush();
 
-  void logButtonClick(
-    GameballInAppMessage message, {
-    required String campaignId,
-    required int buttonId,
-  });
+  /// Stops any scheduled work, leaving buffered events for the next [load].
+  ///
+  /// Called from `stop()`, so a stopped module holds no timers. Retry after this
+  /// point is the next [load]'s job, not a timer's — which is also what keeps a
+  /// failed send from re-arming forever after logout.
+  void dispose();
 }
 
-/// Writes analytics to the local diagnostic log.
+/// Writes analytics to the local diagnostic log and nowhere else.
 ///
-/// The MVP has no impression/click endpoint; this makes the events observable
-/// now and is replaced by an HTTP implementation behind the same interface.
+/// Kept for tests and for a host that wants the module with no analytics traffic
+/// at all. [BatchedMessageAnalytics] is what ships.
 class LoggingMessageAnalytics implements MessageAnalytics {
   @override
-  void logImpression(GameballInAppMessage message, {required String campaignId}) {
-    iamLog('impression: campaign="$campaignId" message="${message.id}"'
-        '${message.isTestSend ? ' (test send)' : ''}');
+  Future<void> load() async {
+    // Nothing is persisted, so there is nothing to restore.
   }
 
   @override
-  void logClick(GameballInAppMessage message, {required String campaignId}) {
-    iamLog('click: campaign="$campaignId" message="${message.id}" (message body)');
+  void log(GameballMessageEvent event) {
+    final button = event.buttonId == null ? '' : ' button=${event.buttonId}';
+    iamLog('${event.type.wireName}: campaign="${event.campaignId}" '
+        'message="${event.messageId}"$button'
+        '${event.isTestSend ? ' (test send)' : ''}');
   }
 
   @override
-  void logButtonClick(
-    GameballInAppMessage message, {
-    required String campaignId,
-    required int buttonId,
-  }) {
-    iamLog('click: campaign="$campaignId" message="${message.id}" button=$buttonId');
+  Future<void> flush() async {
+    // Nothing is buffered.
+  }
+
+  @override
+  void dispose() {
+    // No timers to cancel.
   }
 }

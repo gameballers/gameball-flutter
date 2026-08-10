@@ -21,6 +21,7 @@ const String stubCampaignsJson = '''
   "campaigns": [
     {
       "id": "cmp_welcome_modal",
+      "analyticsToken": "stub.welcome_modal.v1",
       "priority": 100,
       "trigger": { "type": "session_start" },
       "message": {
@@ -67,6 +68,7 @@ const String stubCampaignsJson = '''
     },
     {
       "id": "cmp_welcome_back",
+      "analyticsToken": "stub.welcome_back.v1",
       "priority": 90,
       "trigger": { "type": "session_start" },
       "message": {
@@ -87,6 +89,7 @@ const String stubCampaignsJson = '''
     },
     {
       "id": "cmp_cart_nudge",
+      "analyticsToken": "stub.cart_nudge.v1",
       "priority": 50,
       "trigger": { "type": "custom_event", "eventName": "$stubCartEventName" },
       "message": {
@@ -111,6 +114,7 @@ const String stubCampaignsJson = '''
     },
     {
       "id": "cmp_seasonal_promo",
+      "analyticsToken": "stub.seasonal_promo.v1",
       "priority": 10,
       "trigger": { "type": "custom_event", "eventName": "$stubPromoEventName" },
       "message": {
@@ -125,6 +129,7 @@ const String stubCampaignsJson = '''
     },
     {
       "id": "cmp_thanks_any_purchase",
+      "analyticsToken": "stub.thanks_any_purchase.v1",
       "priority": 40,
       "trigger": { "type": "any_purchase" },
       "message": {
@@ -139,6 +144,7 @@ const String stubCampaignsJson = '''
     },
     {
       "id": "cmp_big_spender",
+      "analyticsToken": "stub.big_spender.v1",
       "priority": 80,
       "trigger": {
         "type": "specific_purchase",
