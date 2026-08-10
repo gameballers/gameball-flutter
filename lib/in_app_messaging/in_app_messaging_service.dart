@@ -117,6 +117,9 @@ class InAppMessagingService {
   /// How long to wait on local storage before giving up on it.
   static const Duration _storeTimeout = Duration(seconds: 2);
 
+  /// How long to wait for telemetry to go out before leaving the app.
+  static const Duration _preActionFlushTimeout = Duration(milliseconds: 800);
+
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
@@ -546,7 +549,31 @@ class InAppMessagingService {
       iamLog('action on message "${message.id}" handled by the host');
       return;
     }
-    _runAction(action);
+    unawaited(_flushThenRun(action));
+  }
+
+  /// Sends buffered telemetry before an action that may take the user away.
+  ///
+  /// `open_url` and `navigate` can be the last thing that happens in this process
+  /// — an external browser may never hand control back, and the OS can reclaim a
+  /// backgrounded app at any point. Flushing first means the click that caused it
+  /// is not the event most likely to be lost.
+  ///
+  /// Bounded, because a dead network must not delay a tap the user is waiting on.
+  /// The events are already on disk either way, so the worst case is that they go
+  /// out on the next launch instead.
+  Future<void> _flushThenRun(GameballClickAction action) async {
+    if (action is GameballOpenUrlAction || action is GameballNavigateAction) {
+      try {
+        await _analytics.flush().timeout(_preActionFlushTimeout);
+      } on TimeoutException {
+        iamLog('telemetry flush did not finish before the action; the events '
+            'stay queued');
+      } catch (error) {
+        iamLog('telemetry flush failed before the action ($error)');
+      }
+    }
+    await _runAction(action);
   }
 
   bool _askHost(

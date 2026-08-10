@@ -55,12 +55,14 @@ void main() {
     Duration interval = const Duration(minutes: 5),
     int batchSize = 20,
     int maxBuffered = maxBufferedAnalyticsEvents,
+    int maxPerRequest = maxEventsPerRequest,
   }) {
     return BatchedMessageAnalytics(
       send: sender.call,
       flushInterval: interval,
       batchSize: batchSize,
       maxBuffered: maxBuffered,
+      maxPerRequest: maxPerRequest,
     );
   }
 
@@ -236,10 +238,15 @@ void main() {
       released = true;
       await pumpEventQueue();
 
-      expect(sender.batches.first.single['type'], 'impression');
-      expect(analytics.bufferedCount, 1,
-          reason: 'the dismiss arrived mid-send, so removing the sent batch '
-              'from the front must not take it with them');
+      expect(sender.batches.first.single['type'], 'impression',
+          reason: 'the dismiss arrived mid-send, so removing the sent batch from '
+              'the front must not take it with them');
+      expect(sender.batches.map((b) => b.single['type']),
+          ['impression', 'dismiss'],
+          reason: 'it goes out in the next batch — immediately, because a '
+              'successful send drains what is left rather than waiting a full '
+              'interval');
+      expect(analytics.bufferedCount, 0);
       analytics.dispose();
     });
 
@@ -367,6 +374,71 @@ void main() {
       await analytics.flush();
 
       expect(sender.batches, isEmpty);
+    });
+  });
+
+  group('the backend request limit', () {
+    test('the documented ceiling is 50', () {
+      expect(maxEventsPerRequest, 50);
+    });
+
+    test('a backlog is chunked rather than sent oversized', () async {
+      final sender = FakeSender();
+      // A batch size high enough that only the explicit flush sends.
+      final analytics = build(sender, batchSize: 1000);
+
+      for (var i = 0; i < 120; i++) {
+        analytics.log(event(GameballMessageEventType.impression,
+            eventUid: 'e$i'));
+      }
+      await analytics.flush();
+      await pumpEventQueue();
+
+      expect(sender.batches.map((b) => b.length), [50, 50, 20],
+          reason: 'over 50 in one request is a documented rejection, so the '
+              'outbox chunks instead of being refused wholesale');
+      expect(analytics.bufferedCount, 0);
+      analytics.dispose();
+    });
+
+    test('chunks keep their order, oldest first', () async {
+      final sender = FakeSender();
+      final analytics = build(sender, batchSize: 1000, maxPerRequest: 2);
+
+      for (var i = 0; i < 5; i++) {
+        analytics.log(event(GameballMessageEventType.impression,
+            eventUid: 'e$i'));
+      }
+      await analytics.flush();
+      await pumpEventQueue();
+
+      final sent = sender.batches
+          .expand((b) => b.map((e) => e['eventUid']))
+          .toList();
+      expect(sent, ['e0', 'e1', 'e2', 'e3', 'e4']);
+      analytics.dispose();
+    });
+
+    test('a failed chunk stops the drain rather than hammering', () async {
+      final sender = FakeSender(result: GameballAnalyticsSendResult.retry);
+      final analytics = build(sender, batchSize: 1000, maxPerRequest: 2);
+
+      for (var i = 0; i < 6; i++) {
+        analytics.log(event(GameballMessageEventType.impression,
+            eventUid: 'e$i'));
+      }
+      await analytics.flush();
+      await pumpEventQueue();
+
+      expect(sender.batches, hasLength(1),
+          reason: 'a dead network should be retried on the timer, not in a loop');
+      expect(analytics.bufferedCount, 6);
+      analytics.dispose();
+    });
+
+    test('the default flush cadence matches the backend', () {
+      expect(defaultAnalyticsFlushInterval, const Duration(seconds: 30));
+      expect(defaultAnalyticsBatchSize, 10);
     });
   });
 }

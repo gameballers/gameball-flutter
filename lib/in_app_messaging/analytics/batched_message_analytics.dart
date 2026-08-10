@@ -9,13 +9,19 @@ import 'message_event.dart';
 
 /// How long a non-empty outbox waits before being sent.
 ///
-/// Matches the roughly ten-second cadence Braze's native SDKs use. Long enough
-/// that an impression and the click that follows it usually travel together;
-/// short enough that a marketer watching a test send does not think it failed.
-const Duration defaultAnalyticsFlushInterval = Duration(seconds: 10);
+/// The backend's stated cadence. Long enough that an impression and the click
+/// that follows it usually travel together; short enough that a marketer watching
+/// a test send does not think it failed.
+const Duration defaultAnalyticsFlushInterval = Duration(seconds: 30);
 
 /// Outbox size that triggers a send without waiting for the timer.
-const int defaultAnalyticsBatchSize = 20;
+const int defaultAnalyticsBatchSize = 10;
+
+/// Most events the backend accepts in one request.
+///
+/// Exceeding it is a documented rejection, so a larger outbox is sent in chunks
+/// rather than in one oversized request that would be refused wholesale.
+const int maxEventsPerRequest = 50;
 
 /// Hard ceiling on the outbox.
 ///
@@ -65,6 +71,7 @@ class BatchedMessageAnalytics implements MessageAnalytics {
     this.flushInterval = defaultAnalyticsFlushInterval,
     this.batchSize = defaultAnalyticsBatchSize,
     this.maxBuffered = maxBufferedAnalyticsEvents,
+    this.maxPerRequest = maxEventsPerRequest,
     Future<SharedPreferences> Function()? preferences,
   }) : _preferences = preferences ?? SharedPreferences.getInstance;
 
@@ -72,6 +79,7 @@ class BatchedMessageAnalytics implements MessageAnalytics {
   final Duration flushInterval;
   final int batchSize;
   final int maxBuffered;
+  final int maxPerRequest;
 
   final Future<SharedPreferences> Function() _preferences;
 
@@ -157,20 +165,25 @@ class BatchedMessageAnalytics implements MessageAnalytics {
     _timer?.cancel();
     _timer = null;
 
-    // Snapshot by value: `log` may append while the request is in flight, and
-    // those events belong to the next batch.
-    final batch = List<Map<String, dynamic>>.of(_outbox);
+    // Snapshot by value, capped at what the backend accepts: `log` may append
+    // while the request is in flight, and those events belong to the next batch.
+    final batch = List<Map<String, dynamic>>.of(
+      _outbox.take(maxPerRequest),
+    );
 
+    var drained = false;
     try {
       final result = await send(batch);
       switch (result) {
         case GameballAnalyticsSendResult.accepted:
+          drained = true;
           // Removing from the front by count is safe precisely because anything
           // added during the await went to the back.
           _outbox.removeRange(0, batch.length);
           await _persist();
           iamLog('analytics: sent ${batch.length} event(s)');
         case GameballAnalyticsSendResult.discard:
+          drained = true;
           _outbox.removeRange(0, batch.length);
           await _persist();
           iamLog('analytics: backend refused ${batch.length} event(s) and a '
@@ -184,8 +197,15 @@ class BatchedMessageAnalytics implements MessageAnalytics {
           '${_outbox.length} event(s) still queued');
     } finally {
       _sending = false;
-      // Retry whatever is left, including events logged during the send.
-      if (_outbox.isNotEmpty) _arm();
+      if (_outbox.isNotEmpty) {
+        if (drained) {
+          // A backlog is chunked, so keep going rather than waiting a full
+          // interval per 50 events — draining 500 would otherwise take minutes.
+          unawaited(flush());
+        } else {
+          _arm();
+        }
+      }
     }
   }
 

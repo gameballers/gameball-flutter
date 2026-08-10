@@ -146,8 +146,15 @@ class RecordingAnalytics implements MessageAnalytics {
   @override
   void log(GameballMessageEvent event) => events.add(event);
 
+  /// Makes a flush take time, for the pre-action bound.
+  Duration? flushDelay;
+
   @override
-  Future<void> flush() async => flushes++;
+  Future<void> flush() async {
+    flushes++;
+    final delay = flushDelay;
+    if (delay != null) await Future<void>.delayed(delay);
+  }
 
   @override
   void dispose() => disposals++;
@@ -689,6 +696,7 @@ void main() {
         text: 'View cart',
         action: GameballNavigateAction('/cart', arguments: {'from': 'iam'}),
       ));
+      await pumpEventQueue();
 
       expect(h.navigator.pushed, ['/cart']);
       expect(h.navigator.lastArguments, {'from': 'iam'});
@@ -702,6 +710,7 @@ void main() {
       await h.service.start(customerId: 'c1');
 
       h.presenter.tapMessage();
+      await pumpEventQueue();
 
       expect(h.navigator.pushed, ['/rewards']);
     });
@@ -762,6 +771,7 @@ void main() {
         onAction: (_, __, ___) => false,
       );
       h.presenter.tapMessage();
+      await pumpEventQueue();
 
       expect(h.navigator.pushed, ['/rewards']);
     });
@@ -792,6 +802,7 @@ void main() {
         onAction: (_, __, ___) => throw StateError('host bug'),
       );
       h.presenter.tapMessage();
+      await pumpEventQueue();
 
       expect(h.navigator.pushed, ['/rewards'],
           reason: 'a buggy host loses its override, not the action');
@@ -1182,6 +1193,60 @@ void main() {
 
       expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
           reason: 'the campaigns already in memory stay usable');
+    });
+  });
+
+  group('flushing before an action that leaves the app', () {
+    Future<int> flushesAfterTapping(GameballClickAction action) async {
+      final button =
+          GameballMessageButton(id: 'b1', text: 'Go', action: action);
+      final h = build(campaigns: [campaign('a', buttons: [button])]);
+      await h.service.start(customerId: 'c1');
+      final before = h.analytics.flushes;
+
+      h.presenter.tapButton(button);
+      await pumpEventQueue();
+
+      return h.analytics.flushes - before;
+    }
+
+    test('open_url flushes first', () async {
+      expect(
+        await flushesAfterTapping(const GameballOpenUrlAction('https://x')),
+        1,
+        reason: 'an external browser may never hand control back, so the click '
+            'that caused it is the event most at risk of being lost',
+      );
+    });
+
+    test('navigate flushes first', () async {
+      expect(await flushesAfterTapping(const GameballNavigateAction('/cart')), 1,
+          reason: 'the OS can reclaim a backgrounded app at any point');
+    });
+
+    test('dismiss does not', () async {
+      expect(await flushesAfterTapping(const GameballDismissAction()), 0,
+          reason: 'nothing is leaving, so the timer is soon enough');
+    });
+
+    test('a slow flush does not stop the action', () async {
+      const button = GameballMessageButton(
+        id: 'b1',
+        text: 'Go',
+        action: GameballNavigateAction('/cart'),
+      );
+      final h = build(campaigns: [campaign('a', buttons: [button])]);
+      await h.service.start(customerId: 'c1');
+      h.analytics.flushDelay = const Duration(seconds: 30);
+
+      h.presenter.tapButton(button);
+      await pumpEventQueue();
+      // Far less than the flush would take, and well past the 800ms bound.
+      await Future<void>.delayed(const Duration(seconds: 1));
+      await pumpEventQueue();
+
+      expect(h.navigator.pushed, ['/cart'],
+          reason: 'a dead network must not swallow a tap the user is waiting on');
     });
   });
 }

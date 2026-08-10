@@ -406,17 +406,12 @@ class GameballApp extends StatelessWidget {
       return GameballAnalyticsSendResult.retry;
     }
 
-    final language = handleLanguage(_lang, _customerPreferredLanguage);
     return sendMessageEventsRequest(
-      <String, dynamic>{
-        'audience': <String, dynamic>{
-          'type': 'customer',
-          'customerId': customerId,
-        },
-        'events': events,
-      },
-      _apiKey,
-      language,
+      events,
+      customerId: customerId,
+      platform: getDevicePlatformCode(),
+      apiKey: _apiKey,
+      lang: handleLanguage(_lang, _customerPreferredLanguage),
       customApiPrefix: _apiPrefix,
       sessionToken: _sessionToken,
     );
