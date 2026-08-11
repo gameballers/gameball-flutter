@@ -15,8 +15,13 @@ client-generated uid.
 
 Two facts frame the work:
 
-1. **Neither endpoint is implemented yet.** `grep -ri inapp` across `g-backend-v2@alpha` returns
-   nothing. This is co-design, not integration against something fixed.
+1. **Both endpoints are live on `api.alpha.gameball.app` and nowhere else.** Verified 2026-08-11
+   by calling them with a real key: production, staging and pirates all return 404 for
+   `bots/inapp/sync` while a real route with a bad parameter returns 400 and a fake route returns
+   404 — so the 404 is the route, not the auth. Alpha returns 200 with a populated payload.
+   (An earlier note here said neither endpoint existed, based on `grep -ri inapp` finding nothing
+   in `g-backend-v2@alpha`. That was evidence about one branch's source, not about deployment, and
+   it was wrong about the latter.)
 2. **Nothing has shipped on our side either.** The module lives on an unpushed branch, so its
    public API can still change freely. Only the pre-existing widget and events APIs are frozen.
 
@@ -327,6 +332,27 @@ Deliberately not in this work, and unaffected by it:
 
 ---
 
+## Verified against the live alpha endpoint
+
+Measured 2026-08-11, not inferred from the reference. Everything in this table is a real response.
+
+| Behaviour | Result | Consequence |
+| --- | --- | --- |
+| Sync response shape | `{response:{cooldownSeconds, messages[]}, success, errorCode, liveMode}` | Parses; all 6 campaigns understood, none dropped |
+| `errorMsg` on success | **Absent**, not null | Handled; the key is simply missing |
+| `content` / `locale` fields | Every field **present and explicitly null** | Our own fixtures used absent keys, so this was untested until now. Captured as `test/fixtures/alpha-sync-response.json` |
+| Empty event batch | **HTTP 200** + `success:false` + `"No events to ingest"` + `errorCode 4` | Proves envelope reading is necessary: a status-code-only reader calls this a success and drops the events |
+| All-invalid batch | HTTP 200 + `success:false` + `"Novalideventsinbatch"` + `errorCode 7` | Our `discard` is correct — those events can never succeed |
+| **Mixed batch** (2 valid + 1 unknown type) | `accepted:2, rejected:1, success:true` | **One bad event does not poison good ones.** Our "clear the batch on success:true" is right; the two that landed are not resent |
+| Non-GUID `eventUid` | **HTTP 400**, `{"code":13,"message":"…could not be converted to System.Guid…"}` | **Undocumented constraint.** `uuidV4()` complies, but any change to id generation would silently destroy telemetry, since 400 discards |
+| 51 events in one request | `accepted:51` | **The documented 50 cap is not enforced.** Our chunking is harmless and future-proof, not required today |
+| Same `eventUid` replayed | `accepted:1` both times | **Dedup is unverifiable from the client** — the response is identical either way. See O8 |
+| `liveMode` on alpha | `true` | Test telemetry counts as live data there |
+
+Alpha's six campaigns are all `messageType: 1` (slideup) with `session_start` triggers, so the
+modal render path, event triggers, `expiresAt` and `metadataFilters` are still unexercised against
+real data. A modal campaign on alpha would close that.
+
 ## Open items
 
 Each has a fallback so none blocks starting.
@@ -340,6 +366,10 @@ Each has a fallback so none blocks starting.
 | **O5** | Are numeric filter values JSON numbers or strings? The example shows `"value": "electronics"` | Coerce: attempt numeric parse for ordering operators, fall back to string compare |
 | **O6** | Is `metadataLogicalOperator: "Or"` needed? | Support `And` only; skip others |
 | **O7** | Any cap on the `messages` array? | None assumed; the cache is bounded by whatever arrives |
+| **O8** | **Is `eventUid` actually deduplicated?** The reference says events are *"persisted deduplicated on eventUid"*, but a replay returns `accepted:1` identically, so the client cannot confirm it. Our outbox is deliberately at-least-once and relies on this; without it, a kill between response and bookkeeping inflates impressions | None available client-side. Needs someone to check stored rows for a replayed uid |
+| **O9** | **`eventUid` must be a GUID** — undocumented, and a non-GUID is a hard 400 rather than a per-event rejection. Please document it, or accept any string | We generate v4 UUIDs, so this is a landmine rather than a live bug |
+| **O10** | A batch of *only* unsupported event types returns `success:false`, so we discard it. Fine today, but if `dismiss` were ever dropped from the vocabulary, a batch of only dismissals would vanish. Prefer `accepted:0, rejected:n, success:true` | Discard, as now |
+| **O11** | Which environment gets these next? Only alpha has them, and the SDK's live telemetry path would 401-or-404 anywhere else — both of which discard. **The events transport should not ship ahead of the endpoint** | Point `apiPrefix` at alpha for testing |
 
 ---
 
