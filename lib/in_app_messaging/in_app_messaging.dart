@@ -23,9 +23,7 @@ export 'models/in_app_message.dart'
         maxModalButtons;
 export 'models/message_trigger.dart'
     show
-        GameballAnyPurchaseTrigger,
         GameballCustomEventTrigger,
         GameballMessageTrigger,
         GameballSessionStartTrigger,
-        GameballSpecificPurchaseTrigger,
         gameballPurchaseEventName;

@@ -5,6 +5,8 @@ import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
 import 'package:gameball_sdk/network/request_calls/send_message_events_request.dart';
+import 'package:gameball_sdk/network/request_calls/sync_in_app_messages_request.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
 import 'package:gameball_sdk/utils/gameball_logger.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
@@ -25,7 +27,8 @@ import 'in_app_messaging/models/message_trigger.dart';
 import 'in_app_messaging/presentation/message_navigator.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
 import 'in_app_messaging/source/campaign_cache.dart';
-import 'in_app_messaging/source/stub_message_source.dart';
+import 'in_app_messaging/source/http_message_source.dart';
+import 'in_app_messaging/source/message_source.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
@@ -344,7 +347,7 @@ class GameballApp extends StatelessWidget {
     }
 
     final service = _inAppMessaging ??= InAppMessagingService(
-      source: StubMessageSource(),
+      source: debugMessageSource ?? HttpMessageSource(_syncInAppMessages),
       presenter: OverlayPresenter(navigatorKey),
       // Persisted, both of them: the backend's contract requires that a
       // non-repeatable campaign never shows again "locally too", and that a
@@ -388,6 +391,48 @@ class GameballApp extends StatelessWidget {
   /// but the request. Returning false leaves the batch queued, which is why an
   /// unconfigured SDK is a false rather than a drop — the events go out once
   /// [init] and [startInAppMessaging] have run.
+  /// Replaces the campaign source. Tests only — never set this in an app.
+  ///
+  /// The end-to-end suite drives the real module through this class, and without a
+  /// substitute every test would perform a live sync.
+  @visibleForTesting
+  static GameballMessageSource? debugMessageSource;
+
+  /// The host app's version, resolved once.
+  ///
+  /// Cached because `PackageInfo` is an async platform call and a sync happens on
+  /// every session start; re-reading it would put a channel round trip on the path
+  /// to the first message.
+  static String? _appVersion;
+
+  /// Performs one sync request for [customerId].
+  ///
+  /// Reads credentials at call time rather than capturing them, so a later
+  /// `init` or `initializeCustomer` is picked up without rebuilding the source.
+  static Future<String?> _syncInAppMessages(String customerId) async {
+    if (isNullOrEmpty(_apiKey)) return null;
+
+    if (_appVersion == null) {
+      try {
+        _appVersion = (await PackageInfo.fromPlatform()).version;
+      } catch (_) {
+        // Targeting by app version degrades; syncing must not.
+        _appVersion = '';
+      }
+    }
+
+    return syncInAppMessagesRequest(
+      customerId: customerId,
+      platform: getDevicePlatformCode(),
+      locale: handleLanguage(_lang, _customerPreferredLanguage),
+      appVersion: _appVersion ?? '',
+      sdkVersion: getSdkVersion(),
+      apiKey: _apiKey,
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+    );
+  }
+
   /// Replaces the analytics implementation. Tests only — never set this in an app.
   ///
   /// The end-to-end tests drive the module through this class's public API, which

@@ -1,8 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
+import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/in_app_message_modal.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
 /// Parses a response captured from the live alpha endpoint, rather than one we
@@ -17,10 +20,15 @@ void main() {
   final raw =
       File('test/fixtures/alpha-sync-response.json').readAsStringSync();
 
+  /// The one modal in the live payload, and the only campaign this SDK renders.
+  InAppMessageCampaign theModal() => parseSyncResponse(raw)
+      .campaigns
+      .firstWhere((c) => c.message.type == GameballMessageType.modal);
+
   test('the real response parses without loss or error', () {
     final result = parseSyncResponse(raw);
 
-    expect(result.campaigns, hasLength(6),
+    expect(result.campaigns, hasLength(7),
         reason: 'every campaign in the response is understood — none dropped '
             'for a shape we did not anticipate');
     expect(result.cooldown, const Duration(seconds: 30),
@@ -49,15 +57,14 @@ void main() {
   });
 
   test('slideups are kept as unsupported rather than dropped', () {
-    final campaigns = parseSyncResponse(raw).campaigns;
+    final unsupported = parseSyncResponse(raw)
+        .campaigns
+        .where((c) => c.message.type == GameballMessageType.unsupported);
 
-    expect(
-      campaigns.every((c) => c.message.type == GameballMessageType.unsupported),
-      isTrue,
-      reason: 'this response is all messageType 1. Keeping them lets the '
-          'evaluator skip them so a usable lower-priority campaign can still '
-          'win, rather than the whole sync looking empty',
-    );
+    expect(unsupported, hasLength(6),
+        reason: 'six messageType 1 campaigns. Keeping them lets the evaluator '
+            'skip them so the one usable campaign still wins, rather than the '
+            'whole sync looking empty');
   });
 
   test('a content block of explicit nulls does not break styling', () {
@@ -85,6 +92,76 @@ void main() {
 
   test('body text is read from locale.message', () {
     expect(parseSyncResponse(raw).campaigns.first.message.body, 'New slideup A');
+  });
+
+  group('the live modal campaign', () {
+    test('its model is assembled from both halves of the payload', () {
+      final campaign = theModal();
+
+      expect(campaign.campaignId, 2051);
+      expect(campaign.variationId, 16);
+      expect(campaign.name, 'Welcome popup on session start');
+      expect(campaign.priority, 5);
+      expect(campaign.trigger, isA<GameballSessionStartTrigger>());
+      expect(campaign.repeatable, isFalse);
+
+      final message = campaign.message;
+      expect(message.header, 'Welcome !');
+      expect(message.body, 'Great to see you back - check what is new today.');
+      expect(message.imageUrl, isNotNull);
+      // Text and styling arrive in separate blocks and are joined here.
+      expect(message.style.backgroundColor, const Color(0xFFFFFFFF));
+      expect(message.style.headerColor, const Color(0xFF111827));
+      expect(message.style.bodyColor, const Color(0xFF1F2937));
+      expect(message.style.closeButtonColor, isNull,
+          reason: 'sent as null, so the host theme decides');
+    });
+
+    test('the button is paired across content and locale by id', () {
+      final button = theModal().message.buttons.single;
+
+      expect(button.id, 'cta');
+      expect(button.text, 'Got it',
+          reason: 'the label lives in locale.buttons and the action in '
+              'content.buttons — neither half is usable alone');
+      expect(button.action, isA<GameballDismissAction>());
+    });
+
+    test('closeBehaviour "button" offers the close glyph but not the scrim', () {
+      final message = theModal().message;
+
+      expect(message.showCloseButton, isTrue);
+      expect(message.dismissOnScrimTap, isFalse,
+          reason: 'the live payload says "button", so a tap outside must not '
+              'dismiss — the first real campaign to exercise this');
+    });
+
+    testWidgets('it renders, and a dead image URL does not stop it',
+        (tester) async {
+      final message = theModal().message;
+      final tapped = <String>[];
+
+      await tester.pumpWidget(MaterialApp(
+        home: GameballInAppMessageModal(
+          message: message,
+          onButtonPressed: (b) => tapped.add(b.id),
+          onClosePressed: () {},
+          onMessagePressed: () {},
+        ),
+      ));
+      await tester.pump();
+
+      // The campaign image is a placeholder that answers 403, and the test
+      // binding fails every image load anyway. Both collapse to nothing, and the
+      // message still has to be readable and actionable.
+      expect(find.text('Welcome !'), findsOneWidget);
+      expect(find.text('Great to see you back - check what is new today.'),
+          findsOneWidget);
+      expect(find.text('Got it'), findsOneWidget);
+
+      await tester.tap(find.text('Got it'));
+      expect(tapped, ['cta']);
+    });
   });
 
   test('success is read from a payload with no errorMsg key at all', () {

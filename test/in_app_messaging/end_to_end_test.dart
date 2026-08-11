@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
+import 'package:gameball_sdk/in_app_messaging/source/stub_message_source.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -39,6 +40,9 @@ void main() {
     // The real module now persists display history and the campaign cache, so
     // the store has to exist for this suite to get past start().
     SharedPreferences.setMockInitialValues({});
+    // The shipped default is the HTTP source. This suite is about the wiring, not
+    // the network, so it runs against the offline fixture.
+    GameballApp.debugMessageSource = StubMessageSource();
     // This suite drives the real module through the real public API, so without
     // a substitute it would post batches to the live API and leave the flush
     // timer pending. Analytics content is asserted in the service unit tests.
@@ -48,6 +52,7 @@ void main() {
   tearDown(() {
     app().stopInAppMessaging();
     GameballApp.debugAnalytics = null;
+    GameballApp.debugMessageSource = null;
   });
 
   testWidgets('the session-start campaign renders from the stub fixture',

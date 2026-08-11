@@ -85,6 +85,71 @@
         "isTest": false
       },
       {
+        "campaignId": 2051,
+        "variationId": 16,
+        "dispatchId": "bb7d6e3f-f9d2-4b71-800b-855eba3406c8",
+        "name": "Welcome popup on session start",
+        "priority": 5,
+        "messageType": 2,
+        "trigger": {
+          "type": "session_start",
+          "repeatable": false
+        },
+        "contentMode": "prerendered",
+        "content": {
+          "colors": {
+            "background": "#FFFFFF",
+            "text": "#1F2937",
+            "header": "#111827",
+            "closeButton": null,
+            "border": null,
+            "frame": null
+          },
+          "closeBehaviour": "button",
+          "action": null,
+          "extras": null,
+          "slideFrom": null,
+          "autoDismissSeconds": null,
+          "iconUrl": null,
+          "imageUrl": "https://cdn.gameball.co/x/welcome-popup.png",
+          "media": null,
+          "orientation": null,
+          "allowedAssetUrls": null,
+          "submitButtonColors": null,
+          "onSuccessAction": null,
+          "buttons": [
+            {
+              "id": "cta",
+              "action": {
+                "type": "dismiss",
+                "url": null,
+                "external": null,
+                "route": null,
+                "arguments": null
+              },
+              "colors": null
+            }
+          ]
+        },
+        "locale": {
+          "header": "Welcome !",
+          "message": "Great to see you back - check what is new today.",
+          "html": null,
+          "placeholder": null,
+          "submitText": null,
+          "successMessage": null,
+          "errorMessage": null,
+          "buttons": [
+            {
+              "id": "cta",
+              "text": "Got it"
+            }
+          ]
+        },
+        "localeCode": "en",
+        "isTest": false
+      },
+      {
         "campaignId": 2042,
         "variationId": 7,
         "dispatchId": "b617ca53-476a-4f87-a1a6-7795338cc0ee",
