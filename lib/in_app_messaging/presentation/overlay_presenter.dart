@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../iam_log.dart';
 import '../models/in_app_message.dart';
 import 'in_app_message_modal.dart';
+import 'in_app_message_slideup.dart';
 import 'message_presenter.dart';
 
 /// Presents messages in an [OverlayEntry] above every route.
@@ -47,12 +48,21 @@ class OverlayPresenter implements GameballMessagePresenter {
 
     _onDismissed = onDismissed;
     final entry = OverlayEntry(
-      builder: (context) => _MessageLayer(
-        message: message,
-        onButtonPressed: onButtonPressed,
-        onMessagePressed: onMessagePressed,
-        onDismiss: dismiss,
-      ),
+      // `opaque: false` either way, but the layer itself decides whether it
+      // covers the screen: a modal blocks, a slideup does not.
+      builder: (context) => switch (message.type) {
+        GameballMessageType.slideup => _SlideupLayer(
+            message: message,
+            onMessagePressed: onMessagePressed,
+            onDismiss: dismiss,
+          ),
+        _ => _MessageLayer(
+            message: message,
+            onButtonPressed: onButtonPressed,
+            onMessagePressed: onMessagePressed,
+            onDismiss: dismiss,
+          ),
+      },
     );
     _entry = entry;
     overlay.insert(entry);
@@ -98,6 +108,35 @@ class OverlayPresenter implements GameballMessagePresenter {
   }
 }
 
+/// A slideup, drawn without a scrim so the app underneath stays usable.
+///
+/// The contrast with [_MessageLayer] is the whole point of the type. A modal fills
+/// the overlay with a scrim that swallows every tap; this occupies only the band
+/// its banner needs, so anything outside it reaches the app. No back-button
+/// handling either — a non-blocking banner has no claim on the back gesture, and
+/// intercepting it would break navigation for a message the user is entitled to
+/// ignore.
+class _SlideupLayer extends StatelessWidget {
+  const _SlideupLayer({
+    required this.message,
+    required this.onMessagePressed,
+    required this.onDismiss,
+  });
+
+  final GameballInAppMessage message;
+  final VoidCallback onMessagePressed;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return GameballInAppMessageSlideup(
+      message: message,
+      onMessagePressed: onMessagePressed,
+      onDismissRequested: onDismiss,
+    );
+  }
+}
+
 /// The scrim plus the modal, with back-button handling where it is available.
 class _MessageLayer extends StatelessWidget {
   const _MessageLayer({
@@ -119,7 +158,11 @@ class _MessageLayer extends StatelessWidget {
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: onDismiss,
+            // Absorbs the tap either way — the scrim's job is to block the app
+            // beneath — but only dismisses when the campaign allows it. A
+            // `closeBehaviour` of `button` means the close glyph is the only way
+            // out, so a tap outside must do nothing rather than nothing visible.
+            onTap: message.dismissOnScrimTap ? onDismiss : null,
             child: ColoredBox(
               color: message.style.scrimColor ?? const Color(0x99000000),
             ),

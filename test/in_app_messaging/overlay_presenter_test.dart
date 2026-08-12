@@ -223,4 +223,110 @@ void main() {
     expect(again, isTrue);
     expect(find.text('body text'), findsOneWidget);
   });
+
+  group('the presenter picks a layer by type', () {
+    testWidgets('a modal gets a blocking scrim', (tester) async {
+      final key = GlobalKey<NavigatorState>();
+      final presenter = OverlayPresenter(key);
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Scaffold(body: Text('host')),
+      ));
+
+      presenter.present(
+        message: const GameballInAppMessage(
+          id: '1',
+          type: GameballMessageType.modal,
+          body: 'blocking',
+        ),
+        onShown: () {},
+        onButtonPressed: (_) {},
+        onMessagePressed: () {},
+        onDismissed: () {},
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('gb_iam_surface')), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_slideup_surface')), findsNothing);
+    });
+
+    testWidgets('a slideup gets no scrim, so the host stays reachable',
+        (tester) async {
+      final key = GlobalKey<NavigatorState>();
+      final presenter = OverlayPresenter(key);
+      var hostTaps = 0;
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => hostTaps++,
+              child: const Text('host button'),
+            ),
+          ),
+        ),
+      ));
+
+      presenter.present(
+        message: const GameballInAppMessage(
+          id: '1',
+          type: GameballMessageType.slideup,
+          body: 'non-blocking',
+        ),
+        onShown: () {},
+        onButtonPressed: (_) {},
+        onMessagePressed: () {},
+        onDismissed: () {},
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('gb_iam_slideup_surface')), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_surface')), findsNothing);
+
+      await tester.tap(find.text('host button'));
+      await tester.pump();
+
+      expect(hostTaps, 1,
+          reason: 'the whole reason slideup is a separate layer: a modal fills '
+              'the overlay with a scrim that swallows every tap, and a slideup '
+              'must not');
+      presenter.dismiss();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a modal with closeBehaviour button ignores a scrim tap',
+        (tester) async {
+      final key = GlobalKey<NavigatorState>();
+      final presenter = OverlayPresenter(key);
+      var dismissals = 0;
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Scaffold(body: Text('host')),
+      ));
+
+      presenter.present(
+        message: const GameballInAppMessage(
+          id: '1',
+          type: GameballMessageType.modal,
+          body: 'close button only',
+          dismissOnScrimTap: false,
+        ),
+        onShown: () {},
+        onButtonPressed: (_) {},
+        onMessagePressed: () {},
+        onDismissed: () => dismissals++,
+      );
+      await tester.pumpAndSettle();
+
+      // Well outside the card, on the scrim.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(dismissals, 0,
+          reason: 'the live campaign 2052 sends closeBehaviour "button", so a '
+              'tap outside must do nothing');
+      presenter.dismiss();
+      await tester.pumpAndSettle();
+    });
+  });
 }

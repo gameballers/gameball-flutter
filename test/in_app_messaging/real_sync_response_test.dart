@@ -56,15 +56,34 @@ void main() {
     }
   });
 
-  test('slideups are kept as unsupported rather than dropped', () {
-    final unsupported = parseSyncResponse(raw)
-        .campaigns
-        .where((c) => c.message.type == GameballMessageType.unsupported);
+  test('every campaign in the live response is now renderable', () {
+    final types =
+        parseSyncResponse(raw).campaigns.map((c) => c.message.type).toSet();
 
-    expect(unsupported, hasLength(6),
-        reason: 'six messageType 1 campaigns. Keeping them lets the evaluator '
-            'skip them so the one usable campaign still wins, rather than the '
-            'whole sync looking empty');
+    expect(types, {GameballMessageType.slideup, GameballMessageType.modal},
+        reason: 'six slideups and one modal. Before slideup support this sync '
+            'produced one usable campaign out of seven');
+  });
+
+  test('the live slideups parse with their real content', () {
+    final slideups = parseSyncResponse(raw)
+        .campaigns
+        .where((c) => c.message.type == GameballMessageType.slideup)
+        .toList();
+
+    expect(slideups, hasLength(6));
+    for (final c in slideups) {
+      expect(c.message.body, isNotNull,
+          reason: 'campaign ${c.label} has no copy, and a slideup is its copy');
+      expect(c.message.buttons, isEmpty);
+    }
+    // The live set has three of each, which is what makes this worth asserting:
+    // a parser that ignored slideFrom and defaulted everything to the bottom
+    // would still pass a test where they all agreed.
+    final positions = slideups.map((c) => c.message.slidePosition).toList();
+    expect(positions.where((p) => p == GameballSlidePosition.top), hasLength(3));
+    expect(
+        positions.where((p) => p == GameballSlidePosition.bottom), hasLength(3));
   });
 
   test('a content block of explicit nulls does not break styling', () {

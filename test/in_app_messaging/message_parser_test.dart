@@ -224,7 +224,17 @@ void main() {
       expect(one(minimal())!.message.type, GameballMessageType.modal);
     });
 
-    for (final (number, name) in [(1, 'slideup'), (3, 'fullscreen'),
+    test('1 is a slideup', () {
+      final campaign = parse('''
+        { "campaignId": 1, "messageType": 1,
+          "trigger": {"type":"session_start"},
+          "content": {}, "locale": {"message":"body"} }
+      ''').campaigns.single;
+
+      expect(campaign.message.type, GameballMessageType.slideup);
+    });
+
+    for (final (number, name) in [(3, 'fullscreen'),
         (4, 'htmlFullscreen'), (5, 'emailCapture'), (99, 'unknown')]) {
       test('$number ($name) is kept as unsupported, not dropped', () {
         final campaign = parse('''
@@ -819,6 +829,80 @@ void main() {
 
       expect(occurrence.filterableProperties['price'], 999,
           reason: 'the caller\'s data is the more specific of the two');
+    });
+  });
+
+  group('slideup', () {
+    String slideup({String content = '{}', String locale = '{"message":"hi"}'}) =>
+        '{"campaignId":1,"messageType":1,"trigger":{"type":"session_start"},'
+        '"content":$content,"locale":$locale}';
+
+    test('reads slideFrom', () {
+      expect(one(slideup(content: '{"slideFrom":"top"}'))!.message.slidePosition,
+          GameballSlidePosition.top);
+      expect(
+          one(slideup(content: '{"slideFrom":"bottom"}'))!.message.slidePosition,
+          GameballSlidePosition.bottom);
+    });
+
+    test('defaults to the bottom when slideFrom is absent or unknown', () {
+      expect(one(slideup())!.message.slidePosition,
+          GameballSlidePosition.bottom);
+      expect(
+          one(slideup(content: '{"slideFrom":"sideways"}'))!
+              .message
+              .slidePosition,
+          GameballSlidePosition.bottom,
+          reason: 'a top banner covers the status bar, so bottom is the safer '
+              'fallback');
+    });
+
+    test('reads iconUrl, which is not the same slot as imageUrl', () {
+      final message =
+          one(slideup(content: '{"iconUrl":"https://cdn/i.png"}'))!.message;
+
+      expect(message.iconUrl, 'https://cdn/i.png');
+      expect(message.imageUrl, isNull);
+    });
+
+    test('drops buttons, loudly', () {
+      final message = one(slideup(
+        content: '{"buttons":[{"id":"b1","action":{"type":"dismiss"}}]}',
+        locale: '{"message":"hi","buttons":[{"id":"b1","text":"Go"}]}',
+      ))!.message;
+
+      expect(message.buttons, isEmpty,
+          reason: 'Braze has none either, and there is no room beside three '
+              'lines of text — the whole surface is the tap target instead');
+    });
+
+    test('needs text: an icon alone is not a message', () {
+      expect(
+        one(slideup(content: '{"iconUrl":"https://cdn/i.png"}', locale: '{}')),
+        isNull,
+        reason: 'a 40-point square with no words says nothing. A modal can carry '
+            'everything in artwork; a banner cannot',
+      );
+    });
+
+    test('an image-only slideup is dropped even with an imageUrl', () {
+      expect(
+        one(slideup(content: '{"imageUrl":"https://cdn/big.png"}', locale: '{}')),
+        isNull,
+      );
+    });
+
+    test('accepts header as a fallback when message is absent', () {
+      expect(one(slideup(locale: '{"header":"From the header"}'))!.message.header,
+          'From the header');
+    });
+
+    test('keeps a message-level action, which is its only interaction', () {
+      final action = one(slideup(
+        content: '{"action":{"type":"navigate","route":"/offers"}}',
+      ))!.message.clickAction;
+
+      expect(action, isA<GameballNavigateAction>());
     });
   });
 }

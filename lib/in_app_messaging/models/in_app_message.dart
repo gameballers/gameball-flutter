@@ -9,7 +9,22 @@ const int maxModalButtons = 2;
 /// a real layout. Braze's closed enum with a silent `slideup` fallback shipped
 /// wrong message types twice — prefer an explicit unknown over a default that
 /// lies.
-enum GameballMessageType { modal, unsupported }
+enum GameballMessageType {
+  /// A centred card over a dimmed background. Blocks the app until dismissed.
+  modal,
+
+  /// A banner at the top or bottom of the screen.
+  ///
+  /// Non-blocking: the app stays usable underneath, so it is the only type that
+  /// does not demand a decision. It also carries no buttons — the whole surface
+  /// is the tap target.
+  slideup,
+
+  unsupported,
+}
+
+/// Which edge a slideup enters from and rests against.
+enum GameballSlidePosition { top, bottom }
 
 /// What a button does when tapped.
 sealed class GameballClickAction {
@@ -125,6 +140,8 @@ class GameballInAppMessage {
     this.showCloseButton = true,
     this.dismissOnScrimTap = true,
     this.autoDismissAfter,
+    this.slidePosition = GameballSlidePosition.bottom,
+    this.iconUrl,
     this.buttons = const <GameballMessageButton>[],
     this.extras = const <String, String>{},
     this.style = const GameballMessageStyle(),
@@ -158,6 +175,22 @@ class GameballInAppMessage {
   /// Null means the message stays until the user dismisses it.
   final Duration? autoDismissAfter;
 
+  /// Which edge a [GameballMessageType.slideup] rests against. Ignored by other
+  /// types.
+  ///
+  /// Defaults to the bottom, which is both Braze's default and the safer choice:
+  /// a banner at the top competes with the status bar and whatever app-bar action
+  /// sits underneath it.
+  final GameballSlidePosition slidePosition;
+
+  /// A small leading image, used by [GameballMessageType.slideup].
+  ///
+  /// Distinct from [imageUrl]: an icon is a fixed-size square beside the text,
+  /// where [imageUrl] is artwork the layout sizes itself around. A slideup has
+  /// room for the former and not the latter.
+  final String? iconUrl;
+
+  /// Up to [maxModalButtons] buttons. Always empty for a slideup, which has none.
   final List<GameballMessageButton> buttons;
 
   /// Arbitrary key-values from the campaign, for driving app behaviour without

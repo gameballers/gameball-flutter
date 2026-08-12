@@ -21,6 +21,7 @@ const Map<int, String> _messageTypeNames = <int, String>{
   5: 'emailCapture',
 };
 
+const int _slideupMessageType = 1;
 const int _modalMessageType = 2;
 
 /// Parses a `bots/inapp/sync` response.
@@ -279,13 +280,15 @@ GameballInAppMessage? _parseMessage(
   final id = variationId == null ? '$campaignId' : '$campaignId/$variationId';
 
   final typeNumber = _asInt(json['messageType']);
-  final type = typeNumber == _modalMessageType
-      ? GameballMessageType.modal
-      : GameballMessageType.unsupported;
+  final type = switch (typeNumber) {
+    _slideupMessageType => GameballMessageType.slideup,
+    _modalMessageType => GameballMessageType.modal,
+    _ => GameballMessageType.unsupported,
+  };
   if (type == GameballMessageType.unsupported) {
     final named = _messageTypeNames[typeNumber] ?? 'unknown';
     iamLog('campaign $label has messageType $typeNumber ($named) — kept, but '
-        'this SDK version renders modal only');
+        'this SDK version renders slideup and modal only');
   }
 
   // Two modal layouts exist: text with an optional image, and image only. So
@@ -293,13 +296,34 @@ GameballInAppMessage? _parseMessage(
   final header = _asString(locale['header']);
   final body = _asString(locale['message']) ?? _asString(locale['body']);
   final imageUrl = _asString(content['imageUrl']);
+  final iconUrl = _asString(content['iconUrl']);
   final hasHeader = header != null && header.isNotEmpty;
   final hasBody = body != null && body.isNotEmpty;
   final hasImage = imageUrl != null && imageUrl.isNotEmpty;
-  if (!hasHeader && !hasBody && !hasImage) {
+
+  if (type == GameballMessageType.slideup) {
+    // A slideup is one line of copy. An icon alone is not a message — unlike a
+    // modal, where artwork can carry everything — because a 40-point square with
+    // no words says nothing.
+    if (!hasHeader && !hasBody) {
+      iamLog('campaign $label dropped: a slideup needs text, and this one has '
+          'none');
+      return null;
+    }
+  } else if (!hasHeader && !hasBody && !hasImage) {
     iamLog('campaign $label dropped: no header, message or imageUrl — nothing '
         'to render');
     return null;
+  }
+
+  // Braze's slideup has none, and there is no room for them beside three lines of
+  // text. Dropped loudly rather than silently, since a campaign that configured
+  // them expected them to appear.
+  var buttons = _parseButtons(content['buttons'], locale['buttons'], label);
+  if (type == GameballMessageType.slideup && buttons.isNotEmpty) {
+    iamLog('campaign $label: ${buttons.length} button(s) ignored — a slideup has '
+        'no buttons; its whole surface is the tap target');
+    buttons = const <GameballMessageButton>[];
   }
 
   final autoSeconds = _asNum(content['autoDismissSeconds']);
@@ -320,10 +344,29 @@ GameballInAppMessage? _parseMessage(
     autoDismissAfter: (autoSeconds != null && autoSeconds > 0)
         ? Duration(milliseconds: (autoSeconds * 1000).round())
         : null,
-    buttons: _parseButtons(content['buttons'], locale['buttons'], label),
+    slidePosition: _parseSlidePosition(content['slideFrom'], label),
+    iconUrl: (iconUrl != null && iconUrl.isNotEmpty) ? iconUrl : null,
+    buttons: buttons,
     extras: _parseExtras(content['extras']),
     style: _parseMessageStyle(content['colors'], content['textAlignment']),
   );
+}
+
+/// Which edge a slideup rests against.
+///
+/// Defaults to the bottom rather than the top: it is Braze's default, and a top
+/// banner covers the status bar and whatever app-bar control sits under it.
+GameballSlidePosition _parseSlidePosition(Object? value, String label) {
+  switch (_asString(value)?.toLowerCase()) {
+    case 'top':
+      return GameballSlidePosition.top;
+    case 'bottom':
+    case null:
+      return GameballSlidePosition.bottom;
+    default:
+      iamLog('campaign $label: unknown slideFrom "$value", using bottom');
+      return GameballSlidePosition.bottom;
+  }
 }
 
 /// How the message may be closed.

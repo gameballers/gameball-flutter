@@ -18,6 +18,7 @@ export 'models/in_app_message.dart'
         GameballMessageButton,
         GameballMessageStyle,
         GameballMessageType,
+        GameballSlidePosition,
         GameballNavigateAction,
         GameballOpenUrlAction,
         maxModalButtons;
