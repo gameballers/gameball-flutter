@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../iam_log.dart';
 import '../models/in_app_message.dart';
+import 'in_app_message_fullscreen.dart';
 import 'in_app_message_modal.dart';
 import 'in_app_message_slideup.dart';
 import 'message_presenter.dart';
@@ -46,6 +47,16 @@ class OverlayPresenter implements GameballMessagePresenter {
       return false;
     }
 
+    if (!_orientationAllows(message, overlay.context)) {
+      // Returning false hands it back to the service, which holds it as pending
+      // and retries at the next display opportunity. A poster designed for
+      // portrait has its copy baked into the artwork, so showing it sideways is
+      // worse than showing it later.
+      iamLog('message "${message.id}" needs ${message.orientation.name} '
+          'orientation; deferring');
+      return false;
+    }
+
     _onDismissed = onDismissed;
     final entry = OverlayEntry(
       // `opaque: false` either way, but the layer itself decides whether it
@@ -53,6 +64,12 @@ class OverlayPresenter implements GameballMessagePresenter {
       builder: (context) => switch (message.type) {
         GameballMessageType.slideup => _SlideupLayer(
             message: message,
+            onMessagePressed: onMessagePressed,
+            onDismiss: dismiss,
+          ),
+        GameballMessageType.fullscreen => _FullscreenLayer(
+            message: message,
+            onButtonPressed: onButtonPressed,
             onMessagePressed: onMessagePressed,
             onDismiss: dismiss,
           ),
@@ -105,6 +122,60 @@ class OverlayPresenter implements GameballMessagePresenter {
     final onDismissed = _onDismissed;
     _onDismissed = null;
     onDismissed?.call();
+  }
+}
+
+/// Whether [message] may display in the current orientation.
+///
+/// Only fullscreen campaigns can insist; the other types are small enough to work
+/// either way, and enforcing it for them would suppress messages for no benefit.
+bool _orientationAllows(GameballInAppMessage message, BuildContext context) {
+  if (message.type != GameballMessageType.fullscreen) return true;
+  return switch (message.orientation) {
+    GameballMessageOrientation.any => true,
+    GameballMessageOrientation.portrait =>
+      MediaQuery.orientationOf(context) == Orientation.portrait,
+    GameballMessageOrientation.landscape =>
+      MediaQuery.orientationOf(context) == Orientation.landscape,
+  };
+}
+
+/// A fullscreen message: edge to edge, with no scrim because nothing shows past
+/// it.
+///
+/// Back-button handling matters more here than anywhere else — a message covering
+/// the entire app with only a small close glyph is the one most likely to feel
+/// like a trap.
+class _FullscreenLayer extends StatelessWidget {
+  const _FullscreenLayer({
+    required this.message,
+    required this.onButtonPressed,
+    required this.onMessagePressed,
+    required this.onDismiss,
+  });
+
+  final GameballInAppMessage message;
+  final void Function(GameballMessageButton button) onButtonPressed;
+  final VoidCallback onMessagePressed;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final layer = GameballInAppMessageFullscreen(
+      message: message,
+      onButtonPressed: onButtonPressed,
+      onMessagePressed: onMessagePressed,
+      onClosePressed: onDismiss,
+    );
+
+    if (Router.maybeOf(context) == null) return layer;
+    return BackButtonListener(
+      onBackButtonPressed: () async {
+        onDismiss();
+        return true;
+      },
+      child: layer,
+    );
   }
 }
 

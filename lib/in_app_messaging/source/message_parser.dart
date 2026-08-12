@@ -23,6 +23,7 @@ const Map<int, String> _messageTypeNames = <int, String>{
 
 const int _slideupMessageType = 1;
 const int _modalMessageType = 2;
+const int _fullscreenMessageType = 3;
 
 /// Parses a `bots/inapp/sync` response.
 ///
@@ -283,12 +284,13 @@ GameballInAppMessage? _parseMessage(
   final type = switch (typeNumber) {
     _slideupMessageType => GameballMessageType.slideup,
     _modalMessageType => GameballMessageType.modal,
+    _fullscreenMessageType => GameballMessageType.fullscreen,
     _ => GameballMessageType.unsupported,
   };
   if (type == GameballMessageType.unsupported) {
     final named = _messageTypeNames[typeNumber] ?? 'unknown';
     iamLog('campaign $label has messageType $typeNumber ($named) — kept, but '
-        'this SDK version renders slideup and modal only');
+        'this SDK version renders slideup, modal and fullscreen only');
   }
 
   // Two modal layouts exist: text with an optional image, and image only. So
@@ -344,12 +346,72 @@ GameballInAppMessage? _parseMessage(
     autoDismissAfter: (autoSeconds != null && autoSeconds > 0)
         ? Duration(milliseconds: (autoSeconds * 1000).round())
         : null,
+    layout: _resolveLayout(content, hasHeader || hasBody, hasImage, label),
+    orientation: _parseOrientation(content['orientation'], label),
     slidePosition: _parseSlidePosition(content['slideFrom'], label),
     iconUrl: (iconUrl != null && iconUrl.isNotEmpty) ? iconUrl : null,
     buttons: buttons,
     extras: _parseExtras(content['extras']),
     style: _parseMessageStyle(content['colors'], content['textAlignment']),
   );
+}
+
+/// Decides how the image and copy are arranged.
+///
+/// **An inference, and the only one left in this parser.** Nothing in the payload
+/// names the layout, so it is derived from which content fields arrived. Braze
+/// does not guess — it sends `image_style`, `TOP` or `GRAPHIC`.
+///
+/// Two failure modes this cannot avoid, both argued in the spec's O12:
+/// a campaign whose personalised copy resolves to empty is indistinguishable from
+/// a deliberately image-only one, and `GRAPHIC` is a different composition rather
+/// than the text layout with the text removed.
+///
+/// An explicit field is read first when present, under either of the two spellings
+/// the backend might use, so the day it ships this stops guessing with no other
+/// change.
+GameballMessageLayout _resolveLayout(
+  Map<String, dynamic> content,
+  bool hasText,
+  bool hasImage,
+  String label,
+) {
+  final declared =
+      _asString(content['layout']) ?? _asString(content['imageStyle']);
+  switch (declared?.toLowerCase()) {
+    case 'graphic':
+    case 'image_only':
+    case 'imageonly':
+      return GameballMessageLayout.imageOnly;
+    case 'top':
+    case 'text':
+    case 'text_with_image':
+      return GameballMessageLayout.textWithImage;
+    case null:
+      break;
+    default:
+      iamLog('campaign $label: unknown layout "$declared", inferring instead');
+  }
+
+  return (!hasText && hasImage)
+      ? GameballMessageLayout.imageOnly
+      : GameballMessageLayout.textWithImage;
+}
+
+/// Which orientations a fullscreen campaign may display in.
+GameballMessageOrientation _parseOrientation(Object? value, String label) {
+  switch (_asString(value)?.toLowerCase()) {
+    case 'portrait':
+      return GameballMessageOrientation.portrait;
+    case 'landscape':
+      return GameballMessageOrientation.landscape;
+    case 'any':
+    case null:
+      return GameballMessageOrientation.any;
+    default:
+      iamLog('campaign $label: unknown orientation "$value", allowing any');
+      return GameballMessageOrientation.any;
+  }
 }
 
 /// Which edge a slideup rests against.

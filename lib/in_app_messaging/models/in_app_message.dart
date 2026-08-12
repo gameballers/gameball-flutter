@@ -20,11 +20,34 @@ enum GameballMessageType {
   /// is the tap target.
   slideup,
 
+  /// Edge-to-edge, covering the app entirely.
+  fullscreen,
+
   unsupported,
 }
 
 /// Which edge a slideup enters from and rests against.
 enum GameballSlidePosition { top, bottom }
+
+/// How a modal or fullscreen message arranges its image and copy.
+///
+/// **Currently inferred** from which content fields the campaign populated,
+/// because nothing in the payload names it. Braze does not infer — it sends
+/// `image_style`, `TOP` or `GRAPHIC` — and its Flutter SDK drops that field, which
+/// is the lossiness this module exists not to inherit. Held on the model rather
+/// than worked out in each widget so that when the backend sends the layout, one
+/// line in the parser replaces the guess and nothing else changes.
+enum GameballMessageLayout {
+  /// Image above the copy, buttons beneath it. Braze's `TOP`.
+  textWithImage,
+
+  /// The image is the message: it fills the surface and buttons sit over it.
+  /// Braze's `GRAPHIC`.
+  imageOnly,
+}
+
+/// Which device orientations a fullscreen message may display in.
+enum GameballMessageOrientation { portrait, landscape, any }
 
 /// What a button does when tapped.
 sealed class GameballClickAction {
@@ -140,6 +163,8 @@ class GameballInAppMessage {
     this.showCloseButton = true,
     this.dismissOnScrimTap = true,
     this.autoDismissAfter,
+    this.layout = GameballMessageLayout.textWithImage,
+    this.orientation = GameballMessageOrientation.any,
     this.slidePosition = GameballSlidePosition.bottom,
     this.iconUrl,
     this.buttons = const <GameballMessageButton>[],
@@ -174,6 +199,19 @@ class GameballInAppMessage {
 
   /// Null means the message stays until the user dismisses it.
   final Duration? autoDismissAfter;
+
+  /// How the image and copy are arranged. Applies to modal and fullscreen.
+  ///
+  /// See [GameballMessageLayout]: this is inferred today and should become a
+  /// value the backend sends.
+  final GameballMessageLayout layout;
+
+  /// Which orientations a [GameballMessageType.fullscreen] may display in.
+  ///
+  /// A poster designed for portrait is not merely narrow in landscape — the copy
+  /// baked into it becomes unreadable — so a campaign can insist. Ignored by the
+  /// other types, which are small enough to work either way.
+  final GameballMessageOrientation orientation;
 
   /// Which edge a [GameballMessageType.slideup] rests against. Ignored by other
   /// types.

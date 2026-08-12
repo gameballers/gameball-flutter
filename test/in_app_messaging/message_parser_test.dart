@@ -234,7 +234,17 @@ void main() {
       expect(campaign.message.type, GameballMessageType.slideup);
     });
 
-    for (final (number, name) in [(3, 'fullscreen'),
+    test('3 is a fullscreen', () {
+      final campaign = parse('''
+        { "campaignId": 1, "messageType": 3,
+          "trigger": {"type":"session_start"},
+          "content": {}, "locale": {"message":"body"} }
+      ''').campaigns.single;
+
+      expect(campaign.message.type, GameballMessageType.fullscreen);
+    });
+
+    for (final (number, name) in [
         (4, 'htmlFullscreen'), (5, 'emailCapture'), (99, 'unknown')]) {
       test('$number ($name) is kept as unsupported, not dropped', () {
         final campaign = parse('''
@@ -903,6 +913,89 @@ void main() {
       ))!.message.clickAction;
 
       expect(action, isA<GameballNavigateAction>());
+    });
+  });
+
+  group('layout', () {
+    String full({String content = '{}', String locale = '{"message":"hi"}'}) =>
+        '{"campaignId":1,"messageType":3,"trigger":{"type":"session_start"},'
+        '"content":$content,"locale":$locale}';
+
+    test('inferred as textWithImage when there is copy', () {
+      expect(one(full())!.message.layout, GameballMessageLayout.textWithImage);
+      expect(
+        one(full(content: '{"imageUrl":"https://cdn/a.png"}'))!.message.layout,
+        GameballMessageLayout.textWithImage,
+        reason: 'copy plus artwork is the stacked variant',
+      );
+    });
+
+    test('inferred as imageOnly when there is artwork and no copy', () {
+      expect(
+        one(full(content: '{"imageUrl":"https://cdn/a.png"}', locale: '{}'))!
+            .message
+            .layout,
+        GameballMessageLayout.imageOnly,
+      );
+    });
+
+    test('an explicit layout wins over the inference', () {
+      // The whole point of O12: this campaign has copy, so the guess would say
+      // stacked. A backend that names the layout overrules it.
+      final message = one(full(
+        content: '{"layout":"graphic","imageUrl":"https://cdn/a.png"}',
+      ))!.message;
+
+      expect(message.layout, GameballMessageLayout.imageOnly,
+          reason: 'when the field arrives the parser must stop guessing');
+    });
+
+    test("Braze's own spellings are accepted", () {
+      expect(
+        one(full(content: '{"imageStyle":"GRAPHIC"}'))!.message.layout,
+        GameballMessageLayout.imageOnly,
+      );
+      expect(
+        one(full(
+          // Needs the image, or the campaign has nothing to render and is
+          // correctly dropped before the layout matters.
+          content: '{"imageStyle":"TOP","imageUrl":"https://cdn/a.png"}',
+          locale: '{}',
+        ))!.message.layout,
+        GameballMessageLayout.textWithImage,
+        reason: 'declared TOP with no copy: the field wins over the inference in '
+            'both directions, or it is not authoritative',
+      );
+    });
+
+    test('an unknown layout falls back to inferring', () {
+      expect(
+        one(full(content: '{"layout":"hologram","imageUrl":"https://cdn/a.png"}',
+            locale: '{}'))!.message.layout,
+        GameballMessageLayout.imageOnly,
+      );
+    });
+  });
+
+  group('orientation', () {
+    String full({String content = '{}'}) =>
+        '{"campaignId":1,"messageType":3,"trigger":{"type":"session_start"},'
+        '"content":$content,"locale":{"message":"hi"}}';
+
+    test('reads portrait and landscape', () {
+      expect(one(full(content: '{"orientation":"portrait"}'))!.message.orientation,
+          GameballMessageOrientation.portrait);
+      expect(
+          one(full(content: '{"orientation":"landscape"}'))!.message.orientation,
+          GameballMessageOrientation.landscape);
+    });
+
+    test('defaults to any when absent or unknown', () {
+      expect(one(full())!.message.orientation, GameballMessageOrientation.any);
+      expect(one(full(content: '{"orientation":"sideways"}'))!.message.orientation,
+          GameballMessageOrientation.any,
+          reason: 'suppressing a message over an unrecognised value would be '
+              'worse than showing it');
     });
   });
 }

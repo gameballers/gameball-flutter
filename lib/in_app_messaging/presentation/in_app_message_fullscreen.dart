@@ -1,0 +1,250 @@
+import 'package:flutter/material.dart';
+
+import '../models/in_app_message.dart';
+
+/// The fullscreen layout, covering both of its variants.
+///
+/// Edge to edge, with no card and no margin — that is what distinguishes it from
+/// a modal, which is a centred card over a dimmed app. The two variants are
+/// genuinely different compositions rather than one with a part hidden:
+///
+/// * [GameballMessageLayout.textWithImage] stacks image, copy and buttons down
+///   the screen on the message background.
+/// * [GameballMessageLayout.imageOnly] lets the image fill the screen and floats
+///   the buttons **over** it, which is Braze's `GRAPHIC` style and the pattern
+///   most consumer apps actually ship: full-bleed promo art with one call to
+///   action and the copy baked into the artwork.
+///
+/// Getting that second one from an inferred layout is exactly why the layout
+/// belongs on the wire — see [GameballMessageLayout].
+class GameballInAppMessageFullscreen extends StatelessWidget {
+  const GameballInAppMessageFullscreen({
+    super.key,
+    required this.message,
+    required this.onButtonPressed,
+    required this.onClosePressed,
+    required this.onMessagePressed,
+  });
+
+  final GameballInAppMessage message;
+  final void Function(GameballMessageButton button) onButtonPressed;
+  final VoidCallback onClosePressed;
+
+  /// Invoked when the surface itself is tapped. Only reachable when the campaign
+  /// set a message-level action.
+  final VoidCallback onMessagePressed;
+
+  bool get _imageOnly => message.layout == GameballMessageLayout.imageOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = message.style;
+
+    return Material(
+      key: const Key('gb_iam_fullscreen_surface'),
+      // Opaque by design: a fullscreen message replaces the app rather than
+      // floating above it, so there is no scrim and nothing shows through.
+      color: style.backgroundColor ?? theme.colorScheme.surface,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (_imageOnly) _fullBleedImage() else _stacked(context, theme, style),
+          // Outside the tappable surface, so closing never counts as engaging.
+          if (message.showCloseButton)
+            SafeArea(child: _closeButton(style)),
+        ],
+      ),
+    );
+  }
+
+  /// Image fills the screen; buttons float over it.
+  Widget _fullBleedImage() {
+    return _wrapTappable(
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          if (message.imageUrl != null)
+            Image.network(
+              message.imageUrl!,
+              key: const Key('gb_iam_fullscreen_image'),
+              // The one place cropping is right: the artwork is meant to bleed
+              // to every edge, and letterboxing it would put bands of message
+              // background where the designer expected none.
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  const SizedBox.shrink(),
+            ),
+          if (message.buttons.isNotEmpty)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                  child: _buttons(stretch: true),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Image, then copy, then buttons — down the screen.
+  Widget _stacked(
+    BuildContext context,
+    ThemeData theme,
+    GameballMessageStyle style,
+  ) {
+    return SafeArea(
+      child: _wrapTappable(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (message.imageUrl != null)
+              // Capped rather than greedy: the copy below it is the reason this
+              // variant exists, so the image must not push it off screen.
+              Flexible(
+                child: Image.network(
+                  message.imageUrl!,
+                  key: const Key('gb_iam_fullscreen_image'),
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const SizedBox.shrink(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (message.header != null)
+                    Padding(
+                      padding:
+                          EdgeInsets.only(bottom: message.body != null ? 12 : 0),
+                      child: Text(
+                        message.header!,
+                        key: const Key('gb_iam_fullscreen_header'),
+                        textAlign: style.headerAlign ?? TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: style.headerColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  if (message.body != null)
+                    Text(
+                      message.body!,
+                      key: const Key('gb_iam_fullscreen_body'),
+                      textAlign: style.bodyAlign ?? TextAlign.center,
+                      style: theme.textTheme.bodyLarge
+                          ?.copyWith(color: style.bodyColor),
+                    ),
+                  if (message.buttons.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 28),
+                      child: _buttons(stretch: true),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Buttons stacked full-width rather than in a right-aligned row.
+  ///
+  /// A fullscreen message has the width for it, and a call to action that fills
+  /// the screen's width is the pattern every promo of this shape uses. The modal's
+  /// compact row would look lost here.
+  Widget _buttons({required bool stretch}) {
+    return Column(
+      key: const Key('gb_iam_fullscreen_buttons'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final button in message.buttons)
+          Padding(
+            padding: EdgeInsets.only(
+              top: button == message.buttons.first ? 0 : 12,
+            ),
+            child: SizedBox(
+              width: stretch ? double.infinity : null,
+              child: _button(button),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _button(GameballMessageButton button) {
+    final style = button.style;
+    return TextButton(
+      onPressed: () => onButtonPressed(button),
+      style: TextButton.styleFrom(
+        backgroundColor: style.backgroundColor,
+        foregroundColor: style.textColor,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: style.borderColor != null
+              ? BorderSide(color: style.borderColor!)
+              : BorderSide.none,
+        ),
+      ),
+      child: Text(
+        button.text,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  /// The close affordance, kept legible over anything behind it.
+  ///
+  /// Always over artwork in the image-only variant, and usually over it in the
+  /// other, so it defaults to a light glyph on a scrim disc unless the campaign
+  /// named a colour. A dark glyph on a dark photograph is invisible.
+  Widget _closeButton(GameballMessageStyle style) {
+    final overArtwork = message.imageUrl != null;
+
+    return Align(
+      alignment: Alignment.topRight,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: overArtwork && style.closeButtonColor == null
+                ? const Color(0x59000000)
+                : null,
+          ),
+          child: IconButton(
+            key: const Key('gb_iam_fullscreen_close'),
+            icon: const Icon(Icons.close),
+            iconSize: 24,
+            color: style.closeButtonColor ??
+                (overArtwork ? const Color(0xFFFFFFFF) : null),
+            tooltip: 'Close',
+            onPressed: onClosePressed,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Makes [child] tappable only when the campaign supplied a message action.
+  Widget _wrapTappable(Widget child) {
+    if (message.clickAction == null) return child;
+    return GestureDetector(
+      key: const Key('gb_iam_fullscreen_tap'),
+      // Opaque rather than InkWell: a ripple across the whole screen reads as a
+      // glitch, and the artwork should not be tinted by a highlight.
+      behavior: HitTestBehavior.opaque,
+      onTap: onMessagePressed,
+      child: child,
+    );
+  }
+}

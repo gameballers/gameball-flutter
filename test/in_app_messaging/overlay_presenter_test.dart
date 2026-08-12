@@ -329,4 +329,113 @@ void main() {
       await tester.pumpAndSettle();
     });
   });
+
+  group('orientation, which only fullscreen can insist on', () {
+    /// Presents [message] on a viewport of the given shape and reports whether
+    /// the presenter accepted it.
+    Future<bool> presentOn(
+      WidgetTester tester,
+      GameballInAppMessage message, {
+      required Size surface,
+    }) async {
+      // `tester.view` rather than `setSurfaceSize`: the latter did not reach
+      // MediaQuery before `present` read it, so every case resolved against the
+      // default 800x600 test window — which is landscape, and inverted two of
+      // these assertions.
+      tester.view.physicalSize = surface;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final key = GlobalKey<NavigatorState>();
+      final presenter = OverlayPresenter(key);
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Scaffold(body: Text('host')),
+      ));
+
+      final shown = presenter.present(
+        message: message,
+        onShown: () {},
+        onButtonPressed: (_) {},
+        onMessagePressed: () {},
+        onDismissed: () {},
+      );
+      await tester.pumpAndSettle();
+      addTearDown(presenter.dismiss);
+      return shown;
+    }
+
+    const portraitOnly = GameballInAppMessage(
+      id: '1',
+      type: GameballMessageType.fullscreen,
+      body: 'portrait poster',
+      orientation: GameballMessageOrientation.portrait,
+    );
+
+    testWidgets('a portrait-only message shows in portrait', (tester) async {
+      expect(
+        await presentOn(tester, portraitOnly, surface: const Size(390, 844)),
+        isTrue,
+      );
+    });
+
+    testWidgets('a portrait-only message is refused in landscape',
+        (tester) async {
+      expect(
+        await presentOn(tester, portraitOnly, surface: const Size(844, 390)),
+        isFalse,
+        reason: 'returning false hands it back to the service as pending. A '
+            'poster with its copy baked into the artwork is unreadable sideways, '
+            'so later beats wrong',
+      );
+    });
+
+    testWidgets('a landscape-only message is refused in portrait',
+        (tester) async {
+      expect(
+        await presentOn(
+          tester,
+          const GameballInAppMessage(
+            id: '1',
+            type: GameballMessageType.fullscreen,
+            body: 'landscape poster',
+            orientation: GameballMessageOrientation.landscape,
+          ),
+          surface: const Size(390, 844),
+        ),
+        isFalse,
+      );
+    });
+
+    testWidgets('any orientation shows either way', (tester) async {
+      const anyOrientation = GameballInAppMessage(
+        id: '1',
+        type: GameballMessageType.fullscreen,
+        body: 'flexible',
+      );
+
+      expect(
+        await presentOn(tester, anyOrientation, surface: const Size(390, 844)),
+        isTrue,
+      );
+    });
+
+    testWidgets('a modal ignores orientation entirely', (tester) async {
+      expect(
+        await presentOn(
+          tester,
+          const GameballInAppMessage(
+            id: '1',
+            type: GameballMessageType.modal,
+            body: 'small enough either way',
+            orientation: GameballMessageOrientation.portrait,
+          ),
+          surface: const Size(844, 390),
+        ),
+        isTrue,
+        reason: 'enforcing it for a small centred card would suppress messages '
+            'for no benefit',
+      );
+    });
+  });
 }

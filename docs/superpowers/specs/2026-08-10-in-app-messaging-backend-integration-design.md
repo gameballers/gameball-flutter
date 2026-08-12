@@ -319,8 +319,24 @@ created. `isTest` stays on the message so the debug screen can surface it.
 
 Deliberately not in this work, and unaffected by it:
 
-- **Message types beyond Modal** — Slideup, Fullscreen, HtmlFullscreen, EmailCapture. Unknown
-  `messageType` already skips safely, so these arrive as no-ops rather than errors.
+- ~~**Message types beyond Modal**~~ — **Slideup and Fullscreen are now implemented.**
+  HtmlFullscreen and EmailCapture remain out of scope; an unknown `messageType` still skips
+  safely, so they arrive as no-ops rather than errors.
+
+  Slideup was taken first because alpha already served six of them, so it could be verified
+  against real data on day one. It is a separate widget rather than a squashed modal for three
+  behavioural reasons: it does not block the app, it has no buttons, and it needs swipe-to-dismiss
+  because the live campaigns carry neither a close behaviour nor an auto-dismiss.
+
+  Fullscreen brings two genuinely different compositions — image over copy, or artwork filling the
+  screen with buttons floated over it (Braze's `GRAPHIC`). The second is the pattern most consumer
+  apps actually ship, and it is not reachable by removing text from the first, which is the
+  clearest argument for O12.
+
+  `orientation` is enforced at display: a fullscreen campaign whose orientation does not match is
+  refused by the presenter and held as pending, because a poster with its copy baked into the
+  artwork is unreadable sideways. **A device rotation does not yet trigger a retry** — the pending
+  message waits for the next display opportunity instead.
 - **The `submit` event** and email capture.
 - **The HtmlFullscreen sandbox** and its JS bridge.
 - **`log_event`, `log_attribute`, `request_push_permission` actions.** The first two are close to
@@ -369,7 +385,7 @@ Each has a fallback so none blocks starting.
 | **O8** | **Is `eventUid` actually deduplicated?** The reference says events are *"persisted deduplicated on eventUid"*, but a replay returns `accepted:1` identically, so the client cannot confirm it. Our outbox is deliberately at-least-once and relies on this; without it, a kill between response and bookkeeping inflates impressions | None available client-side. Needs someone to check stored rows for a replayed uid |
 | **O9** | **`eventUid` must be a GUID** — undocumented, and a non-GUID is a hard 400 rather than a per-event rejection. Please document it, or accept any string | We generate v4 UUIDs, so this is a landmine rather than a live bug |
 | **O10** | A batch of *only* unsupported event types returns `success:false`, so we discard it. Fine today, but if `dismiss` were ever dropped from the vocabulary, a batch of only dismissals would vanish. Prefer `accepted:0, rejected:n, success:true` | Discard, as now |
-| **O12** | **No field names the modal layout.** `messageType: 2` says "modal" and stops; nothing distinguishes "text with optional image" from "image only", so we infer it from which of `locale.header`, `locale.message` and `content.imageUrl` came back non-null. Braze does **not** infer — it sends `image_style: TOP \| GRAPHIC`, where GRAPHIC means the image fills the message area with buttons over it. Their *Flutter* SDK drops the field, which is the lossiness we set out not to inherit. Two consequences: a campaign whose personalised copy resolves to empty is indistinguishable from a deliberate image-only one (campaign 2051 already ships `"header": "Welcome !"` — a Liquid placeholder that resolved to nothing), and GRAPHIC is a different composition rather than the same widget minus text. **Please send the layout the dashboard already asked the marketer for** | Infer from populated fields, as now, and render image-only as a taller image with buttons below rather than over it |
+| **O12** | **No field names the layout.** Now the sharpest of these, because fullscreen makes it visible: `imageOnly` fills the screen and floats buttons over the artwork, which is not the stacked layout with the copy removed. The parser reads an explicit `layout` or `imageStyle` when present — either spelling, `graphic`/`image_only` or `top`/`text` — and only infers when neither arrives, so the day the field ships the guessing stops with no other change. `messageType: 2` says "modal" and stops; nothing distinguishes "text with optional image" from "image only", so we infer it from which of `locale.header`, `locale.message` and `content.imageUrl` came back non-null. Braze does **not** infer — it sends `image_style: TOP \| GRAPHIC`, where GRAPHIC means the image fills the message area with buttons over it. Their *Flutter* SDK drops the field, which is the lossiness we set out not to inherit. Two consequences: a campaign whose personalised copy resolves to empty is indistinguishable from a deliberate image-only one (campaign 2051 already ships `"header": "Welcome !"` — a Liquid placeholder that resolved to nothing), and GRAPHIC is a different composition rather than the same widget minus text. **Please send the layout the dashboard already asked the marketer for** | Infer from populated fields, as now, and render image-only as a taller image with buttons below rather than over it |
 | **O11** | Which environment gets these next? Only alpha has them, and the SDK's live telemetry path would 401-or-404 anywhere else — both of which discard. **The events transport should not ship ahead of the endpoint** | Point `apiPrefix` at alpha for testing |
 
 ---
