@@ -116,6 +116,18 @@ class GameballMessageButton {
   final String text;
   final GameballClickAction action;
   final GameballButtonStyle style;
+
+  /// The same button with different label text.
+  ///
+  /// Exists for personalisation, which rewrites labels just before display. The
+  /// id is carried through deliberately: it is what click analytics report, and
+  /// a substituted button that lost it would be unattributable.
+  GameballMessageButton withText(String newText) => GameballMessageButton(
+        id: id,
+        text: newText,
+        action: action,
+        style: style,
+      );
 }
 
 /// Message-level colours and alignment. A null field means "use the host's theme".
@@ -236,4 +248,34 @@ class GameballInAppMessage {
   final Map<String, String> extras;
 
   final GameballMessageStyle style;
+
+  /// The same message with different text.
+  ///
+  /// Deliberately narrow rather than a general `copyWith`: personalisation is the
+  /// only thing that rewrites a parsed message, and it has no business changing
+  /// the layout, the action, the artwork or the styling. A full copyWith would
+  /// invite exactly that.
+  GameballInAppMessage withText({
+    String? header,
+    String? body,
+    List<GameballMessageButton>? buttons,
+  }) =>
+      GameballInAppMessage(
+        id: id,
+        type: type,
+        body: body ?? this.body,
+        header: header ?? this.header,
+        imageUrl: imageUrl,
+        clickAction: clickAction,
+        showCloseButton: showCloseButton,
+        dismissOnScrimTap: dismissOnScrimTap,
+        autoDismissAfter: autoDismissAfter,
+        layout: layout,
+        orientation: orientation,
+        slidePosition: slidePosition,
+        iconUrl: iconUrl,
+        buttons: buttons ?? this.buttons,
+        extras: extras,
+        style: style,
+      );
 }
