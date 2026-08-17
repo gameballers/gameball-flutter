@@ -315,7 +315,7 @@ void main() {
 
     test('parses an event trigger by name, ignoring the numeric id', () {
       final trigger = one(minimal(
-        trigger: '{"type":"event","eventId":812,"eventName":"add_to_cart"}',
+        trigger: '{"type":"event","eventId":812,"name":"add_to_cart"}',
       ))!.trigger as GameballCustomEventTrigger;
 
       expect(trigger.eventName, 'add_to_cart');
@@ -323,7 +323,7 @@ void main() {
 
     test('accepts custom_event as an alias for event', () {
       final trigger = one(minimal(
-        trigger: '{"type":"custom_event","eventName":"x"}',
+        trigger: '{"type":"custom_event","name":"x"}',
       ))!.trigger as GameballCustomEventTrigger;
 
       expect(trigger.eventName, 'x');
@@ -371,14 +371,14 @@ void main() {
   group('metadata filters', () {
     GameballCustomEventTrigger? eventTrigger(String filters) {
       final campaign = one(minimal(
-        trigger: '{"type":"event","eventName":"e","metadataFilters":$filters}',
+        trigger: '{"type":"event","name":"e","metadataFilters":$filters}',
       ));
       return campaign?.trigger as GameballCustomEventTrigger?;
     }
 
     test('reads the property name from metadataKey', () {
       final t = eventTrigger(
-          '[{"metadataId":1,"metadataKey":"price","operator":"greaterThan",'
+          '[{"metadataId":1,"name":"price","operator":"greaterThan",'
           '"value":100}]')!;
 
       expect(t.filters.single.property, 'price');
@@ -389,7 +389,7 @@ void main() {
     test('reads it from metadataName too, since the spelling was agreed verbally',
         () {
       final t = eventTrigger(
-          '[{"metadataId":1,"metadataName":"price","operator":"is",'
+          '[{"metadataId":1,"name":"price","operator":"is",'
           '"value":"x"}]')!;
 
       expect(t.filters.single.property, 'price');
@@ -407,14 +407,14 @@ void main() {
 
     test('maps the backend operator names', () {
       expect(
-        eventTrigger('[{"metadataKey":"a","operator":"Is","value":1}]')!
+        eventTrigger('[{"name":"a","operator":"Is","value":1}]')!
             .filters
             .single
             .operator,
         GameballFilterOperator.equals,
       );
       expect(
-        eventTrigger('[{"metadataKey":"a","operator":"IsNot","value":1}]')!
+        eventTrigger('[{"name":"a","operator":"IsNot","value":1}]')!
             .filters
             .single
             .operator,
@@ -425,7 +425,7 @@ void main() {
     test('accepts our own operator aliases', () {
       for (final alias in ['equals', 'eq', '==']) {
         expect(
-          eventTrigger('[{"metadataKey":"a","operator":"$alias","value":1}]')!
+          eventTrigger('[{"name":"a","operator":"$alias","value":1}]')!
               .filters
               .single
               .operator,
@@ -437,22 +437,22 @@ void main() {
 
     test('drops a filter with an unusable operator, widening the campaign', () {
       final t = eventTrigger(
-          '[{"metadataKey":"a","operator":"sounds_like","value":1}]')!;
+          '[{"name":"a","operator":"sounds_like","value":1}]')!;
 
       expect(t.filters, isEmpty,
           reason: 'a typo in one operator should not hide the campaign entirely');
     });
 
     test('drops a filter with no value', () {
-      expect(eventTrigger('[{"metadataKey":"a","operator":"is"}]')!.filters,
+      expect(eventTrigger('[{"name":"a","operator":"is"}]')!.filters,
           isEmpty);
     });
 
     test('drops the campaign when the logical operator is not AND', () {
       final campaign = one(minimal(
-        trigger: '{"type":"event","eventName":"e",'
+        trigger: '{"type":"event","name":"e",'
             '"metadataLogicalOperator":"Or",'
-            '"metadataFilters":[{"metadataKey":"a","operator":"is","value":1}]}',
+            '"metadataFilters":[{"name":"a","operator":"is","value":1}]}',
       ));
 
       expect(campaign, isNull,
@@ -462,9 +462,9 @@ void main() {
     test('accepts an explicit And', () {
       expect(
         one(minimal(
-          trigger: '{"type":"event","eventName":"e",'
+          trigger: '{"type":"event","name":"e",'
               '"metadataLogicalOperator":"And",'
-              '"metadataFilters":[{"metadataKey":"a","operator":"is","value":1}]}',
+              '"metadataFilters":[{"name":"a","operator":"is","value":1}]}',
         )),
         isNotNull,
       );

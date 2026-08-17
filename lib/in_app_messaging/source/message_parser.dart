@@ -153,12 +153,12 @@ GameballMessageTrigger? _parseTrigger(Object? json, String label) {
     // source and any older payload keep parsing.
     case 'event':
     case 'custom_event':
-      final eventName = _asString(json['eventName']);
+      final eventName = _asString(json['name']);
       if (eventName == null || eventName.isEmpty) {
         // The backend keys triggers on a numeric eventId and sends the name
         // alongside it. Without the name there is nothing to match a locally
-        // logged event against — the id is meaningless on the device.
-        iamLog('campaign $label dropped: event trigger has no "eventName" '
+        // logged event against — the id is internal and meaningless here.
+        iamLog('campaign $label dropped: event trigger has no "name" '
             '(eventId ${json['eventId']} cannot be resolved on the device)');
         return null;
       }
@@ -209,12 +209,10 @@ List<GameballPropertyFilter>? _parseFilters(Object? json, String label) {
       iamLog('campaign $label: filter skipped, entry is not an object');
       continue;
     }
-    // Three spellings: the backend's agreed metadata name, whichever of the two
-    // it ships as, and the fixture source's own. Costs one `??` and means the
-    // parser does not care which lands.
-    final property = _asString(entry['metadataKey']) ??
-        _asString(entry['metadataName']) ??
-        _asString(entry['property']);
+    // V4 names both the trigger's event and each filter's property with `name`.
+    // The older spellings are gone rather than tolerated: the v1 and v4 paths are
+    // disjoint, so a v4 response always uses this one.
+    final property = _asString(entry['name']);
     if (property == null || property.isEmpty) {
       iamLog('campaign $label dropped: filter has no metadata name '
           '(metadataId ${entry['metadataId']} cannot be resolved on the device)');

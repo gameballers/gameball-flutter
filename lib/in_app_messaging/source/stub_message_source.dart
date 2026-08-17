@@ -104,10 +104,10 @@ const String stubSyncJson = '''
         "trigger": {
           "type": "event",
           "eventId": 812,
-          "eventName": "$stubCartEventName",
+          "name": "$stubCartEventName",
           "metadataLogicalOperator": "And",
           "metadataFilters": [
-            { "metadataId": 4051, "metadataKey": "productId",
+            { "metadataId": 4051, "name": "productId",
               "operator": "contains", "value": "sku" }
           ],
           "repeatable": true,
@@ -142,7 +142,7 @@ const String stubSyncJson = '''
         "trigger": {
           "type": "event",
           "eventId": 813,
-          "eventName": "$stubPromoEventName",
+          "name": "$stubPromoEventName",
           "repeatable": false
         },
         "content": {
@@ -165,7 +165,7 @@ const String stubSyncJson = '''
         "trigger": {
           "type": "event",
           "eventId": 900,
-          "eventName": "$stubPurchaseEventName",
+          "name": "$stubPurchaseEventName",
           "repeatable": true,
           "minIntervalSeconds": 0
         },
@@ -192,10 +192,10 @@ const String stubSyncJson = '''
         "trigger": {
           "type": "event",
           "eventId": 900,
-          "eventName": "$stubPurchaseEventName",
+          "name": "$stubPurchaseEventName",
           "metadataLogicalOperator": "And",
           "metadataFilters": [
-            { "metadataId": 4100, "metadataKey": "price",
+            { "metadataId": 4100, "name": "price",
               "operator": "greaterThan", "value": 100 }
           ],
           "repeatable": false

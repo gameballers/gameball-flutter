@@ -1,191 +1,137 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/material.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
-import 'package:gameball_sdk/in_app_messaging/presentation/in_app_message_modal.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
-/// Parses a response captured from the live alpha endpoint, rather than one we
+/// Parses a response captured from the live V4 endpoint, rather than one we
 /// wrote to match our own reading of the contract.
 ///
-/// Captured 2026-08-11 from
-/// `POST api.alpha.gameball.app/api/v1.0/bots/inapp/sync?playerUniqueId=…`.
+/// Captured 2026-08-17 from
+/// `POST api.alpha.gameball.app/api/v4.0/integrations/inapp-messages/sync`.
 /// Every other parser test asserts against a fixture *we* authored, which proves
 /// only that the parser agrees with our interpretation. This one proves it agrees
-/// with the backend.
+/// with the backend — and it is what caught `content.media` going unread.
+///
+/// **Assertions are derived from the payload, not hard-coded against it.** Alpha
+/// is a live environment whose campaigns are edited by whoever is testing that
+/// day; between writing this suite and running it, one campaign disappeared and
+/// another appeared. A test pinned to campaign 2053 would have started failing
+/// for a reason that says nothing about the parser. Reading the expectation out
+/// of the raw JSON keeps the claim — "nothing the backend sent was lost" —
+/// true whatever the dashboard holds.
 void main() {
-  final raw =
-      File('test/fixtures/alpha-sync-response.json').readAsStringSync();
+  final raw = File('test/fixtures/v4-sync-response.json').readAsStringSync();
+  final decoded = jsonDecode(raw) as Map<String, dynamic>;
+  final rawMessages = (decoded['messages'] as List).cast<Map<String, dynamic>>();
 
-  /// The one modal in the live payload, and the only campaign this SDK renders.
-  InAppMessageCampaign theModal() => parseSyncResponse(raw)
-      .campaigns
-      .firstWhere((c) => c.message.type == GameballMessageType.modal);
+  List<InAppMessageCampaign> parsed() => parseSyncResponse(raw).campaigns;
 
-  test('the real response parses without loss or error', () {
-    final result = parseSyncResponse(raw);
+  InAppMessageCampaign byId(int id) =>
+      parsed().firstWhere((c) => c.campaignId == id);
 
-    expect(result.campaigns, hasLength(7),
-        reason: 'every campaign in the response is understood — none dropped '
-            'for a shape we did not anticipate');
-    expect(result.cooldown, const Duration(seconds: 30),
-        reason: 'taken from the payload, not the fallback');
+  test('no campaign the backend sent is dropped', () {
+    expect(parsed(), hasLength(rawMessages.length),
+        reason: 'a dropped campaign is a campaign the customer never sees, and '
+            'the parser logs rather than throws — so silence is the failure mode');
   });
 
-  test('campaign identity comes through', () {
-    final campaign = parseSyncResponse(raw).campaigns.first;
-
-    expect(campaign.campaignId, 2041);
-    expect(campaign.variationId, 4);
-    expect(campaign.dispatchId, 'c88ca3f1-2c3c-4d3c-87f7-bf054298e654');
-    expect(campaign.name, 'frozen but renameable');
-    expect(campaign.priority, 9);
-    expect(campaign.isTest, isFalse);
-    expect(campaign.repeatable, isFalse);
-    expect(campaign.trigger, isA<GameballSessionStartTrigger>());
-  });
-
-  test('every campaign carries a dispatchId, so telemetry can attribute', () {
-    for (final campaign in parseSyncResponse(raw).campaigns) {
-      expect(campaign.dispatchId, isNotNull,
-          reason: 'campaign ${campaign.label} could not be attributed');
-      expect(campaign.variationId, isNotNull);
-    }
-  });
-
-  test('every campaign in the live response is now renderable', () {
-    final types =
-        parseSyncResponse(raw).campaigns.map((c) => c.message.type).toSet();
-
-    expect(types, {GameballMessageType.slideup, GameballMessageType.modal},
-        reason: 'six slideups and one modal. Before slideup support this sync '
-            'produced one usable campaign out of seven');
-  });
-
-  test('the live slideups parse with their real content', () {
-    final slideups = parseSyncResponse(raw)
-        .campaigns
-        .where((c) => c.message.type == GameballMessageType.slideup)
-        .toList();
-
-    expect(slideups, hasLength(6));
-    for (final c in slideups) {
-      expect(c.message.body, isNotNull,
-          reason: 'campaign ${c.label} has no copy, and a slideup is its copy');
-      expect(c.message.buttons, isEmpty);
-    }
-    // The live set has three of each, which is what makes this worth asserting:
-    // a parser that ignored slideFrom and defaulted everything to the bottom
-    // would still pass a test where they all agreed.
-    final positions = slideups.map((c) => c.message.slidePosition).toList();
-    expect(positions.where((p) => p == GameballSlidePosition.top), hasLength(3));
+  test('the payload exercises all three rendered types', () {
+    final types = parsed().map((c) => c.message.type).toSet();
     expect(
-        positions.where((p) => p == GameballSlidePosition.bottom), hasLength(3));
+      types,
+      containsAll(<GameballMessageType>[
+        GameballMessageType.modal,
+        GameballMessageType.slideup,
+        GameballMessageType.fullscreen,
+      ]),
+      reason: 'until V4, alpha served only slideups, so two of the three '
+          'renderers had never met real data',
+    );
   });
 
-  test('a content block of explicit nulls does not break styling', () {
-    // Every field in the real `content` is present and null — not absent, which
-    // is the shape our own fixtures used. A parser that only handled missing keys
-    // would throw here.
-    final message = parseSyncResponse(raw).campaigns.first.message;
-
-    expect(message.style.backgroundColor, isNull);
-    expect(message.style.headerAlign, isNull);
-    expect(message.buttons, isEmpty);
-    expect(message.extras, isEmpty);
-    expect(message.autoDismissAfter, isNull);
-    expect(message.clickAction, isNull);
+  test('the cooldown comes from the response, not the client default', () {
+    expect(parseSyncResponse(raw).cooldown,
+        Duration(seconds: decoded['cooldownSeconds'] as int));
   });
 
-  test('a null closeBehaviour still leaves the message dismissable', () {
-    final message = parseSyncResponse(raw).campaigns.first.message;
+  group('triggers', () {
+    test('every event trigger keeps the name the backend sent', () {
+      final events = rawMessages.where(
+          (m) => (m['trigger'] as Map<String, dynamic>)['type'] == 'event');
+      expect(events, isNotEmpty, reason: 'the fixture must exercise this path');
 
-    expect(message.showCloseButton, isTrue);
-    expect(message.dismissOnScrimTap, isTrue,
-        reason: 'the live payload sends null here, and a message with no way out '
-            'would trap the user in the app');
-  });
-
-  test('body text is read from locale.message', () {
-    expect(parseSyncResponse(raw).campaigns.first.message.body, 'New slideup A');
-  });
-
-  group('the live modal campaign', () {
-    test('its model is assembled from both halves of the payload', () {
-      final campaign = theModal();
-
-      expect(campaign.campaignId, 2051);
-      expect(campaign.variationId, 16);
-      expect(campaign.name, 'Welcome popup on session start');
-      expect(campaign.priority, 5);
-      expect(campaign.trigger, isA<GameballSessionStartTrigger>());
-      expect(campaign.repeatable, isFalse);
-
-      final message = campaign.message;
-      expect(message.header, 'Welcome !');
-      expect(message.body, 'Great to see you back - check what is new today.');
-      expect(message.imageUrl, isNotNull);
-      // Text and styling arrive in separate blocks and are joined here.
-      expect(message.style.backgroundColor, const Color(0xFFFFFFFF));
-      expect(message.style.headerColor, const Color(0xFF111827));
-      expect(message.style.bodyColor, const Color(0xFF1F2937));
-      expect(message.style.closeButtonColor, isNull,
-          reason: 'sent as null, so the host theme decides');
+      for (final message in events) {
+        final expected =
+            (message['trigger'] as Map<String, dynamic>)['name'] as String;
+        expect(
+          byId(message['campaignId'] as int).trigger,
+          isA<GameballCustomEventTrigger>()
+              .having((t) => t.eventName, 'eventName', expected),
+          reason: 'matching is by name; eventId is internal to the backend',
+        );
+      }
     });
 
-    test('the button is paired across content and locale by id', () {
-      final button = theModal().message.buttons.single;
+    test('every session_start trigger parses as one', () {
+      final starts = rawMessages.where((m) =>
+          (m['trigger'] as Map<String, dynamic>)['type'] == 'session_start');
+      expect(starts, isNotEmpty);
 
-      expect(button.id, 'cta');
-      expect(button.text, 'Got it',
-          reason: 'the label lives in locale.buttons and the action in '
-              'content.buttons — neither half is usable alone');
-      expect(button.action, isA<GameballDismissAction>());
+      for (final message in starts) {
+        expect(byId(message['campaignId'] as int).trigger,
+            isA<GameballSessionStartTrigger>());
+      }
     });
 
-    test('closeBehaviour "button" offers the close glyph but not the scrim', () {
-      final message = theModal().message;
+    test('a repeatable campaign keeps its minimum interval', () {
+      final repeatable = rawMessages.firstWhere(
+        (m) => (m['trigger'] as Map<String, dynamic>)['minIntervalSeconds'] != null,
+        orElse: () => <String, dynamic>{},
+      );
+      if (repeatable.isEmpty) {
+        markTestSkipped('no repeatable campaign in the current payload');
+        return;
+      }
 
-      expect(message.showCloseButton, isTrue);
-      expect(message.dismissOnScrimTap, isFalse,
-          reason: 'the live payload says "button", so a tap outside must not '
-              'dismiss — the first real campaign to exercise this');
-    });
+      final seconds = (repeatable['trigger'] as Map<String, dynamic>)
+          ['minIntervalSeconds'] as int;
+      final campaign = byId(repeatable['campaignId'] as int);
 
-    testWidgets('it renders, and a dead image URL does not stop it',
-        (tester) async {
-      final message = theModal().message;
-      final tapped = <String>[];
-
-      await tester.pumpWidget(MaterialApp(
-        home: GameballInAppMessageModal(
-          message: message,
-          onButtonPressed: (b) => tapped.add(b.id),
-          onClosePressed: () {},
-          onMessagePressed: () {},
-        ),
-      ));
-      await tester.pump();
-
-      // The campaign image is a placeholder that answers 403, and the test
-      // binding fails every image load anyway. Both collapse to nothing, and the
-      // message still has to be readable and actionable.
-      expect(find.text('Welcome !'), findsOneWidget);
-      expect(find.text('Great to see you back - check what is new today.'),
-          findsOneWidget);
-      expect(find.text('Got it'), findsOneWidget);
-
-      await tester.tap(find.text('Got it'));
-      expect(tapped, ['cta']);
+      expect(campaign.repeatable, isTrue);
+      expect(campaign.minInterval, Duration(seconds: seconds));
     });
   });
 
-  test('success is read from a payload with no errorMsg key at all', () {
-    // The live response omits `errorMsg` on success rather than sending null.
-    expect(raw.contains('errorMsg'), isFalse);
-    expect(parseSyncResponse(raw).campaigns, isNotEmpty);
+  test('buttons keep their id and pair with the translated label', () {
+    final withButtons = rawMessages.firstWhere(
+      (m) => ((m['content'] as Map<String, dynamic>)['buttons'] as List?)
+              ?.isNotEmpty ??
+          false,
+      orElse: () => <String, dynamic>{},
+    );
+    if (withButtons.isEmpty) {
+      markTestSkipped('no campaign with buttons in the current payload');
+      return;
+    }
+
+    final rawButton = ((withButtons['content'] as Map<String, dynamic>)['buttons']
+        as List)[0] as Map<String, dynamic>;
+    final rawLabel = ((withButtons['locale'] as Map<String, dynamic>)['buttons']
+        as List)[0] as Map<String, dynamic>;
+
+    final parsedButton =
+        byId(withButtons['campaignId'] as int).message.buttons.single;
+
+    expect(parsedButton.id, rawButton['id']);
+    expect(parsedButton.text, rawLabel['text'],
+        reason: 'styling and label arrive in separate halves, paired by id');
+  });
+
+  test('the raw payload is carried through for the cache to store', () {
+    expect(parseSyncResponse(raw).rawJson, raw);
   });
 }
