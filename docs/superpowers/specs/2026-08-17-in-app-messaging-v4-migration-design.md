@@ -29,7 +29,8 @@ from the document rather than a live response, it says so.
 | 4 | **Read `name` only; no tolerant spelling fallback** | The old parser accepted `eventName`/`metadataKey`/`metadataName` because the naming was agreed verbally. The paths are now disjoint — a v4 response always uses `name` — so tolerance would protect against nothing |
 | 5 | **Fold `content.media` into `imageUrl` rather than adding a model field** | The renderer treats them as one slot and video is not rendered, so a second field would be a distinction without a difference |
 | 6 | **Keep 50-event chunking even though the server no longer caps it** | It now bounds the cost of a failed retry rather than satisfying a limit. Re-documented as our choice, not theirs |
-| 7 | **Variables endpoint deferred** | Not deployed, and blocked on a contradiction in its own contract. See O13 |
+| 7 | **Build variables now, against the document, knowing it is not deployed** | Decided after the probe. The token scan makes it **inert until the backend sends templates**: no tokens in the text means no call, no cost, no behaviour change. It self-activates the day tokens appear, so building early risks nothing and saves a second pass. The contract contradiction is unresolved and stays recorded as O13 |
+| 8 | **Only token-bearing messages take an async display path** | The fetch has to happen before display, but making the whole display path async would put every message through new code for a feature none of them use today. The sync path stays byte-identical for messages without tokens — which is all eight live campaigns |
 
 ## What does not change
 
@@ -60,12 +61,12 @@ these tables is a real response.
 | `content.media` | Set on the one fullscreen campaign, with `imageUrl` null | **A real gap.** That campaign currently has no artwork source at all |
 | `imageUrl` | Either a real URL or a proper `null` — never `""` | No empty-string hazard. The blank-to-null normalisation below is defensive only |
 | Action objects | Flat, with every field present-or-null; `navigate` carries a bare route name (`orders`, no slash) | Parses as-is |
-| `locale` | Always carries all 8 keys, mostly null | Matches the shape the parser already tolerates |
+| `locale` object (response) | Always carries all 8 keys, mostly null | Matches the shape the parser already tolerates |
 | Personalisation | **No `{tokens}` anywhere** — text arrives as `"Hello Sample App User!"` | Server substitutes at sync. See O13 |
 | **`platform` is required in practice** | Omitting it returns **`200` with `messages: []`** — not an error | The only mandatory-by-validation field is `customerId`, but a body without `platform` silently yields nothing. Optional in the schema, load-bearing in effect |
 | Platform targeting | `platform:1` → 12 campaigns, `platform:2` → 8 | Campaigns are targeted per platform, so the code we send decides what the user can ever see |
 | **Unknown platform codes** | `0`, `3`, `99` → `200` with `messages: []` | See O18. `getDevicePlatformCode()` returns **0** on macOS, web and desktop |
-| `locale` | `en` and `ar` both return 8 | It selects a translation, not eligibility — these campaigns carry EN only |
+| `locale` field (request) | `en` and `ar` both return 8 | It selects a translation, not eligibility — these campaigns carry EN only |
 | `appVersion` / `sdkVersion` | Omitting them changes nothing observable | Sent anyway, for targeting we cannot see from here |
 | Missing `customerId` | 400 `{code:3000, type:"PAYLOAD_ERROR", message:"customer id is missing"}` | |
 | Unknown customer | 404 **with** an `ErrorResponse` body `{code:7000, type:"CUSTOMER_ERROR"}` | Distinguishable from a missing endpoint — see below |
@@ -184,7 +185,75 @@ Batching thresholds move to the documented cadence:
 | Events per request | 50 | 50, kept — see decision 6 |
 | Outbox ceiling | 500 | unchanged |
 
-## Section 4 — Fixtures and tests
+## Section 4 — Personalisation variables
+
+Built to the document. **Not verifiable today**: the endpoint 404s and the live payload carries no
+tokens, so every test here is fixture-driven and the feature is inert in production until both
+change. That is a deliberate trade, recorded in decision 7.
+
+### The pieces
+
+A fifth seam, matching the four the module already injects:
+
+```dart
+abstract interface class VariableSource {
+  /// Current personalisation values for [customerId]. Empty when unavailable.
+  Future<Map<String, String>> fetch(String customerId);
+}
+```
+
+The shipped implementation posts `{customerId}` to `…/inapp-messages/variables` and reads
+`{"variables": {...}}`. Any non-200 yields an empty map rather than an exception — the caller's only
+correct response to every documented failure is "use what you already have", so there is nothing for
+it to distinguish.
+
+Around it: a 60-second cache keyed by `customerId`, cleared on customer change and on `stop()`, and
+a pure substitution function.
+
+### Substitution
+
+`substituteTokens(String text, Map<String, String> values)` replaces every `{token}` whose name
+matches `[A-Za-z_][A-Za-z0-9_]*`. Rules, straight from the document:
+
+- Values are inserted verbatim; they arrive pre-formatted, including thousand separators.
+- **A token with no matching key is left exactly as it is.** Forward compatibility: a newer server
+  may know tokens this SDK's map does not, and blanking them would silently delete copy.
+- Anything that is not a well-formed token — a stray `{`, `{ spaced }`, `{2}` — is left alone.
+
+Applied to `header`, `body` and each button's `text`. `html` and the EmailCapture strings are
+skipped because those message types are not rendered; when they are, this is the function they use.
+
+`GameballInAppMessage` gains a narrow copy method for this — not a general `copyWith`, which would
+invite mutation of fields that have no business changing between parse and display.
+
+### Where it happens
+
+In the service, immediately before `present()`, and **only for messages that carry a token**:
+
+```
+_tryPresent(campaign):
+    widget open, or another message showing, or a presentation in flight  → defer
+    message has no '{' token                                             → present now  (unchanged path)
+    otherwise                                                            → resolve, then present
+```
+
+The scan is a `contains('{')` pre-check before the regex, so the common case costs one character
+comparison. The resolve path sets a `_presentationInFlight` flag, awaits the fetch bounded at **2
+seconds**, re-checks the display guards on the way back — the screen may have changed during the
+await — and then presents the substituted copy. On timeout, on failure, or on an empty map it
+presents the original text.
+
+The flag matters: without it, a trigger firing during the await could present a second message on
+top of the first. Every existing guard is re-evaluated after the await rather than trusted from
+before it.
+
+Impression, cap and dismissal bookkeeping are untouched — they still fire from `onShown`, so a
+message whose variables timed out is recorded exactly like any other.
+
+Both durations are injectable, matching `prefetchTimeout`: `variableTimeout` (2s) and
+`variableCacheTtl` (60s).
+
+## Section 5 — Fixtures and tests
 
 Today's real response is captured as `test/fixtures/v4-sync-response.json`, replacing the bots-era
 `alpha-sync-response.json`. `real_sync_response_test.dart` asserts all eight campaigns parse, which
@@ -197,7 +266,7 @@ Parser tests lose their envelope cases and gain: `trigger.name`, a null `name` o
 each `layout` value plus an unknown one, `media` precedence per type, video ignored, and blank URLs.
 The events tests become a status-code table matching the one above.
 
-## Section 5 — Documentation
+## Section 6 — Documentation
 
 The vendored reference is replaced with the V4 document. The 2026-08-10 spec is annotated to point
 here for anything wire-shaped, with O1, O2, O7, O8, O10 and O12 marked resolved.
@@ -209,7 +278,6 @@ given a new version heading.
 
 ## Out of scope
 
-- **The variables endpoint** and `{token}` substitution. Not deployed, and blocked on O13.
 - **HtmlFullscreen and EmailCapture** (`messageType` 4 and 5), the `submit` event, and the HTML
   sandbox with its JS bridge. An unknown `messageType` still skips safely.
 - **Video media.** `media.type == "video"` parses and is ignored.
@@ -235,7 +303,7 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
 | **O5** | Are numeric filter values JSON numbers or strings? | Coerce: numeric parse for ordering operators, string compare otherwise |
 | **O6** | Is `metadataLogicalOperator: "Or"` needed? | Support `And` only; skip others |
 | **O9** | **`eventUid` must be a GUID** — survives the migration, still undocumented, still a hard 400 that discards the whole batch | We generate v4 UUIDs, so this is a landmine rather than a live bug |
-| **O13** | **The variables endpoint is not deployed, and its contract contradicts itself.** The document says sync text arrives "with variables already substituted", and separately says to call variables "only when the cached text still contains `{` tokens". Both cannot hold: the live payload contains no tokens, so the trigger condition never fires. Either the server should stop substituting and send templates, or the SDK's trigger should be something other than a token scan. **Please resolve before we build against a guess** | Not implemented. No campaign uses tokens today, so nothing is stale |
+| **O13** | **The variables contract contradicts itself, and the endpoint is not deployed.** The document says sync text arrives "with variables already substituted", and separately says to call variables "only when the cached text still contains `{` tokens". Both cannot hold: the live payload contains no tokens, so the trigger condition never fires. Either the server stops substituting and sends templates, or the SDK's trigger is meant to be something other than a token scan. **Built anyway, to the document** — the token scan makes it inert rather than wrong, so it costs nothing until this is answered | Implemented and fixture-tested; never fires against today's payload. Untested against the live endpoint, which 404s |
 | **O14** | **The token model cannot express conditionals.** `{points} points left` reads badly at zero, and `Welcome {first_name}` reads badly when the name is empty — the failure that made O12 sharp. Braze uses Liquid, which can branch; a flat value map never can. A permanent ceiling, worth knowing before campaigns are authored against it | — |
 | **O15** | **The token surface is text-only.** If personalisation ever needs to reach an image URL, a deep link or a button action, a value map cannot carry it, and the sync-time snapshot would stay silently stale in a field nobody thought to refresh | — |
 | **O16** | **422 is overloaded** — deactivated customer and all-invalid batch return the same status. Harmless today because both discard, but a future reader mapping 422 to "deactivated" would be wrong | Treat 422 as discard |
@@ -263,6 +331,10 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
   and an unknown one, `media` precedence per message type, video ignored, blank URL normalisation.
 - **Events transport.** One case per row of the status table, driven through a fake HTTP client.
 - **Batching.** The new 10/30s thresholds, and that chunking still holds at 50.
+- **Variables.** Token substitution as a pure function — known token, unknown token left intact,
+  malformed brace left intact, multiple occurrences; the 60s cache; the 2s timeout falling back to
+  the original text; a failed fetch presenting unchanged; and that a message with no token never
+  calls the source at all. All fixture-driven — the endpoint 404s, so none of this is verified live.
 - **Request shape.** That `customerId` and `platform` reach the body rather than the query string,
   and that a `platform: 0` sync logs before it is sent — the one case whose failure is a silent
   empty list rather than an error.
