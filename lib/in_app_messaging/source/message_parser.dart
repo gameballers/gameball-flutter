@@ -25,10 +25,15 @@ const int _slideupMessageType = 1;
 const int _modalMessageType = 2;
 const int _fullscreenMessageType = 3;
 
-/// Parses a `bots/inapp/sync` response.
+/// Parses an `integrations/inapp-messages/sync` response.
 ///
 /// Never throws. The rule is: drop what can never work, keep-but-skip what a
 /// future SDK version might support, and log every decision.
+///
+/// V4 returns a plain payload and reports failure with the status code, so the
+/// bots envelope — and its ability to say `success:false` inside a 200 — is gone
+/// rather than optional. A wrapper reaching this function now means a
+/// misconfigured base URL, and failing to find `messages` says so.
 GameballSyncResult parseSyncResponse(String rawJson) {
   Object? decoded;
   try {
@@ -43,29 +48,13 @@ GameballSyncResult parseSyncResponse(String rawJson) {
     return const GameballSyncResult.empty();
   }
 
-  // The bots envelope reports failure *inside a 200*, so the status code alone
-  // never tells you whether a sync worked.
-  final success = _asBool(decoded['success']);
-  if (success == false) {
-    iamLog('sync rejected by the backend: '
-        '${_asString(decoded['errorMsg']) ?? 'no message'} '
-        '(errorCode ${decoded['errorCode']})');
-    return const GameballSyncResult.empty();
-  }
-
-  // Tolerated unwrapped for the fixture source and for any future endpoint that
-  // returns the payload directly.
-  final payload = decoded['response'] is Map<String, dynamic>
-      ? decoded['response'] as Map<String, dynamic>
-      : decoded;
-
-  final messagesJson = payload['messages'];
+  final messagesJson = decoded['messages'];
   if (messagesJson is! List) {
     iamLog('sync parse failed: "messages" is missing or not a list');
     return const GameballSyncResult.empty();
   }
 
-  final cooldownSeconds = _asInt(payload['cooldownSeconds']);
+  final cooldownSeconds = _asInt(decoded['cooldownSeconds']);
   final campaigns = <InAppMessageCampaign>[];
   for (final entry in messagesJson) {
     if (entry is! Map<String, dynamic>) {

@@ -13,10 +13,11 @@ const String stubPromoEventName = 'view_offers';
 /// The reserved event a purchase is reported under.
 const String stubPurchaseEventName = 'purchase';
 
-/// A stand-in `bots/inapp/sync` response, shaped exactly like the real one.
+/// A stand-in `integrations/inapp-messages/sync` response, shaped exactly like
+/// the real one.
 ///
 /// Held as a raw JSON string rather than as constructed objects, so the real
-/// parsing rules are exercised from day one — the envelope, the `content`/`locale`
+/// parsing rules are exercised from day one — the `content`/`locale`
 /// split, button pairing by id, the numeric `messageType`. When the endpoint
 /// lands, only the transport changes.
 ///
@@ -25,9 +26,8 @@ const String stubPurchaseEventName = 'purchase';
 /// priorities on one trigger, auto-dismiss, and a campaign with no close button.
 const String stubSyncJson = '''
 {
-  "response": {
-    "cooldownSeconds": 30,
-    "messages": [
+  "cooldownSeconds": 30,
+  "messages": [
       {
         "campaignId": 2041,
         "variationId": 1,
@@ -221,13 +221,8 @@ const String stubSyncJson = '''
         },
         "localeCode": "en",
         "isTest": false
-      }
-    ]
-  },
-  "success": true,
-  "errorMsg": null,
-  "errorCode": 0,
-  "liveMode": false
+    }
+  ]
 }
 ''';
 

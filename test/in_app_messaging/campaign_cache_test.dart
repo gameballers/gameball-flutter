@@ -8,15 +8,12 @@ const String _key = 'gameball_iam_campaign_cache';
 /// the cached result can be checked.
 String payload({int campaignId = 2041, int cooldown = 45}) => '''
 {
-  "success": true,
-  "response": {
-    "cooldownSeconds": $cooldown,
-    "messages": [
-      { "campaignId": $campaignId, "messageType": 2,
-        "trigger": {"type": "session_start"},
-        "content": {}, "locale": {"message": "cached body"} }
-    ]
-  }
+  "cooldownSeconds": $cooldown,
+  "messages": [
+    { "campaignId": $campaignId, "messageType": 2,
+      "trigger": {"type": "session_start"},
+      "content": {}, "locale": {"message": "cached body"} }
+  ]
 }
 ''';
 
@@ -112,7 +109,7 @@ void main() {
     });
 
     test('a stored payload that no longer parses reads as empty', () async {
-      await StoredCampaignCache().write('c1', '{"success": false}');
+      await StoredCampaignCache().write('c1', '{"no":"messages"}');
 
       expect((await StoredCampaignCache().read('c1')).campaigns, isEmpty,
           reason: 'the payload is re-parsed by the current rules, so a response '

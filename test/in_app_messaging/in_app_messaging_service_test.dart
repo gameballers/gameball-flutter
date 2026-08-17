@@ -229,12 +229,12 @@ InAppMessageCampaign campaign(
 /// constructed campaigns the fake source hands out.
 String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
 {
-  "success": true,
-  "response": { "cooldownSeconds": 30, "messages": [
+  "cooldownSeconds": 30,
+  "messages": [
     { "campaignId": $campaignId, "messageType": 2,
       "trigger": {"type": "session_start"},
       "content": {}, "locale": {"message": "$body"} }
-  ]}
+  ]
 }
 ''';
 

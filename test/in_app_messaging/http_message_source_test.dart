@@ -3,10 +3,10 @@ import 'package:gameball_sdk/in_app_messaging/models/gameball_audience.dart';
 import 'package:gameball_sdk/in_app_messaging/source/http_message_source.dart';
 
 const String _ok = '''
-{ "success": true, "errorCode": 0, "response": { "cooldownSeconds": 45,
+{ "cooldownSeconds": 45,
   "messages": [ { "campaignId": 2051, "messageType": 2,
     "trigger": {"type": "session_start"},
-    "content": {}, "locale": {"message": "hello"} } ] } }
+    "content": {}, "locale": {"message": "hello"} } ] }
 ''';
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
 
   test('a successful but empty sync is not a failure', () async {
     final source = HttpMessageSource(
-      (_) async => '{"success":true,"response":{"messages":[]}}',
+      (_) async => '{"messages":[]}',
     );
 
     final result = await source.fetch(audience);
@@ -54,7 +54,7 @@ void main() {
 
   test('a rejected sync yields no campaigns without throwing', () async {
     final source = HttpMessageSource(
-      (_) async => '{"success":false,"errorMsg":"PlayerInactive","errorCode":7}',
+      (_) async => '{"detail":"a payload with no messages array"}',
     );
 
     final result = await source.fetch(audience);

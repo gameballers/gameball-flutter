@@ -8,12 +8,9 @@ import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
-/// Wraps one or more campaigns in the bots envelope the backend sends.
+/// Wraps one or more campaigns in the plain payload the backend sends.
 GameballSyncResult parse(String campaignsJson, {String payloadExtras = ''}) {
-  return parseSyncResponse(
-    '{"success":true,"errorCode":0,"response":{$payloadExtras'
-    '"messages":[$campaignsJson]}}',
-  );
+  return parseSyncResponse('{$payloadExtras"messages":[$campaignsJson]}');
 }
 
 /// The single campaign a payload produced, or null when it was dropped.
@@ -38,44 +35,40 @@ String minimal({
 }
 
 void main() {
-  group('the bots envelope', () {
-    test('unwraps response.messages', () {
-      final result = parse(minimal());
-
-      expect(result.campaigns.single.campaignId, 2041);
+  group('the payload root', () {
+    test('reads messages from the root', () {
+      expect(parse(minimal()).campaigns.single.campaignId, 2041);
     });
 
-    test('success:false yields nothing, even at HTTP 200', () {
-      final result = parseSyncResponse('''
-        { "success": false, "errorMsg": "PlayerInactive", "errorCode": 7,
-          "response": { "messages": [ ${minimal()} ] } }
-      ''');
-
-      expect(result.campaigns, isEmpty,
-          reason: 'the envelope reports failure inside a 200, so trusting the '
-              'status code alone would treat a rejection as a success');
-    });
-
-    test('takes cooldownSeconds from the payload', () {
+    test('takes cooldownSeconds from the root', () {
       final result = parse(minimal(), payloadExtras: '"cooldownSeconds": 90,');
 
       expect(result.cooldown, const Duration(seconds: 90));
     });
 
-    test('falls back to 30 seconds when cooldownSeconds is absent', () {
-      expect(parse(minimal()).cooldown, defaultDisplayCooldown);
+    test('falls back to the client default when cooldownSeconds is absent', () {
+      expect(parse(minimal()).cooldown, const Duration(seconds: 30));
     });
 
-    test('ignores a negative cooldown', () {
-      final result = parse(minimal(), payloadExtras: '"cooldownSeconds": -5,');
+    test('a bots-style wrapper is no longer unwrapped', () {
+      // V4 sends a plain payload and reports failure with the status code. The
+      // v1 and v4 paths are disjoint, so a wrapper can only reach here from a
+      // misconfigured base URL — and reading it would hide that.
+      final result = parseSyncResponse(
+          '{"success":true,"response":{"cooldownSeconds":45,'
+          '"messages":[${minimal()}]}}');
 
-      expect(result.cooldown, defaultDisplayCooldown);
+      expect(result.campaigns, isEmpty);
+      expect(result.cooldown, const Duration(seconds: 30),
+          reason: 'the client default, because "messages" is not at the root');
     });
 
-    test('accepts an unwrapped payload, for fixtures', () {
-      final result = parseSyncResponse('{"messages":[${minimal()}]}');
+    test('a payload that is not an object yields nothing', () {
+      expect(parseSyncResponse('[]').campaigns, isEmpty);
+    });
 
-      expect(result.campaigns, hasLength(1));
+    test('invalid JSON yields nothing rather than throwing', () {
+      expect(parseSyncResponse('not json').campaigns, isEmpty);
     });
   });
 
@@ -1073,6 +1066,25 @@ void main() {
           '"trigger":{"type":"session_start"},'
           '"content":{"iconUrl":"  "},"locale":{"message":"hi"}}')!.message;
       expect(message.iconUrl, isNull);
+    });
+  });
+
+  group('the V4 payload has no envelope', () {
+    test('a plain payload parses', () {
+      const raw = '{"cooldownSeconds":45,"messages":[]}';
+      expect(parseSyncResponse(raw).cooldown, const Duration(seconds: 45));
+    });
+
+    test('a bots-style wrapper is no longer unwrapped', () {
+      // The v1 and v4 paths are disjoint, so a wrapper can only arrive from a
+      // misconfigured base URL. Reading it would hide that.
+      const raw =
+          '{"success":true,"response":{"cooldownSeconds":45,"messages":[]}}';
+      final result = parseSyncResponse(raw);
+
+      expect(result.campaigns, isEmpty);
+      expect(result.cooldown, const Duration(seconds: 30),
+          reason: 'the client default, because "messages" is not at the root');
     });
   });
 

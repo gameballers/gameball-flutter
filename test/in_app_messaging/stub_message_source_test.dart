@@ -124,11 +124,11 @@ void main() {
 
   test('an injected payload replaces the fixture', () async {
     final source = StubMessageSource(json: '''
-      {"success": true, "response": {"messages": [
+      {"messages": [
         {"campaignId": 7, "priority": 1, "messageType": 2,
          "trigger": {"type": "session_start"},
          "content": {}, "locale": {"message": "b"}}
-      ]}}
+      ]}
     ''');
 
     expect((await source.fetch(audience)).campaigns.single.campaignId, 7);

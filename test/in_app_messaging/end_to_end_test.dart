@@ -13,13 +13,6 @@ import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Drives the whole module through its real collaborators — the stub source,
-/// the real parser, the real evaluator, the real overlay presenter and the real
-/// modal — via the public `GameballApp` API only.
-///
-/// The unit tests each mock their neighbours, so this is what proves the wiring
-/// between them. It is also the automated equivalent of the sample app's manual
-/// walkthrough.
 /// Reports every message's artwork as loaded.
 ///
 /// `flutter_test` answers all HTTP with a 400, so the real prefetcher would
@@ -43,6 +36,13 @@ class _OneCampaign implements GameballMessageSource {
       parseSyncResponse(raw);
 }
 
+/// Drives the whole module through its real collaborators — the stub source,
+/// the real parser, the real evaluator, the real overlay presenter and the real
+/// modal — via the public `GameballApp` API only.
+///
+/// The unit tests each mock their neighbours, so this is what proves the wiring
+/// between them. It is also the automated equivalent of the sample app's manual
+/// walkthrough.
 void main() {
   GameballApp app() => GameballApp.getInstance();
 
@@ -263,13 +263,13 @@ void main() {
     /// A fullscreen poster that refuses to be shown sideways.
     const portraitPoster = '''
 {
-  "success": true,
-  "response": { "cooldownSeconds": 30, "messages": [
+  "cooldownSeconds": 30,
+  "messages": [
     { "campaignId": 3101, "messageType": 3,
       "trigger": {"type": "session_start"},
       "content": {"orientation": "portrait"},
       "locale": {"message": "Portrait poster"} }
-  ]}
+  ]
 }
 ''';
 
