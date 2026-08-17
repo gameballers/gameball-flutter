@@ -1,5 +1,7 @@
 {
     "cooldownSeconds": 30,
+    "quietHours": null,
+    "campaignOrdering": null,
     "messages": [
         {
             "campaignId": 2055,
