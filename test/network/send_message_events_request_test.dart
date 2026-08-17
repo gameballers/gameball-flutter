@@ -18,8 +18,8 @@ final List<Map<String, dynamic>> oneEvent = [
 
 /// Runs a request against a stubbed transport and returns the verdict.
 Future<GameballAnalyticsSendResult> post({
-  int status = 200,
-  String body = '{"success":true,"response":{"accepted":1,"rejected":0}}',
+  int status = 202,
+  String body = '{"accepted":1,"rejected":0}',
   void Function(http.Request request)? inspect,
 }) async {
   return http.runWithClient(
@@ -39,22 +39,33 @@ Future<GameballAnalyticsSendResult> post({
 
 void main() {
   group('the request', () {
-    test('identifies the customer as playerUniqueId in the query', () async {
+    test('posts to the v4 integrations path', () async {
       Uri? seen;
       await post(inspect: (r) => seen = r.url);
 
-      expect(seen!.path, '/api/v1.0/bots/inapp/events');
-      expect(seen!.queryParameters['playerUniqueId'], 'customer-1',
-          reason: 'identity comes from the external customer id, which is the '
-              'only one this SDK holds');
+      expect(seen!.path, '/api/v4.0/integrations/inapp-messages/events');
+    });
+
+    test('names the customer in the body, not the query', () async {
+      Uri? url;
+      Map<String, dynamic>? body;
+      await post(inspect: (r) {
+        url = r.url;
+        body = jsonDecode(r.body) as Map<String, dynamic>;
+      });
+
+      expect(url!.query, isEmpty,
+          reason: 'v4 carries identity in the body; there is no '
+              'playerUniqueId parameter and no encrypted id');
+      expect(body!['customerId'], 'customer-1');
     });
 
     test('sends the platform and events at the top level', () async {
-      Map<String, dynamic>? sent;
-      await post(inspect: (r) => sent = jsonDecode(r.body));
+      Map<String, dynamic>? body;
+      await post(inspect: (r) => body = jsonDecode(r.body) as Map<String, dynamic>);
 
-      expect(sent!['platform'], 1);
-      expect((sent!['events'] as List).single['eventUid'], 'e1');
+      expect(body!['platform'], 1);
+      expect(body!['events'], hasLength(1));
     });
 
     test('carries the standard headers', () async {
@@ -67,74 +78,76 @@ void main() {
     });
   });
 
-  group('the envelope, which reports failure inside a 200', () {
-    test('success:true is accepted', () async {
-      expect(await post(), GameballAnalyticsSendResult.accepted);
-    });
+  group('status codes decide the outcome', () {
+    // V4 reports failure with the status code rather than inside a 200, so the
+    // envelope reader this function used to carry is gone. Every case below was
+    // measured against api.alpha.gameball.app on 2026-08-17.
 
-    test('success:false is discarded, not treated as a success', () async {
-      final result = await post(
-        body: '{"success":false,'
-            '"errorMsg":"Batch exceeds the maximum of 50 events","errorCode":4}',
-      );
-
-      expect(result, GameballAnalyticsSendResult.discard,
-          reason: 'reading the status code alone would drop these events while '
-              'reporting them as delivered — the worst of both outcomes');
+    test('202 with counts is accepted', () async {
+      expect(await post(status: 202), GameballAnalyticsSendResult.accepted);
     });
 
     test('a partial rejection still clears the batch', () async {
-      final result = await post(
-        body: '{"success":true,"response":{"accepted":9,"rejected":1}}',
+      // Verified live: a mixed batch returns 202 {accepted:1, rejected:1}. The
+      // good events landed, and the rejected ones can never succeed.
+      expect(
+        await post(status: 202, body: '{"accepted":1,"rejected":1}'),
+        GameballAnalyticsSendResult.accepted,
       );
-
-      expect(result, GameballAnalyticsSendResult.accepted,
-          reason: 'rejected events "will never succeed", and the response does '
-              'not say which, so retrying the batch would resend the nine that '
-              'were accepted');
     });
 
-    test('an unreadable 200 is retried', () async {
-      expect(await post(body: '<html>gateway</html>'),
-          GameballAnalyticsSendResult.retry,
-          reason: 'more likely a proxy than the backend');
+    test('an unreadable 2xx body is still accepted', () async {
+      expect(await post(status: 202, body: 'not json'),
+          GameballAnalyticsSendResult.accepted,
+          reason: 'the counts are diagnostics; the status said it landed');
     });
 
-    test('a 200 whose body is not an object is retried', () async {
-      expect(await post(body: '[1,2,3]'), GameballAnalyticsSendResult.retry);
-    });
-  });
-
-  group('status codes', () {
-    test('5xx is retried', () async {
-      expect(await post(status: 503), GameballAnalyticsSendResult.retry);
+    test('400 is discarded', () async {
+      expect(await post(status: 400, body: '{"code":3000}'),
+          GameballAnalyticsSendResult.discard);
     });
 
-    test('429 is retried', () async {
-      expect(await post(status: 429), GameballAnalyticsSendResult.retry,
-          reason: 'throttling is transient by definition');
+    test('401 is discarded', () async {
+      expect(await post(status: 401), GameballAnalyticsSendResult.discard);
+    });
+
+    test('404 is discarded', () async {
+      expect(await post(status: 404, body: '{"code":7000}'),
+          GameballAnalyticsSendResult.discard);
+    });
+
+    test('422 is discarded', () async {
+      // Overloaded on purpose by the backend: a deactivated customer and a batch
+      // in which every event was malformed both land here. Both are permanent
+      // for this batch, so they share an outcome — but do not read a 422 as
+      // "the customer is deactivated".
+      expect(await post(status: 422, body: '{"code":3003}'),
+          GameballAnalyticsSendResult.discard);
     });
 
     test('408 is retried', () async {
       expect(await post(status: 408), GameballAnalyticsSendResult.retry);
     });
 
-    test('401 is discarded', () async {
-      expect(await post(status: 401), GameballAnalyticsSendResult.discard,
-          reason: 'an unchanged retry cannot fix an auth failure, and the outbox '
-              'is FIFO — retrying forever would block every later event');
+    test('429 is retried', () async {
+      expect(await post(status: 429), GameballAnalyticsSendResult.retry);
     });
 
-    test('400 is discarded', () async {
-      expect(await post(status: 400), GameballAnalyticsSendResult.discard);
+    test('5xx is retried', () async {
+      expect(await post(status: 500), GameballAnalyticsSendResult.retry);
+    });
+
+    test('503 is retried', () async {
+      expect(await post(status: 503), GameballAnalyticsSendResult.retry,
+          reason: 'the documented "broker unavailable" case');
     });
 
     test('a transport failure is retried', () async {
       final result = await http.runWithClient(
         () => sendMessageEventsRequest(
           oneEvent,
-          customerId: 'c1',
-          platform: 2,
+          customerId: 'customer-1',
+          platform: 1,
           apiKey: 'key',
           lang: 'en',
         ),

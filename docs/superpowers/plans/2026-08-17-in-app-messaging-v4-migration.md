@@ -48,179 +48,41 @@
 - Modify: `lib/network/utils/constants.dart:7-11`
 - Modify: `lib/network/request_calls/sync_in_app_messages_request.dart`
 - Modify: `lib/network/request_calls/send_message_events_request.dart`
-- Test: `test/in_app_messaging/request_calls_test.dart` (create)
+- Test: `test/network/send_message_events_request_test.dart` (rewrite for V4), `test/network/sync_in_app_messages_request_test.dart` (create)
 
 **Interfaces:**
 - Consumes: `integrationsUrlV4_0` (`"/api/v4.0/integrations"`), `getRequestHeaders(apiKey, lang, {sessionToken})`, `GameballAnalyticsSendResult.{accepted,retry,discard}`.
-- Produces: `inAppMessagesSyncPath`, `inAppMessagesEventsPath`. Both request functions gain an optional final named parameter `http.Client? client` used by tests.
+- Produces: `inAppMessagesSyncPath`, `inAppMessagesEventsPath`. **Signatures otherwise unchanged.**
 
-- [ ] **Step 1: Write the failing test**
+> **Corrected during execution.** The first draft added an `http.Client? client` parameter to both
+> functions for testability. `test/network/send_message_events_request_test.dart` already exists and
+> injects with `http.runWithClient`, a zone override that needs no production parameter at all.
+> Test-only parameters on production signatures are exactly what that pattern avoids, so the tests
+> below extend the existing file and add a sibling for sync, rather than introducing a second
+> mechanism.
 
-Create `test/in_app_messaging/request_calls_test.dart`:
+- [ ] **Step 1: Write the failing tests**
 
-```dart
-import 'dart:convert';
+Rewrite `test/network/send_message_events_request_test.dart` for the V4 contract and add
+`test/network/sync_in_app_messages_request_test.dart` beside it. Both use the `http.runWithClient`
+helper and the hand-rolled `MockClient` the existing file already defines — copy that class into the
+new file rather than exporting it, since a shared test utility across two files is more coupling
+than two small classes.
 
-import 'package:flutter_test/flutter_test.dart';
-import 'package:gameball_sdk/in_app_messaging/analytics/batched_message_analytics.dart';
-import 'package:gameball_sdk/network/request_calls/send_message_events_request.dart';
-import 'package:gameball_sdk/network/request_calls/sync_in_app_messages_request.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
+Cover, for events: the v4 path; `customerId` in the body with an empty query; `platform` and
+`events` at the top level; the standard headers; then one case per status — 202 accepted, 202 with
+`rejected:1` still accepted, an unreadable 2xx accepted, 400/401/404/422 discarded, 408/429/500/503
+retried, and a transport throw retried.
 
-/// Captures the one request the function under test makes.
-class Captured {
-  late Uri url;
-  late Map<String, String> headers;
-  late Map<String, dynamic> body;
-}
-
-/// A client that records the request and answers with [status] / [body].
-({http.Client client, Captured seen}) clientReturning(
-  int status, {
-  String body = '',
-}) {
-  final seen = Captured();
-  final client = MockClient((request) async {
-    seen.url = request.url;
-    seen.headers = request.headers;
-    seen.body = jsonDecode(request.body) as Map<String, dynamic>;
-    return http.Response(body, status);
-  });
-  return (client: client, seen: seen);
-}
-
-void main() {
-  group('sync request', () {
-    test('posts to the v4 integrations path with customerId in the body',
-        () async {
-      final c = clientReturning(200, body: '{"cooldownSeconds":30,"messages":[]}');
-
-      await syncInAppMessagesRequest(
-        customerId: 'c1',
-        platform: 2,
-        locale: 'en',
-        appVersion: '1.0.0',
-        sdkVersion: '3.3.0',
-        apiKey: 'k',
-        client: c.client,
-      );
-
-      expect(c.seen.url.path, '/api/v4.0/integrations/inapp-messages/sync');
-      expect(c.seen.url.query, isEmpty,
-          reason: 'identity moved out of the query string in v4');
-      expect(c.seen.body, {
-        'customerId': 'c1',
-        'platform': 2,
-        'locale': 'en',
-        'appVersion': '1.0.0',
-        'sdkVersion': '3.3.0',
-      });
-    });
-
-    test('returns the body verbatim on 200', () async {
-      const payload = '{"cooldownSeconds":30,"messages":[]}';
-      final c = clientReturning(200, body: payload);
-
-      final result = await syncInAppMessagesRequest(
-        customerId: 'c1',
-        platform: 2,
-        locale: 'en',
-        appVersion: '1.0.0',
-        sdkVersion: '3.3.0',
-        apiKey: 'k',
-        client: c.client,
-      );
-
-      expect(result, payload);
-    });
-
-    test('returns null on any non-2xx', () async {
-      for (final status in <int>[400, 401, 404, 422, 500, 503]) {
-        final c = clientReturning(status, body: '{}');
-        final result = await syncInAppMessagesRequest(
-          customerId: 'c1',
-          platform: 2,
-          locale: 'en',
-          appVersion: '1.0.0',
-          sdkVersion: '3.3.0',
-          apiKey: 'k',
-          client: c.client,
-        );
-        expect(result, isNull, reason: 'HTTP $status is not a usable sync');
-      }
-    });
-  });
-
-  group('events request', () {
-    Future<GameballAnalyticsSendResult> send(
-      int status, {
-      String body = '{"accepted":1,"rejected":0}',
-      Captured? into,
-    }) async {
-      final c = clientReturning(status, body: body);
-      final result = await sendMessageEventsRequest(
-        <Map<String, dynamic>>[
-          <String, dynamic>{'eventUid': 'u', 'campaignId': 1, 'type': 'impression'},
-        ],
-        customerId: 'c1',
-        platform: 2,
-        apiKey: 'k',
-        lang: 'en',
-        client: c.client,
-      );
-      if (into != null) {
-        into.url = c.seen.url;
-        into.body = c.seen.body;
-      }
-      return result;
-    }
-
-    test('posts to the v4 path with customerId and platform in the body',
-        () async {
-      final seen = Captured();
-      await send(202, into: seen);
-
-      expect(seen.url.path, '/api/v4.0/integrations/inapp-messages/events');
-      expect(seen.url.query, isEmpty);
-      expect(seen.body['customerId'], 'c1');
-      expect(seen.body['platform'], 2);
-      expect(seen.body['events'], hasLength(1));
-    });
-
-    test('202 with counts is accepted', () async {
-      expect(await send(202), GameballAnalyticsSendResult.accepted);
-    });
-
-    test('400, 401, 404 and 422 are discarded', () async {
-      for (final status in <int>[400, 401, 404, 422]) {
-        expect(await send(status, body: '{"code":3000}'),
-            GameballAnalyticsSendResult.discard,
-            reason: 'HTTP $status cannot be fixed by an unchanged retry');
-      }
-    });
-
-    test('408, 429 and 5xx are retried', () async {
-      for (final status in <int>[408, 429, 500, 503]) {
-        expect(await send(status, body: '{}'),
-            GameballAnalyticsSendResult.retry,
-            reason: 'HTTP $status is transient');
-      }
-    });
-
-    test('an unreadable 2xx body is still accepted', () async {
-      expect(await send(202, body: 'not json'),
-          GameballAnalyticsSendResult.accepted,
-          reason: 'the counts are diagnostics; the batch landed');
-    });
-  });
-}
-```
+For sync: the v4 path; `customerId` in the body with an empty query; the full targeting body; the
+headers; a 200 body returned verbatim; every non-2xx yielding null; a transport throw yielding null;
+and two platform cases — that an unknown platform is sent unaltered rather than corrected, and that
+an empty list from one is a success rather than a failure.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `flutter test test/in_app_messaging/request_calls_test.dart`
-Expected: FAIL — `No named parameter with the name 'client'`.
+Run: `flutter test test/network/`
+Expected: FAIL — the paths are still `bots/inapp` and the body still has no `customerId`.
 
 - [ ] **Step 3: Replace the endpoint constants**
 
@@ -261,7 +123,6 @@ Replace the body of `lib/network/request_calls/sync_in_app_messages_request.dart
 ///   - `apiKey`: The API key for authentication.
 ///   - `customApiPrefix`: Optional custom API base URL.
 ///   - `sessionToken`: Optional Session Token, sent when the integration has one.
-///   - `client`: Injectable HTTP client. Tests only.
 Future<String?> syncInAppMessagesRequest({
   required String customerId,
   required int platform,
@@ -271,11 +132,7 @@ Future<String?> syncInAppMessagesRequest({
   required String apiKey,
   String? customApiPrefix,
   String? sessionToken,
-  http.Client? client,
 }) async {
-  // Named `c`, not `http`: that identifier is the import prefix, and shadowing
-  // it stops the file compiling.
-  final c = client ?? http.Client();
   try {
     final apiBaseUrl = customApiPrefix ?? baseUrl;
     final url = Uri.parse('$apiBaseUrl$inAppMessagesSyncPath');
@@ -290,7 +147,7 @@ Future<String?> syncInAppMessagesRequest({
           '(1 = iOS, 2 = Android). Expect an empty campaign list');
     }
 
-    final response = await c.post(
+    final response = await http.post(
       url,
       headers: getRequestHeaders(apiKey, locale, sessionToken: sessionToken),
       body: jsonEncode(<String, dynamic>{
@@ -360,7 +217,6 @@ import '../utils/header_generator.dart';
 ///   - `lang`: The language code.
 ///   - `customApiPrefix`: Optional custom API base URL.
 ///   - `sessionToken`: Optional Session Token, sent when the integration has one.
-///   - `client`: Injectable HTTP client. Tests only.
 Future<GameballAnalyticsSendResult> sendMessageEventsRequest(
   List<Map<String, dynamic>> events, {
   required String customerId,
@@ -369,14 +225,12 @@ Future<GameballAnalyticsSendResult> sendMessageEventsRequest(
   required String lang,
   String? customApiPrefix,
   String? sessionToken,
-  http.Client? client,
 }) async {
-  final c = client ?? http.Client();
   try {
     final apiBaseUrl = customApiPrefix ?? baseUrl;
     final url = Uri.parse('$apiBaseUrl$inAppMessagesEventsPath');
 
-    final response = await c.post(
+    final response = await http.post(
       url,
       headers: getRequestHeaders(apiKey, lang, sessionToken: sessionToken),
       body: jsonEncode(<String, dynamic>{
@@ -438,8 +292,8 @@ void _logRejected(String body, int sentCount) {
 
 - [ ] **Step 6: Run the test to verify it passes**
 
-Run: `flutter test test/in_app_messaging/request_calls_test.dart`
-Expected: PASS, 8 tests.
+Run: `flutter test test/network/`
+Expected: PASS, 25 tests.
 
 - [ ] **Step 7: Run the full suite and the analyzer**
 
@@ -449,7 +303,7 @@ Expected: all tests pass; analyzer reports exactly 13 issues.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/network test/in_app_messaging/request_calls_test.dart
+git add lib/network test/network
 git commit -m "feat(iam)!: move the wire layer to the V4 integrations surface"
 ```
 
@@ -1127,7 +981,7 @@ git commit -m "feat(iam)!: drop the bots envelope, which V4 does not send"
 **Interfaces:**
 - Produces:
   - `const inAppMessagesVariablesPath`
-  - `Future<Map<String, String>> fetchMessageVariablesRequest({required String customerId, required String apiKey, required String lang, String? customApiPrefix, String? sessionToken, http.Client? client})`
+  - `Future<Map<String, String>> fetchMessageVariablesRequest({required String customerId, required String apiKey, required String lang, String? customApiPrefix, String? sessionToken})` — injected in tests with `http.runWithClient`, like its siblings
   - `abstract interface class VariableSource { Future<Map<String, String>> fetch(String customerId); }`
   - `class CachingVariableSource implements VariableSource` — constructor `CachingVariableSource({required Future<Map<String, String>> Function(String) fetcher, Duration ttl = defaultVariableCacheTtl, DateTime Function()? clock})`, plus `void clear()`
   - `const Duration defaultVariableCacheTtl = Duration(seconds: 60);`
@@ -1270,21 +1124,18 @@ import '../utils/header_generator.dart';
 ///   - `lang`: The language code.
 ///   - `customApiPrefix`: Optional custom API base URL.
 ///   - `sessionToken`: Optional Session Token, sent when the integration has one.
-///   - `client`: Injectable HTTP client. Tests only.
 Future<Map<String, String>> fetchMessageVariablesRequest({
   required String customerId,
   required String apiKey,
   required String lang,
   String? customApiPrefix,
   String? sessionToken,
-  http.Client? client,
 }) async {
-  final c = client ?? http.Client();
   try {
     final apiBaseUrl = customApiPrefix ?? baseUrl;
     final url = Uri.parse('$apiBaseUrl$inAppMessagesVariablesPath');
 
-    final response = await c.post(
+    final response = await http.post(
       url,
       headers: getRequestHeaders(apiKey, lang, sessionToken: sessionToken),
       body: jsonEncode(<String, dynamic>{'customerId': customerId}),
