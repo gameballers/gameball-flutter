@@ -916,63 +916,102 @@ void main() {
     });
   });
 
-  group('layout', () {
-    String full({String content = '{}', String locale = '{"message":"hi"}'}) =>
-        '{"campaignId":1,"messageType":3,"trigger":{"type":"session_start"},'
+  group('layout, which the backend now names explicitly', () {
+    String full({
+      int messageType = 3,
+      String content = '{}',
+      String locale = '{"message":"hi"}',
+    }) =>
+        '{"campaignId":1,"messageType":$messageType,'
+        '"trigger":{"type":"session_start"},'
         '"content":$content,"locale":$locale}';
 
-    test('inferred as textWithImage when there is copy', () {
-      expect(one(full())!.message.layout, GameballMessageLayout.textWithImage);
-      expect(
-        one(full(content: '{"imageUrl":"https://cdn/a.png"}'))!.message.layout,
-        GameballMessageLayout.textWithImage,
-        reason: 'copy plus artwork is the stacked variant',
-      );
+    const image = '"imageUrl":"https://cdn/a.png"';
+
+    test('a modal with no layout field renders the default', () {
+      expect(one(full(messageType: 2, content: '{$image}'))!.message.layout,
+          GameballMessageLayout.textWithImage);
     });
 
-    test('inferred as imageOnly when there is artwork and no copy', () {
+    test('a modal honours image_only', () {
       expect(
-        one(full(content: '{"imageUrl":"https://cdn/a.png"}', locale: '{}'))!
+        one(full(messageType: 2, content: '{"layout":"image_only",$image}'))!
             .message
             .layout,
         GameballMessageLayout.imageOnly,
       );
     });
 
-    test('an explicit layout wins over the inference', () {
-      // The whole point of O12: this campaign has copy, so the guess would say
-      // stacked. A backend that names the layout overrules it.
-      final message = one(full(
-        content: '{"layout":"graphic","imageUrl":"https://cdn/a.png"}',
-      ))!.message;
-
-      expect(message.layout, GameballMessageLayout.imageOnly,
-          reason: 'when the field arrives the parser must stop guessing');
-    });
-
-    test("Braze's own spellings are accepted", () {
-      expect(
-        one(full(content: '{"imageStyle":"GRAPHIC"}'))!.message.layout,
-        GameballMessageLayout.imageOnly,
-      );
+    test('a modal honours text_with_image', () {
       expect(
         one(full(
-          // Needs the image, or the campaign has nothing to render and is
-          // correctly dropped before the layout matters.
-          content: '{"imageStyle":"TOP","imageUrl":"https://cdn/a.png"}',
-          locale: '{}',
-        ))!.message.layout,
+                messageType: 2,
+                content: '{"layout":"text_with_image",$image}'))!
+            .message
+            .layout,
         GameballMessageLayout.textWithImage,
-        reason: 'declared TOP with no copy: the field wins over the inference in '
-            'both directions, or it is not authoritative',
       );
     });
 
-    test('an unknown layout falls back to inferring', () {
+    test('a fullscreen honours image_and_text, its own default spelling', () {
       expect(
-        one(full(content: '{"layout":"hologram","imageUrl":"https://cdn/a.png"}',
-            locale: '{}'))!.message.layout,
+        one(full(content: '{"layout":"image_and_text",$image}'))!
+            .message
+            .layout,
+        GameballMessageLayout.textWithImage,
+        reason: 'modal and fullscreen spell the same arrangement differently',
+      );
+    });
+
+    test('a fullscreen honours image_only', () {
+      expect(
+        one(full(content: '{"layout":"image_only",$image}'))!.message.layout,
         GameballMessageLayout.imageOnly,
+      );
+    });
+
+    test('an unknown layout renders the default and keeps the message', () {
+      final campaign =
+          one(full(messageType: 2, content: '{"layout":"hologram",$image}'));
+
+      expect(campaign, isNotNull,
+          reason: 'layout is a rendering hint, not a contract — an unknown '
+              'value must never cost the customer the message');
+      expect(campaign!.message.layout, GameballMessageLayout.textWithImage);
+    });
+
+    test('absent copy no longer implies image-only', () {
+      // This is O12, and the reason the inference had to go. A campaign whose
+      // personalised copy resolved to empty was indistinguishable from one the
+      // marketer deliberately made image-only, and alpha was already serving
+      // "Welcome !" from an unresolved placeholder. The backend names the
+      // layout now, so silence means the default.
+      expect(
+        one(full(messageType: 2, content: '{$image}', locale: '{}'))!
+            .message
+            .layout,
+        GameballMessageLayout.textWithImage,
+      );
+    });
+
+    test('imageStyle is no longer read', () {
+      // A guess at what the backend might call the field, made before it had
+      // named one. It chose `layout`, so this hedge is dead weight.
+      expect(
+        one(full(messageType: 2, content: '{"imageStyle":"GRAPHIC",$image}'))!
+            .message
+            .layout,
+        GameballMessageLayout.textWithImage,
+      );
+    });
+
+    test("Braze's own spellings are no longer read", () {
+      expect(
+        one(full(messageType: 2, content: '{"layout":"graphic",$image}'))!
+            .message
+            .layout,
+        GameballMessageLayout.textWithImage,
+        reason: 'this SDK follows the Gameball contract, not Braze wire format',
       );
     });
   });

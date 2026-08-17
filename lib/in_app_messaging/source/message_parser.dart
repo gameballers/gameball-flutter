@@ -344,7 +344,7 @@ GameballInAppMessage? _parseMessage(
     autoDismissAfter: (autoSeconds != null && autoSeconds > 0)
         ? Duration(milliseconds: (autoSeconds * 1000).round())
         : null,
-    layout: _resolveLayout(content, hasHeader || hasBody, hasImage, label),
+    layout: _resolveLayout(content, type, label),
     orientation: _parseOrientation(content['orientation'], label),
     slidePosition: _parseSlidePosition(content['slideFrom'], label),
     iconUrl: (iconUrl != null && iconUrl.isNotEmpty) ? iconUrl : null,
@@ -354,46 +354,39 @@ GameballInAppMessage? _parseMessage(
   );
 }
 
-/// Decides how the image and copy are arranged.
+/// Reads how the image and copy are arranged.
 ///
-/// **An inference, and the only one left in this parser.** Nothing in the payload
-/// names the layout, so it is derived from which content fields arrived. Braze
-/// does not guess — it sends `image_style`, `TOP` or `GRAPHIC`.
+/// The backend names this now — `layout` on `content`, following Braze's
+/// image-style model. Until it did, this function inferred the layout from which
+/// fields arrived, which could not tell a deliberately image-only campaign from
+/// one whose personalised copy resolved to empty. That inference is gone, along
+/// with the `imageStyle` alternate key and the Braze `graphic`/`top` spellings:
+/// all three were hedges against a contract that had not been written.
 ///
-/// Two failure modes this cannot avoid, both argued in the spec's O12:
-/// a campaign whose personalised copy resolves to empty is indistinguishable from
-/// a deliberately image-only one, and `GRAPHIC` is a different composition rather
-/// than the text layout with the text removed.
-///
-/// An explicit field is read first when present, under either of the two spellings
-/// the backend might use, so the day it ships this stops guessing with no other
-/// change.
+/// An unknown value falls back to the type's default rather than skipping the
+/// message. The contract is explicit that layout is a rendering hint, so a value
+/// this SDK version does not know must never cost the customer the message.
 GameballMessageLayout _resolveLayout(
   Map<String, dynamic> content,
-  bool hasText,
-  bool hasImage,
+  GameballMessageType type,
   String label,
 ) {
-  final declared =
-      _asString(content['layout']) ?? _asString(content['imageStyle']);
+  final declared = _asString(content['layout']);
   switch (declared?.toLowerCase()) {
-    case 'graphic':
     case 'image_only':
-    case 'imageonly':
       return GameballMessageLayout.imageOnly;
-    case 'top':
-    case 'text':
+    // Modal and fullscreen spell their default differently; both mean "image
+    // above the copy", which is the one layout this enum calls textWithImage.
     case 'text_with_image':
+    case 'image_and_text':
       return GameballMessageLayout.textWithImage;
     case null:
-      break;
+      return GameballMessageLayout.textWithImage;
     default:
-      iamLog('campaign $label: unknown layout "$declared", inferring instead');
+      iamLog('campaign $label: unknown layout "$declared", rendering the '
+          'default for a ${type.name}');
+      return GameballMessageLayout.textWithImage;
   }
-
-  return (!hasText && hasImage)
-      ? GameballMessageLayout.imageOnly
-      : GameballMessageLayout.textWithImage;
 }
 
 /// Which orientations a fullscreen campaign may display in.
