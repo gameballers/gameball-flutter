@@ -4,6 +4,26 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.3.0] - 2026-08-17 💬
+
+> **Minor Release**: In-app messaging — an opt-in module that displays campaigns authored in the Gameball dashboard
+
+### ✨ Added
+- 💬 **In-App Messaging**: `GameballApp.getInstance().startInAppMessaging(customerId: ..., navigatorKey: ...)` opts a host in. Nothing runs until that call — no requests, no timers, no overlay, no stored state — so upgrading without calling it changes nothing
+- 🖼️ **Three message types**: modal (a centred card over a scrim), slideup (a non-blocking banner at either edge, dismissed by swiping toward its own edge) and fullscreen (edge to edge, in a stacked or an image-only composition)
+- 🎯 **Triggers**: session start — fired on launch and on a return to the foreground after the session timeout — and custom events, matched on the event name and optionally filtered on its metadata with seven operators. A purchase logged via `logPurchase` reaches campaigns as an event named `purchase`, with `productId`, `price`, `currency` and `quantity` available to filters
+- 🚦 **Display rules**: per-campaign frequency caps that survive a restart, a server-driven minimum interval between any two displays, campaign expiry, and priority ordering
+- 📊 **Message analytics**: impressions, clicks (carrying `buttonId` when a button was tapped) and dismissals, batched and written to device storage after every change, so an impression logged a second before a force-quit still arrives
+- 🖐️ **Host hooks**: `beforeDisplay` to show, postpone or drop a message; `onAction` to intercept a tap and handle it yourself; `onNavigate` to route through go_router or any other Navigator 2.0 router; and an `onInAppMessage` stream of everything selected
+- 🗂️ **Offline behaviour**: campaigns are cached per customer, so a failed sync falls back to the last unexpired set rather than showing nothing
+- 🎨 **Artwork prefetch**: a message's image and icon are loaded at sync rather than at display, so an impression is only ever logged for something the user could actually see
+
+### 📝 Notes
+- In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK logs the 404 and stays silent — no errors surface to the host
+- `stopInAppMessaging()` on logout dismisses anything on screen, flushes pending telemetry and clears state
+
+---
+
 ## [3.2.1] - 2026-08-06 🔧
 
 > **Patch Release**: Widget URL shop-parameter fix

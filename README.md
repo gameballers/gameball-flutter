@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -12,6 +12,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 - 🎯 **Customer Management** - Initialize and manage customer profiles with builder pattern
 - 📊 **Event Tracking** - Track user actions and behaviors with flexible metadata
 - 🎁 **Profile Widget** - Display customer loyalty information in customizable UI
+- 💬 **In-App Messaging** - Show dashboard-authored campaigns in your app, opt-in and additive
 - 🔧 **Modern Architecture** - Built with Flutter best practices and null safety
 - 🛡️ **Type Safety** - Compile-time validation with Dart's type system
 - ⚡ **Async/Await Ready** - Modern async architecture with proper error handling
@@ -30,7 +31,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.1
+  gameball_sdk: ^3.3.0
 ```
 
 ### Flutter CLI
@@ -208,6 +209,91 @@ final request = ShowProfileRequestBuilder()
 
 The SDK also records internal diagnostic logs automatically to aid troubleshooting. This requires no integration changes.
 
+## In-App Messaging
+
+Displays campaigns you author in the Gameball dashboard — modals, slideup banners and fullscreen posters — inside your app.
+
+It is **opt-in and additive**. Until you call `startInAppMessaging`, the module makes no requests, starts no timers, draws nothing and stores nothing, so upgrading without calling it changes nothing about how your app behaves.
+
+> In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent.
+
+### Opting in
+
+The SDK draws above your routes, so it needs the same navigator key your app uses:
+
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
+
+MaterialApp(
+  navigatorKey: navigatorKey,
+  home: const HomeScreen(),
+);
+
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+);
+```
+
+Call `stopInAppMessaging()` on logout. It dismisses anything on screen, sends pending telemetry and clears state.
+
+### What triggers a message
+
+**Session start** — on launch, and again when the app returns to the foreground after more than `sessionTimeout` (30 seconds by default).
+
+**Custom events** — a campaign can target an event by name and filter on its metadata:
+
+```dart
+GameballApp.getInstance().sendEvent(
+  EventBuilder()
+      .customerId("customer_123")
+      .eventName("add_to_cart")
+      .eventMetaData("productId", "sku-001")
+      .build(),
+  (success, error) {},
+);
+```
+
+A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
+
+Whether a matching campaign actually appears also depends on its frequency cap, the minimum interval between any two displays, its expiry and its priority — all set in the dashboard.
+
+### Controlling display
+
+```dart
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+
+  // Show it, hold it for the next opportunity, or drop it.
+  beforeDisplay: (message) => isCheckingOut
+      ? GameballDisplayDecision.later
+      : GameballDisplayDecision.show,
+
+  // Return true if you handled the tap; false lets the SDK act.
+  // `button` is null when the message surface itself was tapped.
+  onAction: (message, button, action) => false,
+
+  // Needed for go_router and other Navigator 2.0 routers; without it the
+  // SDK falls back to named routes.
+  onNavigate: (String route, Map<String, Object>? arguments) {
+    // route your own way
+  },
+);
+```
+
+`onInAppMessage` is a stream of every message the SDK selects, whatever happens to it afterwards:
+
+```dart
+GameballApp.getInstance().onInAppMessage.listen((message) {
+  debugPrint("selected ${message.id}");
+});
+```
+
+### Analytics
+
+Impressions, clicks and dismissals are reported automatically — no integration required. A button tap is reported as a click carrying that button's id. Events are batched and persisted to device storage, so telemetry logged just before the app is killed still arrives on the next launch.
+
 ## API Methods
 
 The SDK provides the following public methods:
@@ -216,6 +302,11 @@ The SDK provides the following public methods:
 - `sendEvent(event, callback, {sessionToken})` - Track events with Event builder
 - `showProfile(context, request, {sessionToken})` - Show profile widget with ShowProfileRequest
 - `hideProfile()` - Dismiss the currently shown profile widget (no-op when nothing is shown)
+- `logPurchase(...)` - Report a purchase, which in-app messaging campaigns can target and filter on
+- `startInAppMessaging(customerId:, navigatorKey:, ...)` - Opt in to in-app messaging
+- `stopInAppMessaging()` - Stop it and clear state; call on logout
+- `isInAppMessagingStarted` - Whether in-app messaging is currently running
+- `onInAppMessage` - Stream of every in-app message the SDK selects
 
 ### Session Token Per-Request Override
 

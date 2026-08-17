@@ -4,37 +4,94 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v3.2.1
+## Latest Release: v3.3.0
 
-**Release Date**: 2026-08-06
-**Version**: 3.2.1
-**Type**: Patch Release
+**Release Date**: 2026-08-17
+**Version**: 3.3.0
+**Type**: Minor Release
 
 ---
 
 ## 🎉 What's New
 
-v3.2.1 is a bug-fix release that corrects how the `shop` value is sent to the Gameball widget. There are no API changes — upgrading from any 3.x version requires no code changes.
+v3.3.0 adds **in-app messaging**: campaigns authored in the Gameball dashboard, displayed inside your app. It is opt-in and additive — an app that upgrades and changes nothing behaves exactly as it did on 3.2.1. No requests, no timers, no overlay and no stored state exist until you call `startInAppMessaging`.
 
-### 🐛 Fixed: Widget Shop Parameter
+### 💬 Opting in
 
-When `GameballConfigBuilder` was configured with both `.platform(...)` and `.shop(...)`, the SDK appended the shop value to the widget URL as a **second `platform` key**:
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
 
-```
-...&platform=<platform>&platform=<shop>&...
-```
+MaterialApp(navigatorKey: navigatorKey, home: const HomeScreen());
 
-The widget parses duplicate query keys into an array, and its coupon-redemption flow calls `platform.toLowerCase()` — which throws a `TypeError` on an array. The visible symptom: tapping redeem showed an infinite loading spinner and no request ever reached the backend.
-
-The SDK now sends the value under its own key:
-
-```
-...&platform=<platform>&shop=<shop>&...
+GameballApp.getInstance().startInAppMessaging(
+  customerId: 'customer-123',
+  navigatorKey: navigatorKey,
+);
 ```
 
-### Who should upgrade
+The navigator key is how the SDK draws above your routes, so it has to be the one your `MaterialApp` (or `CupertinoApp`) uses. Call `stopInAppMessaging()` on logout.
 
-Any app that sets both `platform` and `shop` in `GameballConfigBuilder` — widget coupon redemption is broken for that configuration in all prior releases.
+### 🖼️ Message types
+
+**Modal** — a centred card over a dimmed background, with up to two buttons. Blocks the app until dismissed.
+
+**Slideup** — a banner at the top or bottom edge. It does not block: the app stays usable underneath, it carries no buttons because the whole surface is the tap target, and it is dismissed by swiping toward its own edge.
+
+**Fullscreen** — edge to edge, in one of two compositions. Either image over copy with the buttons below, or artwork filling the screen with the buttons floated over it. A fullscreen campaign can also insist on portrait or landscape, and waits rather than showing sideways copy nobody can read.
+
+### 🎯 Triggers
+
+**Session start** fires on launch, and again when the app returns to the foreground after more than the session timeout (30 seconds by default).
+
+**Custom events** match on the event name and, optionally, on the event's metadata:
+
+```dart
+gameballApp.sendEvent(
+  EventBuilder()
+      .customerId('customer-123')
+      .eventName('add_to_cart')
+      .eventMetaData('productId', 'sku-001')
+      .build(),
+  (success, error) {},
+);
+```
+
+A campaign targeting `add_to_cart` can filter on `productId`, using equality, ordering or contains comparisons. A purchase logged through `logPurchase` arrives as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are all available to filters — so "any purchase" and "a purchase over 100" are the same trigger, filtered differently.
+
+### 🚦 What controls whether a message actually shows
+
+Per-campaign frequency caps, which survive a restart. A minimum interval between any two displays, set by the backend rather than hardcoded. Campaign expiry. Priority order when more than one campaign matches. And a message that cannot be drawn right now — because your own Gameball widget is open, or another message is showing — waits instead of being lost.
+
+### 📊 Analytics
+
+Impressions, clicks and dismissals are reported automatically. A button tap is a click carrying the button's id. Events are batched rather than sent one at a time, and the buffer is written to device storage after every change, so an impression logged a second before a force-quit still arrives on the next launch.
+
+Artwork is loaded at sync rather than at display time, so an impression is only ever recorded for a message whose image the user could actually see.
+
+### 🖐️ Taking control
+
+```dart
+gameballApp.startInAppMessaging(
+  customerId: 'customer-123',
+  navigatorKey: navigatorKey,
+  // Postpone during checkout rather than interrupting it.
+  beforeDisplay: (message) => isCheckingOut
+      ? GameballDisplayDecision.later
+      : GameballDisplayDecision.show,
+  // Handle the tap yourself; return false to let the SDK act.
+  onAction: (message, button, action) => false,
+  // Route through go_router instead of named routes.
+  onNavigate: (String route, Map<String, Object>? arguments) {
+    context.push(route);
+  },
+);
+```
+
+`onInAppMessage` is a stream of every message the SDK selects, whatever the host then decides to do with it.
+
+### ⚠️ Availability
+
+In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not yet, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app and nothing else is affected.
 
 ---
 
@@ -49,7 +106,7 @@ Any app that sets both `platform` and `shop` in `GameballConfigBuilder` — widg
 
 ## Migration
 
-No changes required — all v3.x code works without modification.
+No changes required — all v3.x code works without modification. In-app messaging is opt-in; an app that does not call `startInAppMessaging` behaves exactly as before.
 
 See [MIGRATION.md](MIGRATION.md) for details.
 
@@ -59,7 +116,7 @@ See [MIGRATION.md](MIGRATION.md) for details.
 
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.1
+  gameball_sdk: ^3.3.0
 ```
 
 ---
@@ -69,6 +126,15 @@ dependencies:
 - 📧 Email: support@gameball.co
 - 📖 Documentation: https://developer.gameball.co/
 - 🐛 Issues: https://github.com/gameballers/gameball-flutter/issues
+
+---
+
+## Previous Release: v3.2.1
+
+**Release Date**: 2026-08-06
+**Type**: Patch Release
+
+Corrected the widget URL's `shop` parameter, which was being appended as a second `platform` key and broke coupon redemption for apps setting both. See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ---
 

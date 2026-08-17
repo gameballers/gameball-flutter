@@ -6,10 +6,53 @@ This guide provides migration instructions for upgrading between major versions 
 
 ## Table of Contents
 
+- [v3.2.1 → v3.3.0](#migration-guide-v321--v330)
 - [v3.1.1 → v3.2.0](#migration-guide-v311--v320)
 - [v3.1.0 → v3.1.1](#migration-guide-v310--v311)
 - [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
 - [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.2.1 → v3.3.0
+
+Version 3.3.0 adds in-app messaging. This is a **minor update with no breaking changes** — every v3.x app continues to work untouched.
+
+### Do I have to do anything?
+
+No. In-app messaging is opt-in. Until you call `startInAppMessaging`, the module issues no requests, starts no timers, draws nothing and stores nothing. Upgrade the dependency and your app behaves exactly as it did on 3.2.1.
+
+### Update Dependencies
+
+```yaml
+dependencies:
+  gameball_sdk: ^3.3.0
+```
+
+Run `flutter pub get` to update.
+
+### Overview of Changes
+
+#### ✨ What's New
+- **In-app messaging** - `startInAppMessaging(customerId:, navigatorKey:)` displays campaigns authored in the Gameball dashboard; `stopInAppMessaging()` clears it on logout
+- **Three message types** - modal, slideup and fullscreen, chosen per campaign in the dashboard rather than in code
+- **Triggers** - session start, and custom events matched by name and optionally filtered on their metadata. A purchase logged via `logPurchase` reaches campaigns as an event named `purchase`
+- **Host hooks** - `beforeDisplay`, `onAction`, `onNavigate`, and the `onInAppMessage` stream
+- **Automatic message analytics** - impressions, clicks and dismissals, batched and persisted across restarts
+
+### If you do adopt it
+
+Three things are worth knowing before you wire it up.
+
+**The navigator key must be your app's.** The SDK draws above your routes through it, so pass the same `GlobalKey<NavigatorState>` your `MaterialApp` or `CupertinoApp` uses. A key belonging to nothing means messages are selected and then silently never appear.
+
+**Call `stopInAppMessaging()` on logout.** Frequency caps and cached campaigns are stored per customer, and stopping is what dismisses anything on screen and sends pending telemetry under the identity that produced it.
+
+**If you use go_router or another Navigator 2.0 router, pass `onNavigate`.** Without it the SDK falls back to `Navigator.pushNamed`, which cannot see those routes, so a campaign whose action is a navigation will log that it could not route rather than taking the user anywhere.
+
+### Availability
+
+In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app.
 
 ---
 
