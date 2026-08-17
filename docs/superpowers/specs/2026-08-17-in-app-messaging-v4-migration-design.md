@@ -1,6 +1,6 @@
 # In-App Messaging — V4 Integrations Migration
 
-**Status:** designed, not implemented
+**Status:** implemented 2026-08-17 — see [`../plans/2026-08-17-in-app-messaging-v4-migration.md`](../plans/2026-08-17-in-app-messaging-v4-migration.md)
 **Supersedes the wire layer of:** [`2026-08-10-in-app-messaging-backend-integration-design.md`](2026-08-10-in-app-messaging-backend-integration-design.md)
 **Reference:** [`docs/reference/backend-sdk-endpoints-reference.md`](../../reference/backend-sdk-endpoints-reference.md) — replaced with the V4 document as part of this work
 
@@ -54,7 +54,7 @@ these tables is a real response.
 
 | Behaviour | Result | Consequence |
 | --- | --- | --- |
-| Response shape | Top-level keys exactly `{cooldownSeconds, messages}` | **Envelope confirmed gone.** All wrapper handling is deleted, not made optional |
+| Response shape | A plain payload rooted at `{cooldownSeconds, messages, …}` | **Envelope confirmed gone.** All wrapper handling is deleted, not made optional. The root is not a closed set — see the new-fields row below |
 | Campaign coverage | 8 campaigns: 5 modal, 2 slideup, 1 fullscreen | **Closes the old spec's gap.** Alpha previously served only slideups, so the modal and fullscreen paths had never met real data |
 | `trigger.name` | Populated on event triggers (`place_order`, `view_product_page`); null on `session_start` | The rename is real and the values are usable |
 | `layout` | **Null on all 8** | The field exists but nothing authors it yet. O12's fix ships correct but unexercised against live data |
