@@ -335,8 +335,16 @@ Deliberately not in this work, and unaffected by it:
 
   `orientation` is enforced at display: a fullscreen campaign whose orientation does not match is
   refused by the presenter and held as pending, because a poster with its copy baked into the
-  artwork is unreadable sideways. **A device rotation does not yet trigger a retry** — the pending
-  message waits for the next display opportunity instead.
+  artwork is unreadable sideways. **A rotation does release it** — corrected here, having
+  previously claimed otherwise. The mechanism is indirect and worth knowing: a refused
+  presentation re-arms a post-frame retry, and a rotation produces a frame, so the next retry
+  finds an orientation it accepts. Nothing listens for the rotation itself.
+
+  Two consequences follow. An explicit `didChangeMetrics` observer was written and then removed,
+  because no test could distinguish it from what already happens — it was a no-op. And the retry
+  costs one `_tryPresent` per frame the app draws while a message waits, which is cheap but is
+  also what makes rotation work, so making it one-shot would silently break this.
+  `end_to_end_test.dart` pins the behaviour down for that reason.
 - **The `submit` event** and email capture.
 - **The HtmlFullscreen sandbox** and its JS bridge.
 - **`log_event`, `log_attribute`, `request_push_permission` actions.** The first two are close to

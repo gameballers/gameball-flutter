@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
+import 'package:gameball_sdk/in_app_messaging/models/gameball_audience.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
+import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
+import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 import 'package:gameball_sdk/in_app_messaging/source/stub_message_source.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
@@ -26,6 +29,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _ReadyArtwork implements ArtworkPrefetcher {
   @override
   Future<bool> prefetch(GameballInAppMessage message) async => true;
+}
+
+/// Serves one hand-written campaign, for shapes the shared fixture has no
+/// reason to carry.
+class _OneCampaign implements GameballMessageSource {
+  _OneCampaign(this.raw);
+
+  final String raw;
+
+  @override
+  Future<GameballSyncResult> fetch(GameballAudience audience) async =>
+      parseSyncResponse(raw);
 }
 
 void main() {
@@ -236,6 +251,56 @@ void main() {
       expect(app().pendingInAppMessageCampaign?.campaignId, 2041,
           reason: 'a filter on an absent property must not match, or filters '
               'would be decorative');
+    });
+  });
+
+  /// The spec's out-of-scope section claimed a rotation does not trigger a
+  /// retry. It does, and this pins down why, because the reason is indirect: a
+  /// refused presentation re-arms a post-frame retry, and a rotation is a frame.
+  /// Nothing listens for the rotation itself, so anyone who makes that retry
+  /// one-shot will break this without touching anything orientation-shaped.
+  group('rotation', () {
+    /// A fullscreen poster that refuses to be shown sideways.
+    const portraitPoster = '''
+{
+  "success": true,
+  "response": { "cooldownSeconds": 30, "messages": [
+    { "campaignId": 3101, "messageType": 3,
+      "trigger": {"type": "session_start"},
+      "content": {"orientation": "portrait"},
+      "locale": {"message": "Portrait poster"} }
+  ]}
+}
+''';
+
+    testWidgets('turning the device shows the message it had refused',
+        (tester) async {
+      // Sideways at launch, so the poster cannot be drawn yet.
+      tester.view.physicalSize = const Size(844, 390);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      GameballApp.debugMessageSource = _OneCampaign(portraitPoster);
+
+      await startWithHost(tester);
+
+      expect(find.text('Portrait poster'), findsNothing);
+      expect(app().pendingInAppMessageCampaign?.campaignId, 3101,
+          reason: 'refused for orientation, so it waits rather than showing '
+              'copy nobody can read');
+
+      // Frames alone keep refusing it, so what changes below is the geometry
+      // rather than merely the passage of frames.
+      await tester.pump();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.text('Portrait poster'), findsNothing,
+          reason: 'still sideways');
+
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Portrait poster'), findsOneWidget);
+      expect(app().pendingInAppMessageCampaign, isNull);
     });
   });
 }

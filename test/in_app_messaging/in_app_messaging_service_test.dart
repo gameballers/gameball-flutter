@@ -1341,7 +1341,7 @@ void main() {
           reason: 'a wedged image host must not hang start() forever');
     });
 
-    test('readiness is recomputed on the next sync', () async {
+    test('artwork readiness is recomputed on the next sync', () async {
       final h = build();
       h.prefetcher.failing.add('msg_a');
       await h.service.start(customerId: 'c1');
