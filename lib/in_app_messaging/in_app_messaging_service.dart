@@ -12,6 +12,8 @@ import 'models/gameball_audience.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
+import 'personalisation/token_substitution.dart';
+import 'personalisation/variable_source.dart';
 import 'presentation/artwork_prefetcher.dart';
 import 'presentation/message_navigator.dart';
 import 'presentation/message_presenter.dart';
@@ -81,6 +83,13 @@ const Duration defaultSessionTimeout = defaultDisplayCooldown;
 /// the marketer scheduled, and that is the more expensive mistake of the two.
 const Duration defaultArtworkPrefetchTimeout = Duration(seconds: 5);
 
+/// How long to wait for current personalisation values before displaying.
+///
+/// The document's figure. Bounded because a message must never be blocked or
+/// dropped by this call — on timeout the sync-time text is displayed, which is
+/// the same text the customer would have seen with no personalisation at all.
+const Duration defaultVariableTimeout = Duration(seconds: 2);
+
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
 /// Owns no display policy of its own — [selectCampaign] decides what shows —
@@ -95,11 +104,13 @@ class InAppMessagingService {
     required bool Function() isHostWidgetOpen,
     required MessageNavigator navigator,
     required ArtworkPrefetcher prefetcher,
+    required VariableSource variables,
     void Function(GameballInAppMessage message)? emit,
     DateTime Function()? clock,
     UrlLauncher? launcher,
     this.sessionTimeout = defaultSessionTimeout,
     this.prefetchTimeout = defaultArtworkPrefetchTimeout,
+    this.variableTimeout = defaultVariableTimeout,
   })  : _source = source,
         _navigator = navigator,
         _presenter = presenter,
@@ -108,6 +119,7 @@ class InAppMessagingService {
         _analytics = analytics,
         _isHostWidgetOpen = isHostWidgetOpen,
         _prefetcher = prefetcher,
+        _variables = variables,
         _emit = emit,
         _clock = clock ?? DateTime.now,
         _launcher = launcher ?? _defaultLauncher;
@@ -120,6 +132,7 @@ class InAppMessagingService {
   final bool Function() _isHostWidgetOpen;
   final MessageNavigator _navigator;
   final ArtworkPrefetcher _prefetcher;
+  final VariableSource _variables;
   final void Function(GameballInAppMessage message)? _emit;
   final DateTime Function() _clock;
   final UrlLauncher _launcher;
@@ -129,6 +142,9 @@ class InAppMessagingService {
 
   /// How long artwork may take to load before its campaign is passed over.
   final Duration prefetchTimeout;
+
+  /// How long to wait for personalisation values before displaying anyway.
+  final Duration variableTimeout;
 
   /// How long to wait on local storage before giving up on it.
   static const Duration _storeTimeout = Duration(seconds: 2);
@@ -168,6 +184,13 @@ class InAppMessagingService {
   /// as no surface exists.
   bool _postFrameRetryScheduled = false;
 
+  /// Guards the window between deciding to display and actually displaying.
+  ///
+  /// Only a token-bearing message opens that window, by awaiting its variables.
+  /// Without this, a trigger firing during the await would present a second
+  /// message on top of the first.
+  bool _presentationInFlight = false;
+
   /// Whether in-app messaging is running for a customer.
   bool get isStarted => _audience != null;
 
@@ -206,6 +229,8 @@ class InAppMessagingService {
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <int>{};
+    _presentationInFlight = false;
+    _forgetVariables();
     _audience = null;
     _beforeDisplay = null;
     _onAction = null;
@@ -311,7 +336,19 @@ class InAppMessagingService {
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <int>{};
+    _presentationInFlight = false;
+    _forgetVariables();
     _audience = audience;
+  }
+
+  /// Drops any cached personalisation values.
+  ///
+  /// Guarded by a type test because `clear()` is an implementation detail of the
+  /// caching wrapper rather than part of the seam — a source that does not cache
+  /// has nothing to forget.
+  void _forgetVariables() {
+    final variables = _variables;
+    if (variables is CachingVariableSource) variables.clear();
   }
 
   /// Reads persisted state, bounded so a wedged store cannot kill the feature.
@@ -490,7 +527,67 @@ class InAppMessagingService {
       _defer(campaign, 'another message is showing');
       return;
     }
+    if (_presentationInFlight) {
+      _defer(campaign, 'another message is resolving its personalisation');
+      return;
+    }
 
+    // The common path, and today the only one: no tokens means nothing to
+    // fetch, so display stays synchronous and byte-identical to what it was
+    // before personalisation existed.
+    if (!messageHasTokens(campaign.message)) {
+      _present(campaign, campaign.message);
+      return;
+    }
+
+    _presentationInFlight = true;
+    unawaited(_resolveThenPresent(campaign));
+  }
+
+  /// Fetches current values, then displays — bounded, and never at the cost of
+  /// the display itself.
+  Future<void> _resolveThenPresent(InAppMessageCampaign campaign) async {
+    final audience = _audience;
+    var message = campaign.message;
+
+    try {
+      if (audience is CustomerAudience) {
+        final values =
+            await _variables.fetch(audience.customerId).timeout(variableTimeout);
+        message = substituteInto(message, values);
+      }
+    } on TimeoutException {
+      iamLog('personalisation for campaign "${campaign.campaignId}" did not '
+          'arrive within ${variableTimeout.inMilliseconds}ms; displaying the '
+          'text from the last sync');
+    } catch (error) {
+      iamLog('personalisation for campaign "${campaign.campaignId}" failed '
+          '($error); displaying the text from the last sync');
+    } finally {
+      _presentationInFlight = false;
+    }
+
+    // Re-checked rather than trusted: the screen can change during the await,
+    // and the host can log out.
+    if (!isStarted) {
+      iamLog('campaign "${campaign.campaignId}" abandoned: messaging stopped '
+          'while its personalisation was resolving');
+      return;
+    }
+    if (_isHostWidgetOpen() || _presenter.isShowing) {
+      _defer(campaign, 'the screen was taken while personalisation resolved');
+      return;
+    }
+
+    _present(campaign, message);
+  }
+
+  /// Draws [message] for [campaign], and wires its callbacks.
+  ///
+  /// Takes the message separately from the campaign because personalisation
+  /// displays a substituted copy, while every piece of bookkeeping — caps,
+  /// impressions, the pending slot — still keys on the campaign.
+  void _present(InAppMessageCampaign campaign, GameballInAppMessage message) {
     // Both local to this presentation, so a campaign shown again starts clean.
     //
     // `shown` exists because a message can be dismissed before its first frame
@@ -502,7 +599,7 @@ class InAppMessagingService {
     var engaged = false;
 
     final presented = _presenter.present(
-      message: campaign.message,
+      message: message,
       onShown: () {
         shown = true;
         // Recorded at impression, never at selection, so a deferred or

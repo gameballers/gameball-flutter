@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
 import 'package:gameball_sdk/network/request_calls/send_message_events_request.dart';
+import 'package:gameball_sdk/network/request_calls/fetch_message_variables_request.dart';
 import 'package:gameball_sdk/network/request_calls/sync_in_app_messages_request.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
@@ -24,6 +25,7 @@ import 'in_app_messaging/in_app_messaging_service.dart';
 import 'in_app_messaging/models/in_app_message.dart';
 import 'in_app_messaging/models/in_app_message_campaign.dart';
 import 'in_app_messaging/models/message_trigger.dart';
+import 'in_app_messaging/personalisation/variable_source.dart';
 import 'in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'in_app_messaging/presentation/message_navigator.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
@@ -369,6 +371,10 @@ class GameballApp extends StatelessWidget {
       // Artwork is loaded at sync rather than at display, so the impression is
       // logged for a message the user can actually see.
       prefetcher: debugArtworkPrefetcher ?? ImageCacheArtworkPrefetcher(),
+      // Personalisation values, fetched just before display and cached briefly.
+      // Inert until the backend sends text that still contains {tokens}.
+      variables: debugVariableSource ??
+          CachingVariableSource(fetcher: _fetchMessageVariables),
       emit: (message) => _inAppMessageController?.add(message),
     );
 
@@ -453,6 +459,28 @@ class GameballApp extends StatelessWidget {
   /// the end-to-end suite with nothing to display.
   @visibleForTesting
   static ArtworkPrefetcher? debugArtworkPrefetcher;
+
+  /// Replaces the personalisation source. Tests only — never set this in an app.
+  ///
+  /// Without it a token-bearing message would reach for the live endpoint, which
+  /// `flutter_test` answers with a 400 — harmless, but it makes a suite's
+  /// behaviour depend on a network call it never meant to make.
+  @visibleForTesting
+  static VariableSource? debugVariableSource;
+
+  /// Fetches the customer's current personalisation values.
+  static Future<Map<String, String>> _fetchMessageVariables(
+    String customerId,
+  ) async {
+    if (isNullOrEmpty(_apiKey)) return const <String, String>{};
+    return fetchMessageVariablesRequest(
+      customerId: customerId,
+      apiKey: _apiKey,
+      lang: handleLanguage(_lang, _customerPreferredLanguage),
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+    );
+  }
 
   static Future<GameballAnalyticsSendResult> _sendInAppMessageEvents(
     List<Map<String, dynamic>> events,

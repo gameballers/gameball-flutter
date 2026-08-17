@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
 import 'package:gameball_sdk/in_app_messaging/models/gameball_audience.dart';
+import 'package:gameball_sdk/in_app_messaging/personalisation/variable_source.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
@@ -22,6 +23,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _ReadyArtwork implements ArtworkPrefetcher {
   @override
   Future<bool> prefetch(GameballInAppMessage message) async => true;
+}
+
+/// Reports no personalisation values.
+///
+/// The stub fixture carries no `{tokens}`, so the real source is never reached
+/// and this changes nothing today. It is set anyway so the suite's independence
+/// from the network is explicit rather than incidental — the day a fixture grows
+/// a token, this is what stops that becoming a live request.
+class _NoVariables implements VariableSource {
+  @override
+  Future<Map<String, String>> fetch(String customerId) async =>
+      const <String, String>{};
 }
 
 /// Serves one hand-written campaign, for shapes the shared fixture has no
@@ -75,10 +88,12 @@ void main() {
     // timer pending. Analytics content is asserted in the service unit tests.
     GameballApp.debugAnalytics = LoggingMessageAnalytics();
     GameballApp.debugArtworkPrefetcher = _ReadyArtwork();
+    GameballApp.debugVariableSource = _NoVariables();
     app().stopInAppMessaging();
   });
   tearDown(() {
     app().stopInAppMessaging();
+    GameballApp.debugVariableSource = null;
     GameballApp.debugArtworkPrefetcher = null;
     GameballApp.debugAnalytics = null;
     GameballApp.debugMessageSource = null;

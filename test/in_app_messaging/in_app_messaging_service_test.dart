@@ -11,6 +11,7 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
+import 'package:gameball_sdk/in_app_messaging/personalisation/variable_source.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_navigator.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_presenter.dart';
@@ -54,6 +55,10 @@ class FakePresenter implements GameballMessagePresenter {
   bool _showing = false;
 
   final List<String> shownMessageIds = <String>[];
+
+  /// What the presenter was actually handed, which personalisation changes.
+  final List<String?> shownHeaders = <String?>[];
+  final List<String?> shownBodies = <String?>[];
   VoidCallback? _onDismissed;
   void Function(GameballMessageButton)? _onButtonPressed;
   VoidCallback? _onMessagePressed;
@@ -75,6 +80,8 @@ class FakePresenter implements GameballMessagePresenter {
     _onButtonPressed = onButtonPressed;
     _onMessagePressed = onMessagePressed;
     shownMessageIds.add(message.id);
+    shownHeaders.add(message.header);
+    shownBodies.add(message.body);
     onShown();
     return true;
   }
@@ -112,6 +119,19 @@ class FakeArtworkPrefetcher implements ArtworkPrefetcher {
     requested.add(message.id);
     if (hanging.contains(message.id)) return Completer<bool>().future;
     return Future<bool>.value(!failing.contains(message.id));
+  }
+}
+
+class FakeVariableSource implements VariableSource {
+  Map<String, String> values = const <String, String>{};
+  bool hang = false;
+  int fetches = 0;
+
+  @override
+  Future<Map<String, String>> fetch(String customerId) {
+    fetches++;
+    if (hang) return Completer<Map<String, String>>().future;
+    return Future<Map<String, String>>.value(values);
   }
 }
 
@@ -248,6 +268,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   InMemoryCampaignCache cache,
   RecordingNavigator navigator,
   FakeArtworkPrefetcher prefetcher,
+  FakeVariableSource variables,
   List<GameballInAppMessage> emitted,
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
@@ -255,6 +276,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   List<InAppMessageCampaign>? campaigns,
   InMemoryCampaignCache? cache,
   Duration? prefetchTimeout,
+  Duration? variableTimeout,
 }) {
   final source = FakeSource(campaigns ?? [campaign('a')]);
   final presenter = FakePresenter();
@@ -263,6 +285,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   final theCache = cache ?? InMemoryCampaignCache();
   final navigator = RecordingNavigator();
   final prefetcher = FakeArtworkPrefetcher();
+  final variables = FakeVariableSource();
   final emitted = <GameballInAppMessage>[];
   var widgetOpen = false;
   var now = t0;
@@ -276,10 +299,12 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     isHostWidgetOpen: () => widgetOpen,
     navigator: navigator,
     prefetcher: prefetcher,
+    variables: variables,
     emit: emitted.add,
     clock: () => now,
     launcher: (uri, {bool external = false}) async => true,
     prefetchTimeout: prefetchTimeout ?? defaultArtworkPrefetchTimeout,
+    variableTimeout: variableTimeout ?? defaultVariableTimeout,
   );
 
   return (
@@ -291,6 +316,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     cache: theCache,
     navigator: navigator,
     prefetcher: prefetcher,
+    variables: variables,
     emitted: emitted,
     setWidgetOpen: (v) => widgetOpen = v,
     setNow: (v) => now = v,
@@ -1356,6 +1382,119 @@ void main() {
       await pumpEventQueue();
 
       expect(h.presenter.shownMessageIds, ['msg_a']);
+    });
+  });
+
+  group('personalisation', () {
+    InAppMessageCampaign tokenCampaign(String label) => InAppMessageCampaign(
+          campaignId: idFor(label),
+          trigger: const GameballSessionStartTrigger(),
+          priority: 0,
+          message: GameballInAppMessage(
+            id: 'msg_$label',
+            type: GameballMessageType.modal,
+            header: 'Hi {first_name}',
+            body: 'You have {points_balance}',
+          ),
+        );
+
+    test('a message with no token never asks for variables', () async {
+      final h = build();
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['msg_a']);
+      expect(h.variables.fetches, 0,
+          reason: 'the scan is what keeps this inert until tokens exist');
+    });
+
+    test('a token-bearing message displays with values substituted', () async {
+      final h = build(campaigns: [tokenCampaign('promo')]);
+      h.variables.values = const <String, String>{
+        'first_name': 'Ahmed',
+        'points_balance': '1,250',
+      };
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.variables.fetches, 1);
+      expect(h.presenter.shownHeaders, ['Hi Ahmed']);
+      expect(h.presenter.shownBodies, ['You have 1,250']);
+    });
+
+    test('an empty map displays the text already held', () async {
+      final h = build(campaigns: [tokenCampaign('promo')]);
+      h.variables.values = const <String, String>{};
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownHeaders, ['Hi {first_name}'],
+          reason: 'never block or drop a display on this call');
+    });
+
+    test('a hung fetch is bounded and the message still displays', () async {
+      final h = build(
+        campaigns: [tokenCampaign('promo')],
+        variableTimeout: const Duration(milliseconds: 50),
+      );
+      h.variables.hang = true;
+
+      await h.service.start(customerId: 'c1');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      expect(h.presenter.shownHeaders, ['Hi {first_name}']);
+    });
+
+    test('the impression is still logged once, at display', () async {
+      final h = build(campaigns: [tokenCampaign('promo')]);
+      h.variables.values = const <String, String>{'first_name': 'Ahmed'};
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.analytics.impressions, ['promo']);
+    });
+
+    test('the cap is recorded against the campaign, not the copy', () async {
+      final h = build(campaigns: [tokenCampaign('promo')]);
+      h.variables.values = const <String, String>{'first_name': 'Ahmed'};
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.cap.snapshot().shownCampaignIds, {idFor('promo')});
+    });
+
+    test('a trigger during the fetch does not stack a second message',
+        () async {
+      final h = build(campaigns: [tokenCampaign('promo'), campaign('other')]);
+      h.variables.hang = true;
+
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('anything');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'one is still resolving; the other must not jump the queue');
+    });
+
+    test('stopping while a fetch is in flight shows nothing afterwards',
+        () async {
+      final h = build(
+        campaigns: [tokenCampaign('promo')],
+        variableTimeout: const Duration(milliseconds: 50),
+      );
+      h.variables.hang = true;
+
+      await h.service.start(customerId: 'c1');
+      h.service.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'a message resolving when the host logged out must not '
+              'appear over whatever replaced it');
     });
   });
 }
