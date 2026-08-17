@@ -176,13 +176,24 @@ campaign over for an empty string, silently and with no way to tell it from a ne
 all-invalid batch returns it too. Both are discard, so behaviour is unaffected — but the code says
 so in a comment, because the next reader will otherwise assume 422 means deactivated and be wrong.
 
-Batching thresholds move to the documented cadence:
+**Batching needs no change.** The code already flushes at 30 seconds or 10 events, which is exactly
+the documented cadence — checked against `batched_message_analytics.dart` rather than assumed.
 
-| Setting | Was | Becomes |
+What *is* stale is our own handoff document, which still describes the earlier design:
+
+| | `docs/integration/…-handoff.md` says | Code and V4 reference say |
 | --- | --- | --- |
-| Flush interval | 10s | **30s** |
-| Flush at count | 20 | **10** |
-| Events per request | 50 | 50, kept — see decision 6 |
+| Cadence | 10 seconds / 20 events | **30 seconds / 10 events** |
+| Batch size | "1 to 500 events" | chunked at 50 |
+
+That document was written for the backend team, so leaving it wrong is worse than a stale comment —
+it describes behaviour they may have built against. Section 6 corrects it.
+
+| Setting | Value | Status |
+| --- | --- | --- |
+| Flush interval | 30s | already correct |
+| Flush at count | 10 | already correct |
+| Events per request | 50 | kept — see decision 6 |
 | Outbox ceiling | 500 | unchanged |
 
 ## Section 4 — Personalisation variables
@@ -271,6 +282,11 @@ The events tests become a status-code table matching the one above.
 The vendored reference is replaced with the V4 document. The 2026-08-10 spec is annotated to point
 here for anything wire-shaped, with O1, O2, O7, O8, O10 and O12 marked resolved.
 
+`docs/integration/in-app-message-analytics-backend-handoff.md` is corrected: its cadence table says
+10 seconds / 20 events and its batch size says "1 to 500", none of which has been true for some
+time. That document was written *for the backend team*, so a wrong number there is worse than a
+wrong comment — it describes behaviour they may have built against.
+
 3.3.0 is unreleased, so CHANGELOG, RELEASE_NOTES and MIGRATION are amended in place rather than
 given a new version heading.
 
@@ -283,7 +299,7 @@ given a new version heading.
 - **Video media.** `media.type == "video"` parses and is ignored.
 - **`log_event`, `log_attribute`, `request_push_permission` actions.** Still unimplemented; they
   parse as unsupported and their buttons are dropped.
-- **Custom fonts** (`content.font`), `extras`, `allowedAssetUrls`.
+- **Custom fonts** (`content.font`) and `allowedAssetUrls`.
 - **Dayparting in local time.** The sync request still carries no time zone.
 
 ## Open items
@@ -330,7 +346,7 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
 - **Parser.** Plain payload, `trigger.name`, null name on an event trigger, every `layout` value
   and an unknown one, `media` precedence per message type, video ignored, blank URL normalisation.
 - **Events transport.** One case per row of the status table, driven through a fake HTTP client.
-- **Batching.** The new 10/30s thresholds, and that chunking still holds at 50.
+- **Batching.** Unchanged and already correct at 30s/10 events; the existing tests stay as they are.
 - **Variables.** Token substitution as a pure function — known token, unknown token left intact,
   malformed brace left intact, multiple occurrences; the 60s cache; the 2s timeout falling back to
   the original text; a failed fetch presenting unchanged; and that a message with no token never
