@@ -1016,6 +1016,66 @@ void main() {
     });
   });
 
+  group('artwork, which fullscreen delivers as media', () {
+    String withContent(String content, {int messageType = 3}) =>
+        '{"campaignId":1,"messageType":$messageType,'
+        '"trigger":{"type":"session_start"},'
+        '"content":$content,"locale":{"header":"H","message":"B"}}';
+
+    test('a fullscreen takes its artwork from media when imageUrl is null', () {
+      final message = one(withContent(
+          '{"imageUrl":null,"media":{"type":"image","url":"https://x/m.png"}}'))!
+          .message;
+      expect(message.imageUrl, 'https://x/m.png');
+    });
+
+    test('a fullscreen prefers media over imageUrl', () {
+      final message = one(withContent(
+          '{"imageUrl":"https://x/i.png",'
+          '"media":{"type":"image","url":"https://x/m.png"}}'))!.message;
+      expect(message.imageUrl, 'https://x/m.png',
+          reason: 'the contract puts fullscreen artwork in media');
+    });
+
+    test('a modal prefers imageUrl over media', () {
+      final message = one(withContent(
+          '{"imageUrl":"https://x/i.png",'
+          '"media":{"type":"image","url":"https://x/m.png"}}',
+          messageType: 2))!.message;
+      expect(message.imageUrl, 'https://x/i.png');
+    });
+
+    test('a modal still falls back to media', () {
+      final message = one(withContent(
+          '{"media":{"type":"image","url":"https://x/m.png"}}',
+          messageType: 2))!.message;
+      expect(message.imageUrl, 'https://x/m.png');
+    });
+
+    test('video media is ignored rather than drawn as a broken image', () {
+      final message = one(withContent(
+          '{"imageUrl":null,"media":{"type":"video","url":"https://x/v.mp4"}}'))!
+          .message;
+      expect(message.imageUrl, isNull);
+    });
+
+    test('a blank url is treated as absent', () {
+      final message = one(withContent('{"imageUrl":"   ","media":null}',
+          messageType: 2))!.message;
+      expect(message.imageUrl, isNull,
+          reason: 'an empty url would make the artwork prefetcher pass the '
+              'whole campaign over, silently');
+    });
+
+    test('a blank icon url is treated as absent', () {
+      final message = one(
+          '{"campaignId":1,"messageType":1,'
+          '"trigger":{"type":"session_start"},'
+          '"content":{"iconUrl":"  "},"locale":{"message":"hi"}}')!.message;
+      expect(message.iconUrl, isNull);
+    });
+  });
+
   group('orientation', () {
     String full({String content = '{}'}) =>
         '{"campaignId":1,"messageType":3,"trigger":{"type":"session_start"},'

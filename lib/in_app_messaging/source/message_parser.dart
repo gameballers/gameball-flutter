@@ -295,8 +295,8 @@ GameballInAppMessage? _parseMessage(
   // text is not required — but something to render is.
   final header = _asString(locale['header']);
   final body = _asString(locale['message']) ?? _asString(locale['body']);
-  final imageUrl = _asString(content['imageUrl']);
-  final iconUrl = _asString(content['iconUrl']);
+  final imageUrl = _artworkUrl(content, type, label);
+  final iconUrl = _asUrl(content['iconUrl']);
   final hasHeader = header != null && header.isNotEmpty;
   final hasBody = body != null && body.isNotEmpty;
   final hasImage = imageUrl != null && imageUrl.isNotEmpty;
@@ -347,7 +347,7 @@ GameballInAppMessage? _parseMessage(
     layout: _resolveLayout(content, type, label),
     orientation: _parseOrientation(content['orientation'], label),
     slidePosition: _parseSlidePosition(content['slideFrom'], label),
-    iconUrl: (iconUrl != null && iconUrl.isNotEmpty) ? iconUrl : null,
+    iconUrl: iconUrl,
     buttons: buttons,
     extras: _parseExtras(content['extras']),
     style: _parseMessageStyle(content['colors'], content['textAlignment']),
@@ -702,6 +702,50 @@ TextAlign? _parseAlign(Object? value) {
     'end' => TextAlign.end,
     _ => null,
   };
+}
+
+/// A URL, or null when the value is absent or blank.
+///
+/// Blank is treated as absent deliberately. An empty image URL reaches the
+/// artwork prefetcher, fails to load, and makes the whole campaign be passed over
+/// with no way to tell it from a network failure — a severe, silent outcome for a
+/// value that clearly means "none".
+String? _asUrl(Object? value) {
+  final text = _asString(value)?.trim();
+  return (text == null || text.isEmpty) ? null : text;
+}
+
+/// The image a message should render, from either field that can carry one.
+///
+/// Fullscreen puts its artwork in `content.media` and modals in
+/// `content.imageUrl`, so precedence follows the type and each falls back to the
+/// other. Both feed the same renderer, which is why they collapse into one field
+/// on the model rather than two.
+///
+/// Video is parsed and ignored: this SDK renders no video, and treating a video
+/// URL as an image would draw a broken frame.
+String? _artworkUrl(
+  Map<String, dynamic> content,
+  GameballMessageType type,
+  String label,
+) {
+  final direct = _asUrl(content['imageUrl']);
+
+  String? fromMedia;
+  final media = content['media'];
+  if (media is Map<String, dynamic>) {
+    final mediaType = _asString(media['type'])?.toLowerCase();
+    if (mediaType == null || mediaType == 'image') {
+      fromMedia = _asUrl(media['url']);
+    } else {
+      iamLog('campaign $label: ignoring "$mediaType" media — this SDK version '
+          'renders images only');
+    }
+  }
+
+  return type == GameballMessageType.fullscreen
+      ? (fromMedia ?? direct)
+      : (direct ?? fromMedia);
 }
 
 String? _asString(Object? value) => value is String ? value : null;

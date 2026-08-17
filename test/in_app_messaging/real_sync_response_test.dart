@@ -131,6 +131,31 @@ void main() {
         reason: 'styling and label arrive in separate halves, paired by id');
   });
 
+  test('the live fullscreen campaign gets its artwork from media', () {
+    final fullscreen = rawMessages.firstWhere(
+      (m) => m['messageType'] == 3,
+      orElse: () => <String, dynamic>{},
+    );
+    if (fullscreen.isEmpty) {
+      markTestSkipped('no fullscreen campaign in the current payload');
+      return;
+    }
+
+    final content = fullscreen['content'] as Map<String, dynamic>;
+    final media = content['media'] as Map<String, dynamic>?;
+    if (media == null || media['type'] != 'image') {
+      markTestSkipped('the fullscreen campaign no longer carries image media');
+      return;
+    }
+
+    // This campaign's imageUrl is null and its artwork lives only in
+    // content.media. Before that field was read, the one fullscreen campaign on
+    // alpha had no artwork at all — and with the prefetcher in place it would
+    // have been passed over entirely rather than rendering blank.
+    expect(content['imageUrl'], isNull);
+    expect(byId(fullscreen['campaignId'] as int).message.imageUrl, media['url']);
+  });
+
   test('the raw payload is carried through for the cache to store', () {
     expect(parseSyncResponse(raw).rawJson, raw);
   });
