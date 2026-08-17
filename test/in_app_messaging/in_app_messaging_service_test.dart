@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
@@ -9,6 +11,7 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_navigator.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_presenter.dart';
 import 'package:gameball_sdk/in_app_messaging/source/campaign_cache.dart';
@@ -92,6 +95,24 @@ class FakePresenter implements GameballMessagePresenter {
 
   /// Simulates the user tapping the message surface.
   void tapMessage() => _onMessagePressed?.call();
+}
+
+class FakeArtworkPrefetcher implements ArtworkPrefetcher {
+  /// Message ids whose artwork fails to load. Everything else is ready.
+  final Set<String> failing = <String>{};
+
+  /// Message ids whose prefetch never answers, for the timeout bound.
+  final Set<String> hanging = <String>{};
+
+  /// Every message offered for warming, in order.
+  final List<String> requested = <String>[];
+
+  @override
+  Future<bool> prefetch(GameballInAppMessage message) {
+    requested.add(message.id);
+    if (hanging.contains(message.id)) return Completer<bool>().future;
+    return Future<bool>.value(!failing.contains(message.id));
+  }
 }
 
 class RecordingNavigator implements MessageNavigator {
@@ -226,12 +247,14 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   InMemoryFrequencyCap cap,
   InMemoryCampaignCache cache,
   RecordingNavigator navigator,
+  FakeArtworkPrefetcher prefetcher,
   List<GameballInAppMessage> emitted,
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
 }) build({
   List<InAppMessageCampaign>? campaigns,
   InMemoryCampaignCache? cache,
+  Duration? prefetchTimeout,
 }) {
   final source = FakeSource(campaigns ?? [campaign('a')]);
   final presenter = FakePresenter();
@@ -239,6 +262,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   final cap = InMemoryFrequencyCap();
   final theCache = cache ?? InMemoryCampaignCache();
   final navigator = RecordingNavigator();
+  final prefetcher = FakeArtworkPrefetcher();
   final emitted = <GameballInAppMessage>[];
   var widgetOpen = false;
   var now = t0;
@@ -251,9 +275,11 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     analytics: analytics,
     isHostWidgetOpen: () => widgetOpen,
     navigator: navigator,
+    prefetcher: prefetcher,
     emit: emitted.add,
     clock: () => now,
     launcher: (uri, {bool external = false}) async => true,
+    prefetchTimeout: prefetchTimeout ?? defaultArtworkPrefetchTimeout,
   );
 
   return (
@@ -264,6 +290,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     cap: cap,
     cache: theCache,
     navigator: navigator,
+    prefetcher: prefetcher,
     emitted: emitted,
     setWidgetOpen: (v) => widgetOpen = v,
     setNow: (v) => now = v,
@@ -1247,6 +1274,88 @@ void main() {
 
       expect(h.navigator.pushed, ['/cart'],
           reason: 'a dead network must not swallow a tap the user is waiting on');
+    });
+  });
+
+  group('artwork prefetch', () {
+    test('does not display a campaign whose artwork failed to load', () async {
+      final h = build();
+      h.prefetcher.failing.add('msg_a');
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+      expect(h.analytics.impressions, isEmpty,
+          reason: 'an impression for artwork nobody saw is the thing this '
+              'prevents');
+    });
+
+    test('displays a lower-priority campaign when the winner has no artwork',
+        () async {
+      final h = build(campaigns: [
+        campaign('winner', priority: 10),
+        campaign('runner_up', priority: 1),
+      ]);
+      h.prefetcher.failing.add('msg_winner');
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['msg_runner_up']);
+    });
+
+    test('warms every campaign at sync, not only the one that shows', () async {
+      final h = build(campaigns: [
+        campaign('shown', priority: 10),
+        campaign('on_event',
+            trigger: const GameballCustomEventTrigger('add_to_cart')),
+      ]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.prefetcher.requested, containsAll(['msg_shown', 'msg_on_event']),
+          reason: 'an event trigger can fire at any moment with no time to '
+              'fetch, so its artwork has to be warm before it does');
+    });
+
+    test('an event-triggered campaign is skipped when its artwork failed',
+        () async {
+      final h = build(campaigns: [
+        campaign('evt', trigger: const GameballCustomEventTrigger('add_to_cart')),
+      ]);
+      h.prefetcher.failing.add('msg_evt');
+
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('add_to_cart');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('a prefetch that never answers is bounded, and the campaign skipped',
+        () async {
+      final h = build(prefetchTimeout: const Duration(milliseconds: 50));
+      h.prefetcher.hanging.add('msg_a');
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'a wedged image host must not hang start() forever');
+    });
+
+    test('readiness is recomputed on the next sync', () async {
+      final h = build();
+      h.prefetcher.failing.add('msg_a');
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, isEmpty);
+
+      // The image host recovers. A new session must re-evaluate rather than
+      // inherit the earlier failure for the life of the process.
+      h.prefetcher.failing.clear();
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 10)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_a']);
     });
   });
 }

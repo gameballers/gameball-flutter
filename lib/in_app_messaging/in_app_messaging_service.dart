@@ -12,6 +12,7 @@ import 'models/gameball_audience.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
+import 'presentation/artwork_prefetcher.dart';
 import 'presentation/message_navigator.dart';
 import 'presentation/message_presenter.dart';
 import 'source/campaign_cache.dart';
@@ -72,6 +73,14 @@ typedef GameballOnAction = bool Function(
 /// timeout that changes under the host's feet.
 const Duration defaultSessionTimeout = defaultDisplayCooldown;
 
+/// How long artwork may take to load before its campaign is passed over.
+///
+/// An outer bound rather than an expected cost: it exists so a wedged image host
+/// cannot stall the session-start evaluation, not to describe how long a normal
+/// image takes. Generous, because passing over a campaign suppresses a message
+/// the marketer scheduled, and that is the more expensive mistake of the two.
+const Duration defaultArtworkPrefetchTimeout = Duration(seconds: 5);
+
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
 /// Owns no display policy of its own — [selectCampaign] decides what shows —
@@ -85,10 +94,12 @@ class InAppMessagingService {
     required MessageAnalytics analytics,
     required bool Function() isHostWidgetOpen,
     required MessageNavigator navigator,
+    required ArtworkPrefetcher prefetcher,
     void Function(GameballInAppMessage message)? emit,
     DateTime Function()? clock,
     UrlLauncher? launcher,
     this.sessionTimeout = defaultSessionTimeout,
+    this.prefetchTimeout = defaultArtworkPrefetchTimeout,
   })  : _source = source,
         _navigator = navigator,
         _presenter = presenter,
@@ -96,6 +107,7 @@ class InAppMessagingService {
         _cache = campaignCache,
         _analytics = analytics,
         _isHostWidgetOpen = isHostWidgetOpen,
+        _prefetcher = prefetcher,
         _emit = emit,
         _clock = clock ?? DateTime.now,
         _launcher = launcher ?? _defaultLauncher;
@@ -107,12 +119,16 @@ class InAppMessagingService {
   final MessageAnalytics _analytics;
   final bool Function() _isHostWidgetOpen;
   final MessageNavigator _navigator;
+  final ArtworkPrefetcher _prefetcher;
   final void Function(GameballInAppMessage message)? _emit;
   final DateTime Function() _clock;
   final UrlLauncher _launcher;
 
   /// How long backgrounded before a resume counts as a new session.
   final Duration sessionTimeout;
+
+  /// How long artwork may take to load before its campaign is passed over.
+  final Duration prefetchTimeout;
 
   /// How long to wait on local storage before giving up on it.
   static const Duration _storeTimeout = Duration(seconds: 2);
@@ -124,6 +140,13 @@ class InAppMessagingService {
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
+
+  /// Campaigns whose artwork is decoded and safe to display.
+  ///
+  /// Held beside [_campaigns] rather than filtering them, so the list stays a
+  /// faithful record of what the backend sent and the diagnostics can say which
+  /// campaign was passed over and why.
+  Set<int> _artworkReady = const <int>{};
 
   /// Minimum gap between any two displays, as the last sync reported it.
   Duration _cooldown = defaultDisplayCooldown;
@@ -182,6 +205,7 @@ class InAppMessagingService {
     _presenter.dismiss();
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
+    _artworkReady = const <int>{};
     _audience = null;
     _beforeDisplay = null;
     _onAction = null;
@@ -286,6 +310,7 @@ class InAppMessagingService {
     _presenter.dismiss();
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
+    _artworkReady = const <int>{};
     _audience = audience;
   }
 
@@ -358,7 +383,49 @@ class InAppMessagingService {
       iamLog('falling back to ${_campaigns.length} cached campaign(s)');
     }
 
+    await _prefetchArtwork();
+
     _evaluate(const GameballSessionStartOccurrence());
+  }
+
+  /// Loads the artwork of every campaign now held, before any of them displays.
+  ///
+  /// Awaited rather than left running: the impression is logged the moment the
+  /// widget mounts, so artwork arriving a beat later means a view was counted of
+  /// something the user could not see. Waiting is the point.
+  ///
+  /// Every campaign is warmed, not only the one about to show. An event trigger
+  /// fires with no warning and no time to fetch, so a campaign waiting on
+  /// `add_to_cart` depends on this having run at sync.
+  Future<void> _prefetchArtwork() async {
+    final campaigns = _campaigns;
+    if (campaigns.isEmpty) {
+      _artworkReady = const <int>{};
+      return;
+    }
+
+    // Concurrent: these are independent downloads, and the slowest one is the
+    // honest cost of the set.
+    final ready = await Future.wait(campaigns.map(_isArtworkReady));
+
+    _artworkReady = <int>{
+      for (var i = 0; i < campaigns.length; i++)
+        if (ready[i]) campaigns[i].campaignId,
+    };
+  }
+
+  /// Whether one campaign's artwork loaded, bounded by [prefetchTimeout].
+  Future<bool> _isArtworkReady(InAppMessageCampaign campaign) async {
+    try {
+      return await _prefetcher.prefetch(campaign.message).timeout(prefetchTimeout);
+    } on TimeoutException {
+      iamLog('campaign "${campaign.campaignId}" artwork did not load within '
+          '${prefetchTimeout.inMilliseconds}ms');
+      return false;
+    } catch (error) {
+      iamLog('campaign "${campaign.campaignId}" artwork failed ($error)');
+      return false;
+    }
   }
 
   void _evaluate(GameballTriggerOccurrence occurrence) {
@@ -367,9 +434,23 @@ class InAppMessagingService {
       return;
     }
 
+    // Artwork that has not loaded means the message would paint a hole where its
+    // image belongs, and log an impression for it. Passing the campaign over
+    // lets a lower-priority one that *is* ready take the slot instead.
+    final displayable = <InAppMessageCampaign>[];
+    for (final candidate in _campaigns) {
+      if (_artworkReady.contains(candidate.campaignId)) {
+        displayable.add(candidate);
+      } else {
+        iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
+            'ready');
+      }
+    }
+    if (displayable.isEmpty) return;
+
     final campaign = selectCampaign(
       occurrence: occurrence,
-      campaigns: _campaigns,
+      campaigns: displayable,
       capState: _cap.snapshot(),
       now: _clock(),
       cooldown: _cooldown,

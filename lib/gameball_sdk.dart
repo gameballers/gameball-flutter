@@ -24,6 +24,7 @@ import 'in_app_messaging/in_app_messaging_service.dart';
 import 'in_app_messaging/models/in_app_message.dart';
 import 'in_app_messaging/models/in_app_message_campaign.dart';
 import 'in_app_messaging/models/message_trigger.dart';
+import 'in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'in_app_messaging/presentation/message_navigator.dart';
 import 'in_app_messaging/presentation/overlay_presenter.dart';
 import 'in_app_messaging/source/campaign_cache.dart';
@@ -365,6 +366,9 @@ class GameballApp extends StatelessWidget {
       navigator: onNavigate != null
           ? CallbackNavigator(onNavigate)
           : NavigatorKeyNavigator(navigatorKey),
+      // Artwork is loaded at sync rather than at display, so the impression is
+      // logged for a message the user can actually see.
+      prefetcher: debugArtworkPrefetcher ?? ImageCacheArtworkPrefetcher(),
       emit: (message) => _inAppMessageController?.add(message),
     );
 
@@ -440,6 +444,15 @@ class GameballApp extends StatelessWidget {
   /// leave the ten-second flush timer pending, which a widget test rightly rejects.
   @visibleForTesting
   static MessageAnalytics? debugAnalytics;
+
+  /// Replaces the artwork prefetcher. Tests only — never set this in an app.
+  ///
+  /// `flutter_test` answers every HTTP request with a 400, so the real
+  /// prefetcher correctly reports the fixtures' artwork as unloadable and the
+  /// module correctly suppresses those campaigns. Right behaviour, but it leaves
+  /// the end-to-end suite with nothing to display.
+  @visibleForTesting
+  static ArtworkPrefetcher? debugArtworkPrefetcher;
 
   static Future<GameballAnalyticsSendResult> _sendInAppMessageEvents(
     List<Map<String, dynamic>> events,

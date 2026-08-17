@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'package:gameball_sdk/in_app_messaging/source/stub_message_source.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
@@ -16,6 +17,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The unit tests each mock their neighbours, so this is what proves the wiring
 /// between them. It is also the automated equivalent of the sample app's manual
 /// walkthrough.
+/// Reports every message's artwork as loaded.
+///
+/// `flutter_test` answers all HTTP with a 400, so the real prefetcher would
+/// correctly find the fixtures' remote images unloadable and the module would
+/// correctly suppress every campaign — leaving this suite nothing to assert.
+/// Prefetch failure has its own coverage in the service and prefetcher tests.
+class _ReadyArtwork implements ArtworkPrefetcher {
+  @override
+  Future<bool> prefetch(GameballInAppMessage message) async => true;
+}
+
 void main() {
   GameballApp app() => GameballApp.getInstance();
 
@@ -47,10 +59,12 @@ void main() {
     // a substitute it would post batches to the live API and leave the flush
     // timer pending. Analytics content is asserted in the service unit tests.
     GameballApp.debugAnalytics = LoggingMessageAnalytics();
+    GameballApp.debugArtworkPrefetcher = _ReadyArtwork();
     app().stopInAppMessaging();
   });
   tearDown(() {
     app().stopInAppMessaging();
+    GameballApp.debugArtworkPrefetcher = null;
     GameballApp.debugAnalytics = null;
     GameballApp.debugMessageSource = null;
   });
