@@ -17,9 +17,10 @@ All notable changes to the Gameball Flutter SDK are documented here.
 - 🖐️ **Host hooks**: `beforeDisplay` to show, postpone or drop a message; `onAction` to intercept a tap and handle it yourself; `onNavigate` to route through go_router or any other Navigator 2.0 router; and an `onInAppMessage` stream of everything selected
 - 🗂️ **Offline behaviour**: campaigns are cached per customer, so a failed sync falls back to the last unexpired set rather than showing nothing
 - 🎨 **Artwork prefetch**: a message's image and icon are loaded at sync rather than at display, so an impression is only ever logged for something the user could actually see
+- 🔤 **Personalisation**: message text is refreshed with the customer's current values just before display, so points and names are not a snapshot from session start. Bounded and non-blocking — on any failure the message displays with the text it already had
 
 ### 📝 Notes
-- In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK logs the 404 and stays silent — no errors surface to the host
+- In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK logs the 404 and stays silent — no errors surface to the host
 - `stopInAppMessaging()` on logout dismisses anything on screen, flushes pending telemetry and clears state
 
 ---

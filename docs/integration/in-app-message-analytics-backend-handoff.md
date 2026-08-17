@@ -82,7 +82,7 @@ Identical to every other SDK request; produced by the same helper.
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `audience` | object | yes | Who the events belong to. Currently always `{"type":"customer","customerId":"…"}` — the same shape as the campaigns request, so a future device-scoped variant is additive |
-| `events` | array | yes | 1 to 500 events, **oldest first** |
+| `events` | array | yes | 1 to 50 events per request, **oldest first** |
 
 ### 2.4 One event
 
@@ -174,12 +174,12 @@ ever will be. Treat a missing terminal event as "unknown", not as a dismissal.
 | Behaviour | Detail |
 | --- | --- |
 | **Batching** | One request per burst, not per event |
-| **Cadence** | A non-empty buffer is sent after **10 seconds**, or immediately once **20 events** accumulate |
+| **Cadence** | A non-empty buffer is sent after **30 seconds**, or immediately once **10 events** accumulate |
 | **Forced flush** | When the app goes to the background, and when in-app messaging stops (logout) |
 | **Persistence** | The unsent buffer is written to device storage after every change, so an impression logged one second before a force-quit still arrives — on the **next launch** |
 | **Ordering** | Oldest first within a batch. **Across batches, expect out-of-order arrival.** A batch stranded by a dead network can arrive after later ones |
 | **Lateness** | An event can arrive **hours or days** after `occurredAt`. Never infer time-of-event from time-of-receipt |
-| **Batch size** | 1 to 500 events. 500 only after a long offline period |
+| **Batch size** | 1 to 50 events per request. The outbox holds up to 500 and flushes in chunks of 50, so a long offline period arrives as several requests rather than one |
 | **Ceiling** | The outbox holds 500 events. Beyond that the **oldest are dropped** and it is logged on the device |
 | **Concurrency** | One request in flight at a time, per app instance |
 
@@ -329,7 +329,7 @@ Nine questions. The first three block us; the rest we can proceed without.
 5. **Do you want `dismiss` at all?** It is more than Braze offers and cheap for us
    to send. If you would rather not store it, we can stop sending it — but say so
    rather than rejecting it.
-6. **Maximum batch size you will accept.** We cap the outbox at 500 events; if your
+6. **Maximum batch size you will accept.** ~~Answered by V4: no hard limit.~~ We cap the outbox at 500 events; if your
    limit is lower, we will lower ours to match.
 7. **Confirm the conversion-rate denominator** is unique impressions (§7.2).
 8. **Authentication.** Today this posts `ApiKey` plus a `customerId` in the body.
@@ -379,7 +379,7 @@ with the original `occurredAt` values, possibly the next day.
 6. **Calendar-day boundary.** Post two impressions from one user either side of
    midnight in the workspace time zone. Unique impressions must be 2, total 2. Two
    on the same day: unique 1, total 2.
-7. **Batch of 500.** Must be accepted, not truncated.
+7. **Batch of 50.** Must be accepted, not truncated. The client chunks at 50 even though V4 states no hard limit — it bounds the cost of a failed retry rather than satisfying a cap.
 8. **Throttling.** Return 429 and confirm the same batch is re-offered rather than
    lost.
 

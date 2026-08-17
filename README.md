@@ -215,7 +215,7 @@ Displays campaigns you author in the Gameball dashboard — modals, slideup bann
 
 It is **opt-in and additive**. Until you call `startInAppMessaging`, the module makes no requests, starts no timers, draws nothing and stores nothing, so upgrading without calling it changes nothing about how your app behaves.
 
-> In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent.
+> In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent.
 
 ### Opting in
 
@@ -289,6 +289,12 @@ GameballApp.getInstance().onInAppMessage.listen((message) {
   debugPrint("selected ${message.id}");
 });
 ```
+
+### Personalisation
+
+Campaign text is personalised by the backend at session start. When a message displays much later, the SDK refreshes those values first, so a points balance is current rather than a snapshot from launch. The fetch is capped at two seconds and cached for a minute, and any failure falls back to the text already held — it can never delay or suppress a message. Messages with no personalisation tokens skip it entirely.
+
+> Requires `integrations/inapp-messages/variables` to be enabled for your account. Until then, text is the sync-time rendering.
 
 ### Analytics
 

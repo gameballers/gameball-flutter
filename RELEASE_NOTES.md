@@ -68,6 +68,14 @@ Impressions, clicks and dismissals are reported automatically. A button tap is a
 
 Artwork is loaded at sync rather than at display time, so an impression is only ever recorded for a message whose image the user could actually see.
 
+### 🔤 Personalisation
+
+Campaign text arrives already personalised at session start. For a message displayed much later, the SDK refreshes the values just before showing it, so points balances and profile fields are current rather than a snapshot from launch.
+
+It is bounded and cannot delay or suppress a message: the fetch is capped at two seconds, cached for a minute, and any failure — including no network — falls back to the text already held. A message with no personalisation tokens skips the call entirely.
+
+> This ships ahead of the endpoint it calls. Until `integrations/inapp-messages/variables` is enabled for your account, campaign text is the sync-time rendering, which is exactly what it was before.
+
 ### 🖐️ Taking control
 
 ```dart
@@ -91,7 +99,7 @@ gameballApp.startInAppMessaging(
 
 ### ⚠️ Availability
 
-In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not yet, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app and nothing else is affected.
+In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not yet, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app and nothing else is affected.
 
 ---
 

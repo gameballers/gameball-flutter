@@ -52,7 +52,7 @@ Three things are worth knowing before you wire it up.
 
 ### Availability
 
-In-app messaging needs the `bots/inapp` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app.
+In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent — nothing surfaces to your app.
 
 ---
 

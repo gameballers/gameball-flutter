@@ -11,7 +11,7 @@ import 'message_source.dart';
 /// identity.
 typedef GameballSyncSender = Future<String?> Function(String customerId);
 
-/// Fetches campaigns from `bots/inapp/sync`.
+/// Fetches campaigns from `integrations/inapp-messages/sync`.
 ///
 /// Thin on purpose: it turns an audience into a customer id, delegates the request,
 /// and hands the body to the parser. Every rule about what a campaign means lives

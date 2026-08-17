@@ -1,5 +1,12 @@
 # In-App Messaging — Backend Integration Design
 
+> **Superseded for anything wire-shaped** by
+> [`2026-08-17-in-app-messaging-v4-migration-design.md`](2026-08-17-in-app-messaging-v4-migration-design.md).
+> The endpoints, the envelope, the identity model and the trigger field names all
+> changed with the V4 integrations release. The behavioural design here — triggers,
+> caps, deferral, analytics semantics — still holds.
+
+
 Supersedes the wire-format half of `2026-08-05-gameball-in-app-messaging-mvp-design.md`.
 Everything that spec said about architecture, layering, seams and presentation still stands;
 this replaces only the parts that guessed at a contract the backend has since specified.
@@ -384,17 +391,17 @@ Each has a fallback so none blocks starting.
 | # | Item | Fallback if unanswered |
 | --- | --- | --- |
 | ~~O1~~ | ~~`metadataKey` on `metadataFilters`~~ — **resolved.** The backend is adding the metadata name alongside `eventName`. Numbering kept stable for anything already citing O2–O7 | — |
-| **O2** | Does V1 honour `X-GB-TOKEN` when present? V1 is documented as `APIKey` only, and the API key ships in the app binary — so without a token cross-check, anyone holding it can read every campaign's content and post telemetry for arbitrary customers | Send it anyway; harmless if ignored. Record the exposure |
+| ~~O2~~ | ~~Does V1 honour `X-GB-TOKEN`?~~ — **moot on V4.** No player token on that surface; `APIKey` plus `customerId` in the body. See the 2026-08-17 spec |
 | **O3** | Is `autoDismissSeconds` valid on Modal? Their doc lists it under Slideup | Honour it on Modal if present |
 | **O4** | Full `metadataFilters.operator` vocabulary. Only `"Is"` is documented; we implement seven | Map `Is` → equals; skip campaigns using unknown operators |
 | **O5** | Are numeric filter values JSON numbers or strings? The example shows `"value": "electronics"` | Coerce: attempt numeric parse for ordering operators, fall back to string compare |
 | **O6** | Is `metadataLogicalOperator: "Or"` needed? | Support `And` only; skip others |
-| **O7** | Any cap on the `messages` array? | None assumed; the cache is bounded by whatever arrives |
-| **O8** | **Is `eventUid` actually deduplicated?** The reference says events are *"persisted deduplicated on eventUid"*, but a replay returns `accepted:1` identically, so the client cannot confirm it. Our outbox is deliberately at-least-once and relies on this; without it, a kill between response and bookkeeping inflates impressions | None available client-side. Needs someone to check stored rows for a replayed uid |
+| ~~O7~~ | ~~Any cap on the `messages` array?~~ — **resolved.** V4 states no hard batch limit. See the 2026-08-17 spec |
+| ~~O8~~ | ~~Is `eventUid` actually deduplicated?~~ — **confirmed in writing** by the V4 reference. See the 2026-08-17 spec |
 | **O9** | **`eventUid` must be a GUID** — undocumented, and a non-GUID is a hard 400 rather than a per-event rejection. Please document it, or accept any string | We generate v4 UUIDs, so this is a landmine rather than a live bug |
-| **O10** | A batch of *only* unsupported event types returns `success:false`, so we discard it. Fine today, but if `dismiss` were ever dropped from the vocabulary, a batch of only dismissals would vanish. Prefer `accepted:0, rejected:n, success:true` | Discard, as now |
-| **O12** | **No field names the layout.** Now the sharpest of these, because fullscreen makes it visible: `imageOnly` fills the screen and floats buttons over the artwork, which is not the stacked layout with the copy removed. The parser reads an explicit `layout` or `imageStyle` when present — either spelling, `graphic`/`image_only` or `top`/`text` — and only infers when neither arrives, so the day the field ships the guessing stops with no other change. `messageType: 2` says "modal" and stops; nothing distinguishes "text with optional image" from "image only", so we infer it from which of `locale.header`, `locale.message` and `content.imageUrl` came back non-null. Braze does **not** infer — it sends `image_style: TOP \| GRAPHIC`, where GRAPHIC means the image fills the message area with buttons over it. Their *Flutter* SDK drops the field, which is the lossiness we set out not to inherit. Two consequences: a campaign whose personalised copy resolves to empty is indistinguishable from a deliberate image-only one (campaign 2051 already ships `"header": "Welcome !"` — a Liquid placeholder that resolved to nothing), and GRAPHIC is a different composition rather than the same widget minus text. **Please send the layout the dashboard already asked the marketer for** | Infer from populated fields, as now, and render image-only as a taller image with buttons below rather than over it |
-| **O11** | Which environment gets these next? Only alpha has them, and the SDK's live telemetry path would 401-or-404 anywhere else — both of which discard. **The events transport should not ship ahead of the endpoint** | Point `apiPrefix` at alpha for testing |
+| ~~O10~~ | ~~All-unsupported batches~~ — **resolved,** though not as proposed: V4 answers 422 rather than a 2xx with counts. See the 2026-08-17 spec |
+| ~~O12~~ | ~~No field names the layout~~ — **resolved.** `content.layout` ships explicitly. See the 2026-08-17 spec |
+| ~~O11~~ | ~~Which environment gets these next?~~ — **carried forward as O19** in the 2026-08-17 spec: the V4 paths are on alpha only, production returns a bare 404 |
 
 ---
 
