@@ -12,4 +12,6 @@ const mobileLogsPath = "/api/v4.0/integrations/mobile/logs";
 // a token. See docs/superpowers/specs/2026-08-17-in-app-messaging-v4-migration-design.md
 const inAppMessagesSyncPath = "$integrationsUrlV4_0/inapp-messages/sync";
 const inAppMessagesEventsPath = "$integrationsUrlV4_0/inapp-messages/events";
+const inAppMessagesVariablesPath =
+    "$integrationsUrlV4_0/inapp-messages/variables";
 const widgetBaseUrl = "https://m.gameball.app";
