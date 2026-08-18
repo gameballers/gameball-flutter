@@ -66,8 +66,8 @@ To test push notifications:
 
 - Flutter 1.17.0+ (Recommended: 3.0+)
 - Dart 3.4.4+
-- Android API level 21+
-- iOS 12.0+
+- Android API level 24+
+- iOS 13.0+
 
 ## Documentation
 

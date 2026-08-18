@@ -21,10 +21,17 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 
 - **Minimum Flutter Version**: 1.17.0
 - **Dart**: 3.4.4+
-- **Android**: API level 21+
-- **iOS**: 12.0+
+- **Android**: API level 24+
+- **iOS**: 13.0+
 
-> **Note**: While the SDK supports Flutter 1.17.0+, we recommend using Flutter 3.0+ for the best development experience with modern features like null safety and enhanced tooling.
+> **Where the platform floors come from**: `shared_preferences` and `url_launcher` — both used by the
+> SDK — declare `minSdk 24` on Android and a `13.0` iOS deployment target. Setting a lower
+> `minSdkVersion` or `IPHONEOS_DEPLOYMENT_TARGET` in your app will fail the build rather than fail at
+> runtime, so these are hard floors, not recommendations.
+
+> **Note**: The `environment` constraint in `pubspec.yaml` permits older Flutter and Dart versions,
+> and `pub` will resolve older dependency versions to satisfy them. A current resolution needs
+> Flutter 3.44+ / Dart 3.12+, so that is what to expect on a fresh `pub get`.
 
 ## Installation
 

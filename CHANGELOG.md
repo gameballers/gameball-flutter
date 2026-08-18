@@ -20,6 +20,7 @@ All notable changes to the Gameball Flutter SDK are documented here.
 - 🔤 **Personalisation**: message text is refreshed with the customer's current values just before display, so points and names are not a snapshot from session start. Bounded and non-blocking — on any failure the message displays with the text it already had
 
 ### 📝 Notes
+- 📱 **Platform requirements corrected**: the documented floors were Android API 21 and iOS 12.0, which the SDK has not been able to build against for some time — `shared_preferences` and `url_launcher` require `minSdk 24` and an iOS 13.0 deployment target. The floors are now stated as **API 24+ / iOS 13.0+**. No behaviour changed; the previous numbers would simply have failed the build
 - In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK logs the 404 and stays silent — no errors surface to the host
 - `stopInAppMessaging()` on logout dismisses anything on screen, flushes pending telemetry and clears state
 

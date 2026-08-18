@@ -107,8 +107,8 @@ In-app messaging needs the `integrations/inapp-messages` endpoints enabled for y
 
 - Flutter 1.17.0+
 - Dart 3.4.4+
-- Android API 21+
-- iOS 12.0+
+- Android API 24+
+- iOS 13.0+
 
 ---
 
