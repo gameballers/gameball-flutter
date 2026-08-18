@@ -49,10 +49,12 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (_imageOnly) _fullBleedImage() else _stacked(context, theme, style),
+          if (_imageOnly)
+            _fullBleedImage()
+          else
+            _stacked(context, theme, style),
           // Outside the tappable surface, so closing never counts as engaging.
-          if (message.showCloseButton)
-            SafeArea(child: _closeButton(style)),
+          if (message.showCloseButton) SafeArea(child: _closeButton(style)),
         ],
       ),
     );
@@ -96,61 +98,85 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
     ThemeData theme,
     GameballMessageStyle style,
   ) {
+    final hasImage = message.imageUrl != null;
+
+    // The image takes whatever the copy does not need, exactly as before — the
+    // full-bleed look this variant exists for. What changed is that the copy is
+    // now bounded and scrollable instead of unbounded: long promotional text, or
+    // any text at an accessibility scale, used to overflow off the bottom and
+    // take the buttons with it.
     return SafeArea(
       child: _wrapTappable(
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (message.imageUrl != null)
-              // Capped rather than greedy: the copy below it is the reason this
-              // variant exists, so the image must not push it off screen.
-              Flexible(
-                child: Image.network(
-                  message.imageUrl!,
-                  key: const Key('gb_iam_fullscreen_image'),
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const SizedBox.shrink(),
+        LayoutBuilder(
+          builder: (context, constraints) => Column(
+            // Centres the block when there is nothing to fill with — a
+            // copy-only message on a tall screen. A no-op when an image is
+            // present, because Expanded leaves no slack.
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (hasImage)
+                Expanded(
+                  child: Image.network(
+                    message.imageUrl!,
+                    key: const Key('gb_iam_fullscreen_image'),
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox.shrink(),
+                  ),
+                ),
+              ConstrainedBox(
+                // Copy may claim at most 60% of the height when it shares the
+                // screen with artwork, and all of it when it does not. Either
+                // way it scrolls past that rather than overflowing, so the
+                // buttons underneath stay on screen and reachable.
+                constraints: BoxConstraints(
+                  maxHeight: hasImage
+                      ? constraints.maxHeight * 0.6
+                      : constraints.maxHeight,
+                ),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (message.header != null)
+                          Padding(
+                            padding: EdgeInsets.only(
+                                bottom: message.body != null ? 12 : 0),
+                            child: Text(
+                              message.header!,
+                              key: const Key('gb_iam_fullscreen_header'),
+                              textAlign: style.headerAlign ?? TextAlign.center,
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                color: style.headerColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        if (message.body != null)
+                          Text(
+                            message.body!,
+                            key: const Key('gb_iam_fullscreen_body'),
+                            textAlign: style.bodyAlign ?? TextAlign.center,
+                            style: theme.textTheme.bodyLarge
+                                ?.copyWith(color: style.bodyColor),
+                          ),
+                        if (message.buttons.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 28),
+                            child: _buttons(stretch: true),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (message.header != null)
-                    Padding(
-                      padding:
-                          EdgeInsets.only(bottom: message.body != null ? 12 : 0),
-                      child: Text(
-                        message.header!,
-                        key: const Key('gb_iam_fullscreen_header'),
-                        textAlign: style.headerAlign ?? TextAlign.center,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          color: style.headerColor,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  if (message.body != null)
-                    Text(
-                      message.body!,
-                      key: const Key('gb_iam_fullscreen_body'),
-                      textAlign: style.bodyAlign ?? TextAlign.center,
-                      style: theme.textTheme.bodyLarge
-                          ?.copyWith(color: style.bodyColor),
-                    ),
-                  if (message.buttons.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 28),
-                      child: _buttons(stretch: true),
-                    ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -210,8 +236,9 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
   Widget _closeButton(GameballMessageStyle style) {
     final overArtwork = message.imageUrl != null;
 
+    // `topEnd`, not `topRight`: in Arabic the trailing corner is the left one.
     return Align(
-      alignment: Alignment.topRight,
+      alignment: AlignmentDirectional.topEnd,
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: DecoratedBox(

@@ -49,56 +49,70 @@ class GameballInAppMessageModal extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: Stack(
               children: [
+                // Scrollable rather than clipped. A long promo on a small phone,
+                // or any copy at an accessibility text scale, is taller than the
+                // card — and a clipped card loses its buttons, which is the one
+                // part of the message that has to stay reachable.
+                //
+                // SingleChildScrollView sizes to its child up to the incoming
+                // constraint, so a short message stays short; it only scrolls
+                // once the content genuinely does not fit.
+                //
                 // The tap target wraps the content, not the Stack, so the close
                 // button stays outside it. Buttons sit inside but win the hit
                 // test themselves, so their taps never reach here.
-                _wrapTappable(
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (message.imageUrl != null)
-                        _image(context, message.imageUrl!),
-                      // Omitted entirely for image-only, so there is no blank
-                      // band under the artwork.
-                      if (_hasText || message.buttons.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (message.header != null)
-                                Padding(
-                                  padding: EdgeInsets.only(
-                                      bottom: message.body != null ? 8 : 0),
-                                  child: Text(
-                                    message.header!,
-                                    key: const Key('gb_iam_header'),
-                                    textAlign:
-                                        style.headerAlign ?? TextAlign.start,
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      color: style.headerColor,
-                                      fontWeight: FontWeight.w700,
+                SingleChildScrollView(
+                  child: _wrapTappable(
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (message.imageUrl != null)
+                          _image(context, message.imageUrl!),
+                        // Omitted entirely for image-only, so there is no blank
+                        // band under the artwork.
+                        if (_hasText || message.buttons.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (message.header != null)
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                        bottom: message.body != null ? 8 : 0),
+                                    child: Text(
+                                      message.header!,
+                                      key: const Key('gb_iam_header'),
+                                      textAlign:
+                                          style.headerAlign ?? TextAlign.start,
+                                      style:
+                                          theme.textTheme.titleLarge?.copyWith(
+                                        color: style.headerColor,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              if (message.body != null)
-                                Text(
-                                  message.body!,
-                                  key: const Key('gb_iam_body'),
-                                  textAlign: style.bodyAlign ?? TextAlign.start,
-                                  style: theme.textTheme.bodyMedium
-                                      ?.copyWith(color: style.bodyColor),
-                                ),
-                              if (message.buttons.isNotEmpty) _buttons(context),
-                            ],
+                                if (message.body != null)
+                                  Text(
+                                    message.body!,
+                                    key: const Key('gb_iam_body'),
+                                    textAlign:
+                                        style.bodyAlign ?? TextAlign.start,
+                                    style: theme.textTheme.bodyMedium
+                                        ?.copyWith(color: style.bodyColor),
+                                  ),
+                                if (message.buttons.isNotEmpty)
+                                  _buttons(context),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-                if (message.showCloseButton) _closeButton(style),
+                if (message.showCloseButton) _closeButton(context, style),
               ],
             ),
           ),
@@ -114,14 +128,17 @@ class GameballInAppMessageModal extends StatelessWidget {
   /// glyph on a dark photograph is effectively invisible, so in that case it gets
   /// a scrim disc behind it and a light glyph. Over the plain message surface no
   /// disc is needed and the campaign's colour is used directly.
-  Widget _closeButton(GameballMessageStyle style) {
+  Widget _closeButton(BuildContext context, GameballMessageStyle style) {
     final overArtwork = message.imageUrl != null;
     final glyphColour = style.closeButtonColor ??
         (overArtwork ? const Color(0xFFFFFFFF) : null);
 
-    return Positioned(
+    // `end` rather than `right`: in Arabic the trailing corner is the left one,
+    // and a close glyph pinned to the wrong corner reads as someone else's UI.
+    return Positioned.directional(
+      textDirection: Directionality.of(context),
       top: 4,
-      right: 4,
+      end: 4,
       child: DecoratedBox(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
@@ -190,14 +207,16 @@ class GameballInAppMessageModal extends StatelessWidget {
     return Padding(
       key: const Key('gb_iam_buttons'),
       padding: const EdgeInsets.only(top: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+      // Wrap, not Row. Two German or Arabic labels are wider than two English
+      // ones and overflowed the card by 360 logical pixels; a second line is
+      // always better than a clipped button. `spacing` also removes the
+      // hand-rolled left padding, which put the gap on the wrong side in Arabic.
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          for (final button in message.buttons)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: _button(context, button),
-            ),
+          for (final button in message.buttons) _button(context, button),
         ],
       ),
     );

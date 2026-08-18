@@ -95,9 +95,8 @@ class _GameballInAppMessageSlideupState
                 // Only towards its own edge: a banner at the bottom swipes down,
                 // one at the top swipes up. Sideways would fight a horizontal
                 // scroll or a page view underneath.
-                direction: _fromTop
-                    ? DismissDirection.up
-                    : DismissDirection.down,
+                direction:
+                    _fromTop ? DismissDirection.up : DismissDirection.down,
                 onDismissed: (_) => widget.onDismissRequested(),
                 child: Material(
                   key: const Key('gb_iam_slideup_surface'),
@@ -134,9 +133,15 @@ class _GameballInAppMessageSlideupState
                           ),
                           if (message.clickAction != null)
                             Padding(
-                              padding: const EdgeInsets.only(left: 8),
+                              padding:
+                                  const EdgeInsetsDirectional.only(start: 8),
                               child: Icon(
-                                Icons.chevron_right,
+                                // Flipped for Arabic: a right-pointing chevron
+                                // in a right-to-left layout points backwards,
+                                // which reads as "go back" rather than "open".
+                                Directionality.of(context) == TextDirection.rtl
+                                    ? Icons.chevron_left
+                                    : Icons.chevron_right,
                                 size: 20,
                                 color: style.bodyColor ??
                                     theme.colorScheme.onSurfaceVariant,
@@ -174,7 +179,9 @@ class _GameballInAppMessageSlideupState
   /// ratio would change the banner's height with every campaign.
   Widget _icon(String url) {
     return Padding(
-      padding: const EdgeInsets.only(right: 12),
+      // `end`, not `right`: the Row itself flips for Arabic, so a hard-coded
+      // right margin would put the gap on the outside of the banner.
+      padding: const EdgeInsetsDirectional.only(end: 12),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: Image.network(
