@@ -264,6 +264,7 @@ class InAppMessagingService {
   /// Called when the host logs an event that may trigger a message.
   void onCustomEvent(String eventName, {Map<String, Object>? properties}) {
     if (!isStarted) return;
+    _forgetVariablesAfterEvent();
     _evaluate(GameballCustomEventOccurrence(
       eventName,
       properties: properties ?? const <String, Object>{},
@@ -279,6 +280,7 @@ class InAppMessagingService {
     Map<String, Object>? properties,
   }) {
     if (!isStarted) return;
+    _forgetVariablesAfterEvent();
     // A purchase is an event named `purchase`, not a trigger type of its own:
     // the backend models it that way, so a campaign targeting purchases is
     // authored as an event trigger and filters on productId or price.
@@ -290,6 +292,22 @@ class InAppMessagingService {
       properties: properties ?? const <String, Object>{},
     ));
   }
+
+  /// Drops cached personalisation values because the customer just acted.
+  ///
+  /// The campaign this exists for is "you just earned 200 points, you now have
+  /// X". Its trigger is the purchase, and the balance it quotes is fetched
+  /// moments later — so a value cached before the purchase would make the
+  /// message announcing the change quote the number from before it.
+  ///
+  /// Only on events. A session-start message cannot have gone stale between the
+  /// sync and the display, so clearing there would buy a second fetch and
+  /// nothing else.
+  ///
+  /// Free unless a message actually displays: this only empties the cache, and
+  /// the fetch happens later in [_resolveThenPresent] — and only for a message
+  /// that carries a token at all.
+  void _forgetVariablesAfterEvent() => _variables.clear();
 
   /// Called when the app returns to the foreground.
   ///

@@ -281,6 +281,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   InMemoryCampaignCache? cache,
   Duration? prefetchTimeout,
   Duration? variableTimeout,
+  VariableSource? variableSource,
 }) {
   final source = FakeSource(campaigns ?? [campaign('a')]);
   final presenter = FakePresenter();
@@ -303,7 +304,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     isHostWidgetOpen: () => widgetOpen,
     navigator: navigator,
     prefetcher: prefetcher,
-    variables: variables,
+    variables: variableSource ?? variables,
     emit: emitted.add,
     clock: () => now,
     launcher: (uri, {bool external = false}) async => true,
@@ -1512,6 +1513,97 @@ void main() {
       expect(h.presenter.shownMessageIds, isEmpty,
           reason: 'a message resolving when the host logged out must not '
               'appear over whatever replaced it');
+    });
+  });
+
+  group('values are refetched when the customer has just done something', () {
+    InAppMessageCampaign balanceCampaign(String label,
+            {GameballMessageTrigger? trigger}) =>
+        InAppMessageCampaign(
+          campaignId: idFor(label),
+          trigger: trigger ?? const GameballCustomEventTrigger('place_order'),
+          priority: 0,
+          message: GameballInAppMessage(
+            id: 'msg_$label',
+            type: GameballMessageType.modal,
+            body: 'You have {points_balance}',
+          ),
+        );
+
+    test('an event trigger drops cached values before evaluating', () async {
+      final h = build(campaigns: [balanceCampaign('promo')]);
+      await h.service.start(customerId: 'c1');
+      final before = h.variables.clears;
+
+      h.service.onCustomEvent('place_order');
+      await pumpEventQueue();
+
+      expect(h.variables.clears, greaterThan(before));
+    });
+
+    test('a purchase drops them too', () async {
+      final h = build(campaigns: [balanceCampaign('promo')]);
+      await h.service.start(customerId: 'c1');
+      final before = h.variables.clears;
+
+      h.service.onPurchase(
+        productId: 'sku-1',
+        price: 10,
+        currency: 'EGP',
+      );
+      await pumpEventQueue();
+
+      expect(h.variables.clears, greaterThan(before));
+    });
+
+    test('a session start does not, because nothing has happened yet',
+        () async {
+      final h = build(
+        campaigns: [
+          balanceCampaign('promo', trigger: const GameballSessionStartTrigger())
+        ],
+      );
+
+      await h.service.start(customerId: 'c1');
+      final afterStart = h.variables.clears;
+      await pumpEventQueue();
+
+      expect(h.variables.clears, afterStart,
+          reason: 'the values cannot have moved between the sync and the '
+              'session-start message, so paying for a second fetch would buy '
+              'nothing');
+    });
+
+    test('an event-triggered message shows values from after the event',
+        () async {
+      // The campaign this whole mechanism exists for: "you just earned points,
+      // you now have X". With a real cache and a frozen clock the 60-second TTL
+      // can never expire on its own, so this passes only if the event
+      // invalidated it.
+      var balance = '1,000';
+      final frozen = DateTime.utc(2026, 8, 18, 12);
+      final source = CachingVariableSource(
+        fetcher: (_) async => <String, String>{'points_balance': balance},
+        clock: () => frozen,
+      );
+
+      final h = build(
+        campaigns: [balanceCampaign('earned')],
+        variableSource: source,
+      );
+      await h.service.start(customerId: 'c1');
+
+      // A previous message in this session already warmed the cache.
+      await source.fetch('c1');
+      // Then the customer buys something and Gameball awards the points.
+      balance = '1,450';
+
+      h.service.onCustomEvent('place_order');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownBodies, ['You have 1,450'],
+          reason: 'a message announcing a points change that quotes the old '
+              'balance is the worst version of this feature');
     });
   });
 }

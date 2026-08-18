@@ -265,6 +265,19 @@ message whose variables timed out is recorded exactly like any other.
 Both durations are injectable, matching `prefetchTimeout`: `variableTimeout` (2s) and
 `variableCacheTtl` (60s).
 
+**The cache is dropped whenever the customer acts.** `onCustomEvent` and `onPurchase` clear it
+before evaluating; session start does not. The campaign this exists for is *"you just earned 200
+points, you now have X"* — its trigger is the purchase, and a value cached before that purchase
+would make the message announcing the change quote the number from before it. A session-start
+message cannot have gone stale between its own sync and its own display, so clearing there would
+buy a second fetch and nothing else.
+
+Clearing is free unless a message actually displays: it only empties the cache, and the fetch
+happens later, and only for a message that carries a token at all.
+
+This puts the SDK at Braze's `templated_iam` timing — values resolved per trigger rather than per
+session — while keeping one request per customer rather than one per message.
+
 ## Section 5 — Fixtures and tests
 
 Today's real response is captured as `test/fixtures/v4-sync-response.json`, replacing the bots-era
@@ -327,6 +340,7 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
 | **O17** | **Do high-security-mode hosts need the v4.1 variant?** `/api/v4.1/integrations/inapp-messages/sync` exists and returns 401 to APIKey-only auth. We pin v4.0; if high-security mode ever requires v4.1 here, that is a change we have not made | Pin v4.0 |
 | **O18** | **An unrecognised `platform` returns 200 with an empty list, not an error.** `getDevicePlatformCode()` sends `0` for macOS, web and every desktop target, and `0`, `3` and `99` all return zero campaigns silently. A developer demoing on macOS sees a feature that does nothing and has no way to find out why. **Either reject unknown platforms with an error, or add codes for the platforms Flutter actually runs on** | Log loudly before sending `platform: 0`; the request still goes out |
 | **O20** | **`quietHours` is enforced SDK-side** — confirmed 2026-08-18. The backend will return a model the SDK evaluates against the **device** timezone, which is the only party that knows the customer's local time. The model's shape is still to come. What the SDK needs from it: the window's start and end, whether it is global or per-campaign, and whether the times are wall-clock local or an offset. `campaignOrdering` is still unanswered | Not implemented, and currently ignored safely. A message caught by a quiet window should be **suppressed**, not deferred: the pending slot is in-memory and dies with the process, while a quiet window is hours long, so "retry when it ends" would essentially never fire. Suppressing costs the occurrence and not the campaign, so it is selected again on the next session outside the window |
+| **O23** | **Is the variables endpoint read-after-write consistent with event processing?** The SDK reports a purchase to the events endpoint, Gameball awards points asynchronously, and the SDK then fetches variables moments later to render *"you now have X"*. If the award has not landed by then, that campaign quotes the pre-purchase balance no matter how correctly the client behaves — cache invalidation cannot fix a value the server has not written yet. **Needs an answer before anyone builds a points-change campaign** | The cache is invalidated on every event, which is everything the client can do |
 | **O21** | **Deployment order is now load-bearing.** If sync stops substituting *before* the variables endpoint is live, every personalised campaign displays raw `{first_name}` to every customer — a total failure, not an edge case. The two changes have to land in the other order, or behind one flag | The SDK cannot detect this. It substitutes what it is given and shows what it has |
 | **O22** | **Their rule 4 is no longer safe, and needs replacing.** The contract says an unresolved token should be "left as-is" for forward compatibility. That was correct while the server had already substituted — leaving `{x}` meant leaving whatever the server produced. Once the server sends templates, leaving it as-is means **showing braces to a customer**, and it happens on any timeout, any network blip, or any token the map does not carry. Needs either a per-campaign pre-substituted fallback in the payload, or agreement that the SDK suppresses a message it cannot fully resolve | Currently the raw text is displayed. See the recommendation below |
 | **O19** | **Which environment gets these next?** Supersedes O11. The V4 paths are on alpha only — production returns a bare 404, identical to a nonexistent path. The module is inert anywhere else, and the events transport still must not ship ahead of the endpoint | Point `apiPrefix` at alpha for testing |
