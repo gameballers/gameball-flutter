@@ -320,14 +320,43 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
 | **O5** | Are numeric filter values JSON numbers or strings? | Coerce: numeric parse for ordering operators, string compare otherwise |
 | **O6** | Is `metadataLogicalOperator: "Or"` needed? | Support `And` only; skip others |
 | **O9** | **`eventUid` must be a GUID** — survives the migration, still undocumented, still a hard 400 that discards the whole batch | We generate v4 UUIDs, so this is a landmine rather than a live bug |
-| **O13** | **The variables contract contradicts itself, and the endpoint is not deployed.** The document says sync text arrives "with variables already substituted", and separately says to call variables "only when the cached text still contains `{` tokens". Both cannot hold: the live payload contains no tokens, so the trigger condition never fires. Either the server stops substituting and sends templates, or the SDK's trigger is meant to be something other than a token scan. **Built anyway, to the document** — the token scan makes it inert rather than wrong, so it costs nothing until this is answered | Implemented and fixture-tested; never fires against today's payload. Untested against the live endpoint, which 404s |
+| ~~O13~~ | ~~The variables contract contradicts itself~~ — **resolved 2026-08-18.** The backend will **stop substituting variables in the sync response**; text arrives with `{tokens}` intact and the SDK substitutes them from the variables API just before display. This is the model the module was built for, so no code changes — but it moves the async display path from never-used to the normal path for any personalised campaign, and it creates O21 and O22 below | Implemented. Inert until sync stops substituting, then live |
 | **O14** | **The token model cannot express conditionals.** `{points} points left` reads badly at zero, and `Welcome {first_name}` reads badly when the name is empty — the failure that made O12 sharp. Braze uses Liquid, which can branch; a flat value map never can. A permanent ceiling, worth knowing before campaigns are authored against it | — |
 | **O15** | **The token surface is text-only.** If personalisation ever needs to reach an image URL, a deep link or a button action, a value map cannot carry it, and the sync-time snapshot would stay silently stale in a field nobody thought to refresh | — |
 | **O16** | **422 is overloaded** — deactivated customer and all-invalid batch return the same status. Harmless today because both discard, but a future reader mapping 422 to "deactivated" would be wrong | Treat 422 as discard |
 | **O17** | **Do high-security-mode hosts need the v4.1 variant?** `/api/v4.1/integrations/inapp-messages/sync` exists and returns 401 to APIKey-only auth. We pin v4.0; if high-security mode ever requires v4.1 here, that is a change we have not made | Pin v4.0 |
 | **O18** | **An unrecognised `platform` returns 200 with an empty list, not an error.** `getDevicePlatformCode()` sends `0` for macOS, web and every desktop target, and `0`, `3` and `99` all return zero campaigns silently. A developer demoing on macOS sees a feature that does nothing and has no way to find out why. **Either reject unknown platforms with an error, or add codes for the platforms Flutter actually runs on** | Log loudly before sending `platform: 0`; the request still goes out |
-| **O20** | **Two undocumented top-level fields appeared mid-migration.** `quietHours` and `campaignOrdering` were added to the sync response between two captures on 2026-08-17, minutes apart, and are absent from the reference document. Both are null for every platform probed. `quietHours` in particular sounds like display policy the SDK would be expected to honour — a do-not-disturb window is not something a client can infer. **Please document both, and say whether the SDK is meant to enforce them** | Ignored. Unknown root fields do not affect parsing, so a message is never dropped for one |
+| **O20** | **`quietHours` is enforced SDK-side** — confirmed 2026-08-18. The backend will return a model the SDK evaluates against the **device** timezone, which is the only party that knows the customer's local time. The model's shape is still to come. What the SDK needs from it: the window's start and end, whether it is global or per-campaign, and whether the times are wall-clock local or an offset. `campaignOrdering` is still unanswered | Not implemented, and currently ignored safely. A message caught by a quiet window should be **suppressed**, not deferred: the pending slot is in-memory and dies with the process, while a quiet window is hours long, so "retry when it ends" would essentially never fire. Suppressing costs the occurrence and not the campaign, so it is selected again on the next session outside the window |
+| **O21** | **Deployment order is now load-bearing.** If sync stops substituting *before* the variables endpoint is live, every personalised campaign displays raw `{first_name}` to every customer — a total failure, not an edge case. The two changes have to land in the other order, or behind one flag | The SDK cannot detect this. It substitutes what it is given and shows what it has |
+| **O22** | **Their rule 4 is no longer safe, and needs replacing.** The contract says an unresolved token should be "left as-is" for forward compatibility. That was correct while the server had already substituted — leaving `{x}` meant leaving whatever the server produced. Once the server sends templates, leaving it as-is means **showing braces to a customer**, and it happens on any timeout, any network blip, or any token the map does not carry. Needs either a per-campaign pre-substituted fallback in the payload, or agreement that the SDK suppresses a message it cannot fully resolve | Currently the raw text is displayed. See the recommendation below |
 | **O19** | **Which environment gets these next?** Supersedes O11. The V4 paths are on alpha only — production returns a bare 404, identical to a nonexistent path. The module is inert anywhere else, and the events transport still must not ship ahead of the endpoint | Point `apiPrefix` at alpha for testing |
+
+## Once sync stops substituting
+
+O13's resolution is the right one, and it turns two things that were harmless into
+things that are not. Both are recorded above as O21 and O22; this is what the SDK should do about
+the second, which is ours to fix.
+
+**The failure fallback becomes user-visible.** Today `_resolveThenPresent` falls back to
+`campaign.message` unchanged on a timeout, an error, or an empty map, and `substituteTokens` returns
+text untouched when the map is empty. That fallback is currently *the server's own rendering*. Once
+the server sends templates it becomes **raw braces on screen**, on a path that runs at app-open time
+with a 2-second bound over a mobile network — so "sometimes" rather than "rarely".
+
+Two changes, in this order:
+
+1. **Persist the variable map per customer**, exactly as the campaign cache and the frequency cap
+   already persist theirs. A failed fetch then falls back to the customer's *last known* values —
+   slightly stale, which is the problem the endpoint was invented to reduce rather than a new one,
+   and identical in kind to what the server used to send. This alone removes almost every occurrence.
+
+2. **Suppress a message that still carries unresolved tokens after substitution.** Only reachable
+   when there is no persisted map either — a first session on a dead network. Braces in
+   customer-facing copy are worse than no message, and suppressing costs the occurrence rather than
+   the campaign, so it is selected again next session. Needs a product decision, because it means
+   marginally fewer messages on bad networks.
+
+Both are SDK-side and small. Neither is a substitute for getting O21's deployment order right.
 
 ## Testing
 
