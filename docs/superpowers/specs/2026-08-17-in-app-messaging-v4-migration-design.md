@@ -357,16 +357,28 @@ text untouched when the map is empty. That fallback is currently *the server's o
 the server sends templates it becomes **raw braces on screen**, on a path that runs at app-open time
 with a 2-second bound over a mobile network — so "sometimes" rather than "rarely".
 
-### 1. Persist the variable map — decision-independent, not yet built
+### 1. Persist the variable map — **built 2026-08-18**
 
-Store the last known values per customer, exactly as the campaign cache and the frequency cap
-already store theirs. A failed fetch then falls back to that customer's last known values: slightly
-stale, which is the problem the endpoint was invented to *reduce* rather than a new one, and
-identical in kind to what the server used to send.
+The last known values are stored per customer, the way the campaign cache and the frequency cap
+already store theirs. A failed fetch falls back to them: slightly stale, which is the problem the
+endpoint was invented to *reduce* rather than a new one, and identical in kind to what the server
+used to send. Without it, any two-second timeout on a mobile connection produced a raw `{token}`.
 
-Worth doing whichever way O22 is decided, because it changes how often the question arises at all.
-With it, an unresolved token means a first-ever session on a dead network, or a genuinely bad token
-— rather than any two-second timeout.
+**Only the tokens the held campaigns actually use are written.** The endpoint returns
+`player_name`, `player_last_name` and `player_email` alongside the points balances, and this is the
+first customer PII the module would keep at rest — so the service derives the needed set from the
+campaigns after each sync (`tokensIn`) and the source stores nothing else. A campaign set that
+mentions no tokens keeps nothing at all, which is every campaign today. The live fetch still returns
+everything; the filter applies only to the device.
+
+Two properties worth knowing. `clear()` — logout, or a customer change — removes the stored copy as
+well as the memory one, which the campaign cache does not do for its own data. And a stale write
+cannot resurrect it: the pending write re-checks the customer *after* awaiting storage, because a
+synchronous check passes while the clear that overtakes it has not been issued yet. That race was
+real and is covered by a test.
+
+This narrows O22 rather than answering it. An unresolved token now means a first-ever session on a
+dead network, or a genuinely bad token — not any dropped request.
 
 ### 2. What to do when a token is still unresolved — O22, awaiting a product decision
 

@@ -127,9 +127,13 @@ class FakeVariableSource implements VariableSource {
   bool hang = false;
   int fetches = 0;
   int clears = 0;
+  Set<String> retained = const <String>{};
 
   @override
   void clear() => clears++;
+
+  @override
+  void retainOnly(Set<String> tokenNames) => retained = tokenNames;
 
   @override
   Future<Map<String, String>> fetch(String customerId) {
@@ -1529,6 +1533,18 @@ void main() {
             body: 'You have {points_balance}',
           ),
         );
+
+    test('only tokens the campaigns use are marked worth storing', () async {
+      final h = build(campaigns: [
+        balanceCampaign('promo', trigger: const GameballSessionStartTrigger()),
+      ]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.variables.retained, {'points_balance'},
+          reason: 'the endpoint also returns a name and an email; a campaign '
+              'that mentions neither is no reason to keep them on the device');
+    });
 
     test('an event trigger drops cached values before evaluating', () async {
       final h = build(campaigns: [balanceCampaign('promo')]);

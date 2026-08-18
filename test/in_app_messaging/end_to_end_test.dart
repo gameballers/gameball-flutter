@@ -38,6 +38,9 @@ class _NoVariables implements VariableSource {
 
   @override
   void clear() {}
+
+  @override
+  void retainOnly(Set<String> tokenNames) {}
 }
 
 /// Serves one hand-written campaign, for shapes the shared fixture has no

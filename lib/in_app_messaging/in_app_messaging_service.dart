@@ -432,8 +432,23 @@ class InAppMessagingService {
     }
 
     await _prefetchArtwork();
+    _declarePersonalisationNeeds();
 
     _evaluate(const GameballSessionStartOccurrence());
+  }
+
+  /// Tells the variable source which tokens the held campaigns actually use.
+  ///
+  /// The endpoint returns the customer's name and email alongside their points
+  /// balance, and only the retained subset is kept on the device. A campaign set
+  /// that mentions no tokens at all keeps nothing, which is the common case
+  /// while the backend still substitutes at sync.
+  void _declarePersonalisationNeeds() {
+    final needed = <String>{};
+    for (final campaign in _campaigns) {
+      needed.addAll(tokensIn(campaign.message));
+    }
+    _variables.retainOnly(needed);
   }
 
   /// Loads the artwork of every campaign now held, before any of them displays.

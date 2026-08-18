@@ -98,6 +98,31 @@ void main() {
     });
   });
 
+  group('tokensIn', () {
+    test('finds every token across header, body and buttons', () {
+      expect(
+        tokensIn(message(
+          header: 'Hi {first_name}',
+          body: 'You have {points_balance} of {tier_target}',
+          buttons: [button('Spend {points_balance}')],
+        )),
+        {'first_name', 'points_balance', 'tier_target'},
+      );
+    });
+
+    test('is empty for copy with no tokens', () {
+      expect(tokensIn(message(header: 'Hi', body: 'there')), isEmpty);
+    });
+
+    test('ignores malformed braces', () {
+      expect(tokensIn(message(body: 'a { b } {2} {')), isEmpty);
+    });
+
+    test('reports a token once however often it appears', () {
+      expect(tokensIn(message(body: '{a} {a} {a}')), {'a'});
+    });
+  });
+
   group('substituteInto', () {
     test('rewrites header, body and button labels together', () {
       final result = substituteInto(

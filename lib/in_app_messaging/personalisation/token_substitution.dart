@@ -21,6 +21,26 @@ bool messageHasTokens(GameballInAppMessage message) {
 bool _hasToken(String? text) =>
     text != null && text.contains('{') && _token.hasMatch(text);
 
+/// Every distinct `{token}` name appearing in [message]'s text.
+///
+/// Used to decide which values are worth keeping on the device. A campaign that
+/// never mentions `{player_email}` gives the SDK no reason to store one, and the
+/// less personal data sits at rest the better.
+Set<String> tokensIn(GameballInAppMessage message) {
+  final found = <String>{};
+  for (final text in <String?>[
+    message.header,
+    message.body,
+    ...message.buttons.map((b) => b.text),
+  ]) {
+    if (text == null || !text.contains('{')) continue;
+    for (final match in _token.allMatches(text)) {
+      found.add(match.group(1)!);
+    }
+  }
+  return found;
+}
+
 /// Replaces every `{token}` in [text] that [values] knows.
 ///
 /// A token with no matching key is **left exactly as written**. A newer server
