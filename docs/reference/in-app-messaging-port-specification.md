@@ -32,6 +32,67 @@ repeating them.
 
 ---
 
+## 0.5 Your Braze reference is not the one we used — and that matters
+
+Every comparison in the Flutter work was made against the **Braze Flutter SDK**. Our research document
+is titled *"How Braze Handles In-App Messages (Flutter SDK)"* and is scoped to it. **Do not reuse that
+comparison for a native port.**
+
+The reason is not tidiness. **Braze's Flutter plugin is a deliberately degraded surface** — a thin
+bridge over two native SDKs that own all the real logic. Our own research records that its display
+hooks are *"Reachable from Dart: No"* on both platforms. So when the Flutter work concluded "we expose
+things Braze cannot", that was true **of the plugin**, and false of the SDK underneath it.
+
+Each port must therefore benchmark against its own counterpart:
+
+| Port | Reference | Note |
+| --- | --- | --- |
+| iOS native | [`braze-inc/braze-swift-sdk`](https://github.com/braze-inc/braze-swift-sdk) | In-app messages live in a separate **BrazeUI** library. Supports iOS, Mac Catalyst and visionOS; not tvOS. |
+| Android native | [`braze-inc/braze-android-sdk`](https://github.com/braze-inc/braze-android-sdk) | |
+| React Native | [`braze-inc/braze-react-native-sdk`](https://github.com/braze-inc/braze-react-native-sdk) | Likely a bridge like the Flutter one — check whether it is lossy in the same way before treating it as the bar. |
+
+### What changes when the reference is the native SDK
+
+**Three claims from the Flutter design do not survive the switch.** Do not carry them into a port
+document or a competitive comparison:
+
+1. **"Host display hooks are something Braze's SDK cannot offer."** True of the Flutter plugin only.
+   The native SDKs expose the equivalent — a presentation delegate on iOS, an
+   `IInAppMessageManagerListener` on Android. For a native port these are **table stakes, not a
+   differentiator.**
+2. **"One pending slot is enough."** The Flutter SDK holds a single pending message and notes that
+   *Braze keeps a stack*. Against a native SDK that keeps a stack, a slot may read as a regression
+   rather than a simplification. Re-decide it deliberately for your platform; do not inherit it because
+   Flutter did.
+3. **Our platform floors.** The Flutter SDK effectively requires **iOS 13.0 / Android API 24**, and
+   that comes entirely from Flutter plugins — `shared_preferences`, `url_launcher` — which a native
+   port will not have. **braze-swift-sdk supports iOS 12.0.** A Swift port has no reason to inherit our
+   floor, and inheriting it would be a self-inflicted competitive gap.
+
+### What to establish in your reference before you start
+
+Read the counterpart SDK for these specifically, because they are the places where the Flutter
+comparison is silent or misleading:
+
+- **How it presents** — its own window, the host's view hierarchy, or something else — and what that
+  buys it. Braze on iOS uses its own window and can therefore sit above native surfaces our Flutter
+  overlay cannot.
+- **Its customisation surface** — view factories, delegates, subclassable presenters. This is the part
+  the Flutter plugin flattens completely, and the part a native integrator will expect.
+- **Its deferral vocabulary** — Braze has explicit re-enqueue and discard semantics natively. Compare
+  them to §6.1 rather than assuming ours is a superset.
+- **Its animation and dismissal behaviour**, which the Flutter plugin cannot express and which
+  therefore never entered our design.
+- **Whether it keeps a queue**, and what it does when two messages become eligible at once.
+- **How it handles orientation, configuration changes and process death** on that platform.
+
+Produce a research document per port, tagged the way ours is — **[src]** for claims read out of the
+SDK's source with a `file:line`, **[doc]** for claims from Braze's documentation. That distinction is
+what made our own reference trustworthy enough to argue from, and it is what let us notice when a claim
+turned out to be about the plugin rather than the product.
+
+---
+
 ## 1. What the module is, in one paragraph
 
 A marketer authors a campaign in the dashboard: some artwork, copy, a button, and a rule about when

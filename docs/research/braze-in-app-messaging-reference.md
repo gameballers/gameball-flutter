@@ -2,6 +2,15 @@
 
 Behavioural reference for extending the Gameball Flutter SDK with in-app messaging.
 
+> **Scoped to the Braze *Flutter* plugin. Do not reuse it as the reference for a native port.**
+> That plugin is a thin bridge over two native SDKs which own all the real logic, and its display
+> hooks are unreachable from Dart — so several conclusions here ("Braze cannot expose X") are true of
+> the plugin and false of the product. An iOS port benchmarks against
+> [`braze-swift-sdk`](https://github.com/braze-inc/braze-swift-sdk), Android against
+> [`braze-android-sdk`](https://github.com/braze-inc/braze-android-sdk). See §0.5 of
+> [`../reference/in-app-messaging-port-specification.md`](../reference/in-app-messaging-port-specification.md)
+> for what changes when the reference changes.
+
 ## Scope and sources
 
 Everything below is derived from two kinds of source, and each claim is tagged so you
