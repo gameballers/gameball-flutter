@@ -342,7 +342,7 @@ Numbering continues from the 2026-08-10 spec. Resolved items are struck through 
 | **O20** | **`quietHours` is enforced SDK-side** — confirmed 2026-08-18. The backend will return a model the SDK evaluates against the **device** timezone, which is the only party that knows the customer's local time. The model's shape is still to come. What the SDK needs from it: the window's start and end, whether it is global or per-campaign, and whether the times are wall-clock local or an offset. `campaignOrdering` is still unanswered | Not implemented, and currently ignored safely. A message caught by a quiet window should be **suppressed**, not deferred: the pending slot is in-memory and dies with the process, while a quiet window is hours long, so "retry when it ends" would essentially never fire. Suppressing costs the occurrence and not the campaign, so it is selected again on the next session outside the window |
 | **O23** | **Is the variables endpoint read-after-write consistent with event processing?** The SDK reports a purchase to the events endpoint, Gameball awards points asynchronously, and the SDK then fetches variables moments later to render *"you now have X"*. If the award has not landed by then, that campaign quotes the pre-purchase balance no matter how correctly the client behaves — cache invalidation cannot fix a value the server has not written yet. **Needs an answer before anyone builds a points-change campaign** | The cache is invalidated on every event, which is everything the client can do |
 | **O21** | **Deployment order is now load-bearing.** If sync stops substituting *before* the variables endpoint is live, every personalised campaign displays raw `{first_name}` to every customer — a total failure, not an edge case. The two changes have to land in the other order, or behind one flag | The SDK cannot detect this. It substitutes what it is given and shows what it has |
-| **O22** | **Their rule 4 is no longer safe, and needs replacing.** The contract says an unresolved token should be "left as-is" for forward compatibility. That was correct while the server had already substituted — leaving `{x}` meant leaving whatever the server produced. Once the server sends templates, leaving it as-is means **showing braces to a customer**, and it happens on any timeout, any network blip, or any token the map does not carry. Needs either a per-campaign pre-substituted fallback in the payload, or agreement that the SDK suppresses a message it cannot fully resolve | Currently the raw text is displayed. See the recommendation below |
+| **O22** | **What should happen to a message with an unresolved token? — open, product decision.** Deferred deliberately 2026-08-18: whether a customer sees nothing or sees `{first_name}` is a call about tolerance, not about code. The three options and what each costs are set out below. **This decision has a deadline**: it is only theoretical while the server still substitutes. The moment O13's change ships, whichever behaviour is in the code becomes the shipped answer — and today that is "show the braces" | Currently fail-open: the raw text is displayed |
 | **O19** | **Which environment gets these next?** Supersedes O11. The V4 paths are on alpha only — production returns a bare 404, identical to a nonexistent path. The module is inert anywhere else, and the events transport still must not ship ahead of the endpoint | Point `apiPrefix` at alpha for testing |
 
 ## Once sync stops substituting
@@ -357,20 +357,41 @@ text untouched when the map is empty. That fallback is currently *the server's o
 the server sends templates it becomes **raw braces on screen**, on a path that runs at app-open time
 with a 2-second bound over a mobile network — so "sometimes" rather than "rarely".
 
-Two changes, in this order:
+### 1. Persist the variable map — decision-independent, not yet built
 
-1. **Persist the variable map per customer**, exactly as the campaign cache and the frequency cap
-   already persist theirs. A failed fetch then falls back to the customer's *last known* values —
-   slightly stale, which is the problem the endpoint was invented to reduce rather than a new one,
-   and identical in kind to what the server used to send. This alone removes almost every occurrence.
+Store the last known values per customer, exactly as the campaign cache and the frequency cap
+already store theirs. A failed fetch then falls back to that customer's last known values: slightly
+stale, which is the problem the endpoint was invented to *reduce* rather than a new one, and
+identical in kind to what the server used to send.
 
-2. **Suppress a message that still carries unresolved tokens after substitution.** Only reachable
-   when there is no persisted map either — a first session on a dead network. Braces in
-   customer-facing copy are worse than no message, and suppressing costs the occurrence rather than
-   the campaign, so it is selected again next session. Needs a product decision, because it means
-   marginally fewer messages on bad networks.
+Worth doing whichever way O22 is decided, because it changes how often the question arises at all.
+With it, an unresolved token means a first-ever session on a dead network, or a genuinely bad token
+— rather than any two-second timeout.
 
-Both are SDK-side and small. Neither is a substitute for getting O21's deployment order right.
+### 2. What to do when a token is still unresolved — O22, awaiting a product decision
+
+| Option | Customer sees | Cost |
+| --- | --- | --- |
+| **Show the raw text** (today's behaviour) | `Hello {first_name}` | Visibly broken. But it gets *reported* — someone screenshots it and the typo is found |
+| **Render it empty** (Braze's default) | `Hello ` | Reads as a bug rather than a placeholder. Still noticed, still reported |
+| **Suppress the message** | nothing | Nothing broken ships. But a permanently bad token silently kills the campaign forever, with no signal to anyone |
+
+Suppression is only the best of these **if it reports**. `GameballLogger` already posts diagnostics
+to Gameball, so a suppression can surface where a human will act on it. Without that it is strictly
+worse than the other two on discoverability: braces get reported, silence does not.
+
+Two things would make this decision cheaper whichever way it goes. **Validating tokens at authoring
+time in the dashboard** removes the permanent-misconfiguration case entirely, leaving the guard to
+handle only transient failure. And **a fallback value per token in the payload** — Braze's
+`default:` filter, expressed as data rather than syntax — means every token resolves to something
+and the guard almost never fires.
+
+One exception applies whatever is chosen: **do not suppress a test send.** `isTest` campaigns
+display and report nothing, so their audience is the marketer. Suppressing one gives them a blank
+screen and no telemetry, which is the worst way to debug a typo; showing the braces makes it obvious
+in a second.
+
+Neither of these is a substitute for getting O21's deployment order right.
 
 ## Testing
 
