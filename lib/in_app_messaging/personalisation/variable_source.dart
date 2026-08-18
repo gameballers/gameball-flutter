@@ -15,6 +15,14 @@ abstract interface class VariableSource {
   /// Current values for [customerId]. **Empty when unavailable** — never throws,
   /// because the caller's only response to a failure is to use the text it has.
   Future<Map<String, String>> fetch(String customerId);
+
+  /// Forgets anything held for a previous customer.
+  ///
+  /// On the interface rather than only on the caching implementation, so the
+  /// service can say what it means — "this customer is gone" — without testing
+  /// which implementation it was given. A source that holds nothing does
+  /// nothing, which is a correct answer rather than an empty one.
+  void clear();
 }
 
 /// Wraps a fetcher in a short per-customer cache.
@@ -65,6 +73,7 @@ class CachingVariableSource implements VariableSource {
   }
 
   /// Forgets everything. Called when the customer changes and on stop.
+  @override
   void clear() {
     _customerId = null;
     _values = null;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
+import 'message_presenter.dart' show messageEntrance;
 
 /// The modal layout, covering both of Braze's modal variants.
 ///
@@ -38,86 +39,115 @@ class GameballInAppMessageModal extends StatelessWidget {
     final style = message.style;
 
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Material(
-            key: const Key('gb_iam_surface'),
-            color: style.backgroundColor ?? theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                // Scrollable rather than clipped. A long promo on a small phone,
-                // or any copy at an accessibility text scale, is taller than the
-                // card — and a clipped card loses its buttons, which is the one
-                // part of the message that has to stay reachable.
-                //
-                // SingleChildScrollView sizes to its child up to the incoming
-                // constraint, so a short message stays short; it only scrolls
-                // once the content genuinely does not fit.
-                //
-                // The tap target wraps the content, not the Stack, so the close
-                // button stays outside it. Buttons sit inside but win the hit
-                // test themselves, so their taps never reach here.
-                SingleChildScrollView(
-                  child: _wrapTappable(
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (message.imageUrl != null)
-                          _image(context, message.imageUrl!),
-                        // Omitted entirely for image-only, so there is no blank
-                        // band under the artwork.
-                        if (_hasText || message.buttons.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                if (message.header != null)
-                                  Padding(
-                                    padding: EdgeInsets.only(
-                                        bottom: message.body != null ? 8 : 0),
-                                    child: Text(
-                                      message.header!,
-                                      key: const Key('gb_iam_header'),
-                                      textAlign:
-                                          style.headerAlign ?? TextAlign.start,
-                                      style:
-                                          theme.textTheme.titleLarge?.copyWith(
-                                        color: style.headerColor,
-                                        fontWeight: FontWeight.w700,
+      child: _entrance(
+        context,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Material(
+              key: const Key('gb_iam_surface'),
+              color: style.backgroundColor ?? theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: [
+                  // Scrollable rather than clipped. A long promo on a small phone,
+                  // or any copy at an accessibility text scale, is taller than the
+                  // card — and a clipped card loses its buttons, which is the one
+                  // part of the message that has to stay reachable.
+                  //
+                  // SingleChildScrollView sizes to its child up to the incoming
+                  // constraint, so a short message stays short; it only scrolls
+                  // once the content genuinely does not fit.
+                  //
+                  // The tap target wraps the content, not the Stack, so the close
+                  // button stays outside it. Buttons sit inside but win the hit
+                  // test themselves, so their taps never reach here.
+                  SingleChildScrollView(
+                    child: _wrapTappable(
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (message.imageUrl != null)
+                            _image(context, message.imageUrl!),
+                          // Omitted entirely for image-only, so there is no blank
+                          // band under the artwork.
+                          if (_hasText || message.buttons.isNotEmpty)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  if (message.header != null)
+                                    Padding(
+                                      padding: EdgeInsets.only(
+                                          bottom: message.body != null ? 8 : 0),
+                                      child: Text(
+                                        message.header!,
+                                        key: const Key('gb_iam_header'),
+                                        textAlign: style.headerAlign ??
+                                            TextAlign.start,
+                                        style: theme.textTheme.titleLarge
+                                            ?.copyWith(
+                                          color: style.headerColor,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                if (message.body != null)
-                                  Text(
-                                    message.body!,
-                                    key: const Key('gb_iam_body'),
-                                    textAlign:
-                                        style.bodyAlign ?? TextAlign.start,
-                                    style: theme.textTheme.bodyMedium
-                                        ?.copyWith(color: style.bodyColor),
-                                  ),
-                                if (message.buttons.isNotEmpty)
-                                  _buttons(context),
-                              ],
+                                  if (message.body != null)
+                                    Text(
+                                      message.body!,
+                                      key: const Key('gb_iam_body'),
+                                      textAlign:
+                                          style.bodyAlign ?? TextAlign.start,
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(color: style.bodyColor),
+                                    ),
+                                  if (message.buttons.isNotEmpty)
+                                    _buttons(context),
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                if (message.showCloseButton) _closeButton(context, style),
-              ],
+                  if (message.showCloseButton) _closeButton(context, style),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Fades and lifts the card into place on first build.
+  ///
+  /// `TweenAnimationBuilder` animates from `begin` to `end` when it is first
+  /// mounted, which is exactly an entrance — and it needs no controller to own,
+  /// so this widget stays stateless.
+  ///
+  /// Honours the platform's reduce-motion setting: a customer who has asked the
+  /// OS for less movement gets the message immediately, not a shorter animation.
+  Widget _entrance(BuildContext context, {required Widget child}) {
+    final still = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: still ? Duration.zero : messageEntrance,
+      curve: Curves.easeOutCubic,
+      builder: (context, t, animated) => Opacity(
+        opacity: t,
+        // Scale, not slide: a card that arrives from an edge implies a direction
+        // the message does not have. 4% is enough to read as arriving.
+        child: Transform.scale(scale: 0.96 + 0.04 * t, child: animated),
+      ),
+      child: child,
     );
   }
 
@@ -151,7 +181,10 @@ class GameballInAppMessageModal extends StatelessWidget {
           icon: const Icon(Icons.close),
           iconSize: 20,
           color: glyphColour,
-          tooltip: 'Close',
+          // Flutter's own localised string, so it is already correct in every
+          // locale the host app ships — including Arabic. A literal here would
+          // be the only untranslated word in the module.
+          tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
           onPressed: onClosePressed,
         ),
       ),

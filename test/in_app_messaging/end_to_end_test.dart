@@ -35,6 +35,9 @@ class _NoVariables implements VariableSource {
   @override
   Future<Map<String, String>> fetch(String customerId) async =>
       const <String, String>{};
+
+  @override
+  void clear() {}
 }
 
 /// Serves one hand-written campaign, for shapes the shared fixture has no

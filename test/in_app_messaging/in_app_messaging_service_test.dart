@@ -126,6 +126,10 @@ class FakeVariableSource implements VariableSource {
   Map<String, String> values = const <String, String>{};
   bool hang = false;
   int fetches = 0;
+  int clears = 0;
+
+  @override
+  void clear() => clears++;
 
   @override
   Future<Map<String, String>> fetch(String customerId) {
@@ -1465,6 +1469,19 @@ void main() {
       await pumpEventQueue();
 
       expect(h.cap.snapshot().shownCampaignIds, {idFor('promo')});
+    });
+
+    test('a new customer never inherits the previous one\'s values', () async {
+      final h = build();
+      await h.service.start(customerId: 'c1');
+      final before = h.variables.clears;
+
+      h.service.onCustomerChanged('c2');
+      await pumpEventQueue();
+
+      expect(h.variables.clears, greaterThan(before),
+          reason: 'personalising one customer with another one\'s name is the '
+              'worst thing this feature can do');
     });
 
     test('a trigger during the fetch does not stack a second message',

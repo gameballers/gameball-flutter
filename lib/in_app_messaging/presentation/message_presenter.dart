@@ -2,6 +2,18 @@ import 'package:flutter/widgets.dart';
 
 import '../models/in_app_message.dart';
 
+/// How long a modal or fullscreen message takes to appear.
+///
+/// Short on purpose. The slideup already animates its entrance, and a message
+/// that simply blinks into existence beside one that glides in reads as an
+/// unfinished build rather than a deliberate difference.
+///
+/// There is no matching exit animation: dismissal is synchronous everywhere —
+/// the analytics event, the pending-slot retry and the auto-dismiss timer all
+/// hang off it — and making it await a fade would put an animation frame in the
+/// middle of the module's most load-bearing path for no behavioural gain.
+const Duration messageEntrance = Duration(milliseconds: 200);
+
 /// Draws a message somewhere the user can see it.
 ///
 /// Internal: not exported to hosts. Deliberately knows nothing about analytics

@@ -230,7 +230,7 @@ class InAppMessagingService {
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <int>{};
     _presentationInFlight = false;
-    _forgetVariables();
+    _variables.clear();
     _audience = null;
     _beforeDisplay = null;
     _onAction = null;
@@ -337,18 +337,8 @@ class InAppMessagingService {
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <int>{};
     _presentationInFlight = false;
-    _forgetVariables();
+    _variables.clear();
     _audience = audience;
-  }
-
-  /// Drops any cached personalisation values.
-  ///
-  /// Guarded by a type test because `clear()` is an implementation detail of the
-  /// caching wrapper rather than part of the seam — a source that does not cache
-  /// has nothing to forget.
-  void _forgetVariables() {
-    final variables = _variables;
-    if (variables is CachingVariableSource) variables.clear();
   }
 
   /// Reads persisted state, bounded so a wedged store cannot kill the feature.

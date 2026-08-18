@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
+import 'message_presenter.dart' show messageEntrance;
 
 /// The fullscreen layout, covering both of its variants.
 ///
@@ -41,22 +42,45 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
     final theme = Theme.of(context);
     final style = message.style;
 
-    return Material(
-      key: const Key('gb_iam_fullscreen_surface'),
-      // Opaque by design: a fullscreen message replaces the app rather than
-      // floating above it, so there is no scrim and nothing shows through.
-      color: style.backgroundColor ?? theme.colorScheme.surface,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (_imageOnly)
-            _fullBleedImage()
-          else
-            _stacked(context, theme, style),
-          // Outside the tappable surface, so closing never counts as engaging.
-          if (message.showCloseButton) SafeArea(child: _closeButton(style)),
-        ],
+    return _entrance(
+      context,
+      child: Material(
+        key: const Key('gb_iam_fullscreen_surface'),
+        // Opaque by design: a fullscreen message replaces the app rather than
+        // floating above it, so there is no scrim and nothing shows through.
+        color: style.backgroundColor ?? theme.colorScheme.surface,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_imageOnly)
+              _fullBleedImage()
+            else
+              _stacked(context, theme, style),
+            // Outside the tappable surface, so closing never counts as engaging.
+            if (message.showCloseButton)
+              SafeArea(child: _closeButton(context, style)),
+          ],
+        ),
       ),
+    );
+  }
+
+  /// Fades the surface into place on first build.
+  ///
+  /// Fade alone, where the modal also scales: a fullscreen surface that grows
+  /// into position looks like a botched transition, and scaling would move the
+  /// artwork's painted bounds — which is the thing this variant is measured on.
+  ///
+  /// Honours the platform's reduce-motion setting.
+  Widget _entrance(BuildContext context, {required Widget child}) {
+    final still = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: still ? Duration.zero : messageEntrance,
+      curve: Curves.easeOut,
+      builder: (context, t, animated) => Opacity(opacity: t, child: animated),
+      child: child,
     );
   }
 
@@ -233,7 +257,7 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
   /// Always over artwork in the image-only variant, and usually over it in the
   /// other, so it defaults to a light glyph on a scrim disc unless the campaign
   /// named a colour. A dark glyph on a dark photograph is invisible.
-  Widget _closeButton(GameballMessageStyle style) {
+  Widget _closeButton(BuildContext context, GameballMessageStyle style) {
     final overArtwork = message.imageUrl != null;
 
     // `topEnd`, not `topRight`: in Arabic the trailing corner is the left one.
@@ -254,7 +278,10 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
             iconSize: 24,
             color: style.closeButtonColor ??
                 (overArtwork ? const Color(0xFFFFFFFF) : null),
-            tooltip: 'Close',
+            // Flutter's own localised string, so it is already correct in
+            // every locale the host app ships — including Arabic. A literal
+            // here would be the only untranslated word in the module.
+            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
             onPressed: onClosePressed,
           ),
         ),

@@ -34,13 +34,17 @@ Future<void> pumpOn(
   Size size = const Size(390, 844),
   double textScale = 1.0,
   TextDirection direction = TextDirection.ltr,
+  bool reduceMotion = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
   await tester.pumpWidget(MediaQuery(
-    data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+    data: MediaQueryData(
+      textScaler: TextScaler.linear(textScale),
+      disableAnimations: reduceMotion,
+    ),
     child: Directionality(
       textDirection: direction,
       child: MaterialApp(
@@ -187,6 +191,68 @@ void main() {
           tester.getSize(find.byKey(const Key('gb_iam_fullscreen_image')));
       expect(image.height, greaterThan(844 * 0.4),
           reason: 'the image is greedy, not capped at a fixed proportion');
+    });
+  });
+
+  group('arriving on screen', () {
+    testWidgets('the modal fades in rather than blinking into place',
+        (tester) async {
+      await pumpOn(
+        tester,
+        modal(const GameballInAppMessage(
+          id: 'm',
+          type: GameballMessageType.modal,
+          body: 'Welcome back',
+        )),
+      );
+      // First frame of the entrance.
+      await tester.pump(const Duration(milliseconds: 1));
+
+      final opacity = tester.widget<Opacity>(find.byType(Opacity).first);
+      expect(opacity.opacity, lessThan(1.0),
+          reason: 'the slideup animates its entrance; a modal that appears '
+              'instantly beside it reads as unfinished');
+
+      await tester.pumpAndSettle();
+      expect(tester.widget<Opacity>(find.byType(Opacity).first).opacity, 1.0);
+    });
+
+    testWidgets('reduce-motion gets the message immediately, not slowly',
+        (tester) async {
+      await pumpOn(
+        tester,
+        modal(const GameballInAppMessage(
+          id: 'm',
+          type: GameballMessageType.modal,
+          body: 'Welcome back',
+        )),
+        reduceMotion: true,
+      );
+      await tester.pump(const Duration(milliseconds: 1));
+
+      expect(tester.widget<Opacity>(find.byType(Opacity).first).opacity, 1.0,
+          reason: 'someone who asked the OS for less movement gets none, not a '
+              'shorter version of it');
+    });
+
+    testWidgets('the fullscreen surface fades without moving its artwork',
+        (tester) async {
+      await pumpOn(
+        tester,
+        fullscreen(const GameballInAppMessage(
+          id: 'm',
+          type: GameballMessageType.fullscreen,
+          layout: GameballMessageLayout.imageOnly,
+          imageUrl: 'https://cdn/promo.png',
+        )),
+      );
+      await tester.pump(const Duration(milliseconds: 1));
+
+      final surface =
+          tester.getSize(find.byKey(const Key('gb_iam_fullscreen_surface')));
+      expect(surface, const Size(390, 844),
+          reason: 'fade only — a scaling fullscreen surface would move the '
+              'artwork bounds this variant is measured on');
     });
   });
 

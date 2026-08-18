@@ -732,9 +732,23 @@ String? _artworkUrl(
     }
   }
 
-  return type == GameballMessageType.fullscreen
+  final chosen = type == GameballMessageType.fullscreen
       ? (fromMedia ?? direct)
       : (direct ?? fromMedia);
+
+  // Cleartext artwork is blocked by default on both platforms — iOS App
+  // Transport Security and, since API 28, Android's cleartext policy. The image
+  // then fails to load, the prefetcher finds it unready, and the campaign is
+  // passed over entirely. Not rejected here, because a host that has configured
+  // an exception is entitled to use it; but named, because otherwise the only
+  // symptom is a campaign that silently never shows.
+  if (chosen != null && chosen.startsWith('http://')) {
+    iamLog('campaign $label: artwork is served over http, which iOS and Android '
+        'both block by default — expect this campaign to be passed over unless '
+        'the host app allows cleartext for that host');
+  }
+
+  return chosen;
 }
 
 String? _asString(Object? value) => value is String ? value : null;
