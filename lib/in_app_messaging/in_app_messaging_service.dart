@@ -152,6 +152,9 @@ class InAppMessagingService {
   /// How long to wait for telemetry to go out before leaving the app.
   static const Duration _preActionFlushTimeout = Duration(milliseconds: 800);
 
+  /// Above this, warming artwork is worth mentioning in the log.
+  static const Duration _slowPrefetch = Duration(seconds: 1);
+
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
@@ -424,6 +427,13 @@ class InAppMessagingService {
   /// Every campaign is warmed, not only the one about to show. An event trigger
   /// fires with no warning and no time to fetch, so a campaign waiting on
   /// `add_to_cart` depends on this having run at sync.
+  ///
+  /// The whole set is awaited, which delays the first message of a session by
+  /// the slowest single image — **not** by their sum. They run concurrently, so
+  /// the ceiling here is [prefetchTimeout] however many campaigns arrive. If that
+  /// ceiling is ever too long, the lever is the timeout rather than the
+  /// structure; awaiting only the winner would mean selecting before knowing
+  /// what is displayable, and re-selecting when it turns out not to be.
   Future<void> _prefetchArtwork() async {
     final campaigns = _campaigns;
     if (campaigns.isEmpty) {
@@ -431,6 +441,7 @@ class InAppMessagingService {
       return;
     }
 
+    final startedAt = _clock();
     // Concurrent: these are independent downloads, and the slowest one is the
     // honest cost of the set.
     final ready = await Future.wait(campaigns.map(_isArtworkReady));
@@ -439,6 +450,15 @@ class InAppMessagingService {
       for (var i = 0; i < campaigns.length; i++)
         if (ready[i]) campaigns[i].campaignId,
     };
+
+    // Logged only when it actually cost something. This sits on the path to the
+    // first message of a session, and a slow image host is otherwise invisible —
+    // the message simply appears late, which looks like the SDK being slow.
+    final took = _clock().difference(startedAt);
+    if (took > _slowPrefetch) {
+      iamLog('artwork for ${campaigns.length} campaign(s) took '
+          '${took.inMilliseconds}ms, delaying the first message by that much');
+    }
   }
 
   /// Whether one campaign's artwork loaded, bounded by [prefetchTimeout].
