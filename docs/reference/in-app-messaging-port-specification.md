@@ -973,7 +973,12 @@ Do not implement these; the Flutter SDK does not, and parity matters more than f
 - **`log_event`, `log_attribute`, `request_push_permission`** actions — parse as unsupported
 - **Custom fonts** (`content.font`), `allowedAssetUrls`
 - **Dayparting in local time** — the sync request carries no time zone
-- **`quietHours` / `campaignOrdering`** — present in the response, undocumented, not yet enforced
+- **`campaignOrdering`** — present in the response, undocumented, and **correctly ignored**. Confirmed with the
+  backend 2026-08-24: the ordering the marketer configures is expressed by the order of the `messages` array
+  itself, which the SDK already uses as its tie-break. This field is therefore not the ranking, despite the name.
+  Observed sending only two ids, naming campaigns absent from the same response, and never covering a
+  tied-priority pair — consistent with dashboard state leaking into the payload. It should be documented or
+  dropped; acting on it would re-rank ties the dashboard had already settled
 
 An unknown `messageType` must skip **safely**, so these arrive as no-ops rather than errors when the
 backend starts sending them.
@@ -990,7 +995,7 @@ build the affected part.
 | **O19** | The V4 endpoints are on **alpha only**; production returns a bare 404 | Whether you can test at all |
 | **O13/O21** | Sync will stop substituting variables. **Deployment order is load-bearing** — if it lands before the variables endpoint, every personalised campaign shows raw braces | §8 |
 | **O22** | What to do with an unresolved token. **Open product decision** — do not decide per SDK | §8.4 |
-| **O20** | `quietHours` is SDK-enforced against the device timezone; the model is still to come. A message caught by a window should be **suppressed**, not deferred | §5, §6.1 |
+| **O20** | ~~`quietHours` is SDK-enforced against the device timezone; the model is still to come~~ **Resolved 2026-08-24.** The shape is `{enabled, start, end}` at the response root, with `start`/`end` as bare `HH:mm` **in UTC** — confirmed with the backend team, because the strings carry no zone and the obvious reading (the customer's local wall clock) is the wrong one. Global, not per-campaign: verified across 78 campaign objects, none carries a window. Implemented and enforced; a caught message is **suppressed**, not deferred | §5, §6.1 |
 | **O23** | Is the variables endpoint read-after-write consistent with event processing? If not, "you just earned X" quotes the old balance however correctly the client behaves | §8.2 |
 | **O9** | `eventUid` must be a GUID — undocumented, and a non-GUID is a hard 400 discarding the batch | §4.2 |
 | **O4/O6** | The authoritative filter operator vocabulary, and whether `Or` is reachable from the dashboard | §3.7 |

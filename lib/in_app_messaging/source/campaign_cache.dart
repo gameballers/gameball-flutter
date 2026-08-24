@@ -13,6 +13,11 @@ import 'message_source.dart';
 /// previous unexpired cache"*, and a message can display offline if its payload
 /// arrived first. Neither is possible if campaigns only live in memory.
 ///
+/// Everything the parser produced is carried back except [GameballSyncResult.rawJson],
+/// which is deliberately dropped so a result read *from* the cache can never be
+/// written back to it. Anything new on the result has to be added here as well —
+/// the rebuild is the one place a field can silently fail to survive a restart.
+///
 /// **The raw response is stored, not parsed objects.** That means no serialiser to
 /// write and keep in step with the model, and the only reader is the parser that
 /// is already tested. It also means a payload written by an older SDK version is
@@ -44,6 +49,7 @@ class InMemoryCampaignCache implements CampaignCache {
     return GameballSyncResult(
       campaigns: result.campaigns,
       cooldown: result.cooldown,
+      quietHours: result.quietHours,
     );
   }
 
@@ -100,6 +106,7 @@ class StoredCampaignCache implements CampaignCache {
       return GameballSyncResult(
         campaigns: result.campaigns,
         cooldown: result.cooldown,
+        quietHours: result.quietHours,
       );
     } catch (error) {
       // A corrupt cache must not stop messaging from starting.

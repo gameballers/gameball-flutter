@@ -275,6 +275,68 @@ void main() {
     });
   });
 
+  group('logPurchase', () {
+    /// A campaign on the reserved `purchase` event, which the stub fixture has
+    /// no equivalent of.
+    const purchaseCampaign = '''
+{
+  "cooldownSeconds": 30,
+  "messages": [
+    {
+      "campaignId": 9001,
+      "variationId": 1,
+      "name": "purchase probe",
+      "priority": 5,
+      "messageType": 2,
+      "contentMode": "prerendered",
+      "trigger": {
+        "type": "event", "name": "purchase",
+        "repeatable": true, "minIntervalSeconds": 0
+      },
+      "content": {"closeBehaviour": "both"},
+      "locale": {"header": "Thanks", "message": "for your purchase"}
+    }
+  ]
+}
+''';
+
+    testWidgets('one purchase produces one trigger occurrence', (tester) async {
+      GameballApp.debugMessageSource = _OneCampaign(purchaseCampaign);
+      app().init(GameballConfigBuilder().apiKey('test-key').lang('en').build());
+
+      final key = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Scaffold(body: Text('host screen')),
+      ));
+
+      final seen = <String>[];
+      final sub = app().onInAppMessage.listen((m) => seen.add(m.id));
+      addTearDown(sub.cancel);
+
+      app().startInAppMessaging(customerId: 'customer-1', navigatorKey: key);
+      await tester.pumpAndSettle();
+      expect(seen, isEmpty, reason: 'no session_start campaign exists here');
+
+      app().logPurchase(
+        customerId: 'customer-1',
+        productId: 'sku-1',
+        price: 120,
+        currency: 'USD',
+        callback: (_, __) {},
+      );
+      await tester.pumpAndSettle();
+
+      expect(seen, ['9001/1'],
+          reason: 'logPurchase sends the reserved event, which already notifies '
+              'the trigger engine. Notifying it a second time emits the message '
+              'twice and parks the duplicate in the pending slot, displacing '
+              'whatever was legitimately waiting there');
+      expect(app().pendingInAppMessageCampaign, isNull,
+          reason: 'nothing should be left deferred by a single purchase');
+    });
+  });
+
   /// The spec's out-of-scope section claimed a rotation does not trigger a
   /// retry. It does, and this pins down why, because the reason is indirect: a
   /// refused presentation re-arms a post-frame retry, and a rotation is a frame.

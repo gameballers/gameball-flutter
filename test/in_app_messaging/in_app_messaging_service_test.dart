@@ -11,6 +11,7 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/models/property_filter.dart';
+import 'package:gameball_sdk/in_app_messaging/models/quiet_hours.dart';
 import 'package:gameball_sdk/in_app_messaging/personalisation/variable_source.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/artwork_prefetcher.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/message_navigator.dart';
@@ -31,6 +32,9 @@ class FakeSource implements GameballMessageSource {
   /// What the next sync reports as the global cooldown.
   Duration cooldown = defaultDisplayCooldown;
 
+  /// What the next sync reports as the quiet-hours window.
+  GameballQuietHours? quietHours;
+
   /// The payload the sync "arrived as". Null by default, because a source with no
   /// raw response — as this fake is — has nothing for the cache to store, and the
   /// service must not invent one.
@@ -45,9 +49,41 @@ class FakeSource implements GameballMessageSource {
     return GameballSyncResult(
       campaigns: campaigns,
       cooldown: cooldown,
+      quietHours: quietHours,
       rawJson: rawJson,
     );
   }
+}
+
+/// A history store that answers slowly, and — like the real one — knows nothing
+/// until its load completes.
+///
+/// [stored] is what is on disk; [snapshot] only reports it once [load] has
+/// finished, which is the property that makes giving up on the read observable.
+class SlowFrequencyCap implements FrequencyCap {
+  SlowFrequencyCap({required this.delay, required this.stored});
+
+  final Duration delay;
+  final Map<int, DateTime> stored;
+
+  Map<int, DateTime> _loaded = <int, DateTime>{};
+
+  @override
+  Future<void> load(String customerId) async {
+    await Future<void>.delayed(delay);
+    _loaded = Map<int, DateTime>.of(stored);
+  }
+
+  @override
+  CapState snapshot() => CapState(
+        lastDisplayByCampaign: Map<int, DateTime>.unmodifiable(_loaded),
+        lastDisplayAt: _loaded.values.isEmpty
+            ? null
+            : _loaded.values.reduce((a, b) => a.isAfter(b) ? a : b),
+      );
+
+  @override
+  void recordDisplay(int campaignId, DateTime at) => _loaded[campaignId] = at;
 }
 
 class FakePresenter implements GameballMessagePresenter {
@@ -235,6 +271,8 @@ InAppMessageCampaign campaign(
   String? dispatchId,
   bool isTest = false,
   DateTime? expiresAt,
+  bool repeatable = false,
+  Duration? minInterval,
 }) {
   return InAppMessageCampaign(
     campaignId: idFor(label),
@@ -243,6 +281,8 @@ InAppMessageCampaign campaign(
     dispatchId: dispatchId,
     isTest: isTest,
     expiresAt: expiresAt,
+    repeatable: repeatable,
+    minInterval: minInterval,
     message: GameballInAppMessage(
       id: 'msg_$label',
       type: GameballMessageType.modal,
@@ -255,9 +295,14 @@ InAppMessageCampaign campaign(
 
 /// A real sync response, for seeding the cache — which stores payloads, not the
 /// constructed campaigns the fake source hands out.
-String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
+String rawSync({
+  int campaignId = 2041,
+  String body = 'cached body',
+  String quietHours = 'null',
+}) => '''
 {
   "cooldownSeconds": 30,
+  "quietHours": $quietHours,
   "messages": [
     { "campaignId": $campaignId, "messageType": 2,
       "trigger": {"type": "session_start"},
@@ -272,7 +317,7 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   FakeSource source,
   FakePresenter presenter,
   RecordingAnalytics analytics,
-  InMemoryFrequencyCap cap,
+  FrequencyCap cap,
   InMemoryCampaignCache cache,
   RecordingNavigator navigator,
   FakeArtworkPrefetcher prefetcher,
@@ -285,12 +330,15 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
   InMemoryCampaignCache? cache,
   Duration? prefetchTimeout,
   Duration? variableTimeout,
+  Duration? storeTimeout,
+  Duration? historyTimeout,
   VariableSource? variableSource,
+  FrequencyCap? frequencyCap,
 }) {
   final source = FakeSource(campaigns ?? [campaign('a')]);
   final presenter = FakePresenter();
   final analytics = RecordingAnalytics();
-  final cap = InMemoryFrequencyCap();
+  final cap = frequencyCap ?? InMemoryFrequencyCap();
   final theCache = cache ?? InMemoryCampaignCache();
   final navigator = RecordingNavigator();
   final prefetcher = FakeArtworkPrefetcher();
@@ -314,6 +362,8 @@ String rawSync({int campaignId = 2041, String body = 'cached body'}) => '''
     launcher: (uri, {bool external = false}) async => true,
     prefetchTimeout: prefetchTimeout ?? defaultArtworkPrefetchTimeout,
     variableTimeout: variableTimeout ?? defaultVariableTimeout,
+    storeTimeout: storeTimeout ?? defaultStoreTimeout,
+    historyTimeout: historyTimeout ?? defaultHistoryTimeout,
   );
 
   return (
@@ -1011,6 +1061,90 @@ void main() {
           reason: 'caps survive the new session, so the next campaign shows');
     });
 
+    test('a second pause on the way back in does not reset the clock',
+        () async {
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      // iOS sends inactive → hidden going out, and inactive → resumed coming
+      // back. Every one of those reaches onAppPaused, so the last one lands an
+      // instant before the resume. Measuring from it makes every absence zero.
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppPaused();
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
+          reason: 'the absence is measured from when the app first left the '
+              'foreground, not from the last pause notification');
+    });
+
+    test('a server cooldown longer than the session timeout suppresses, '
+        'then recovers on the next qualifying return', () async {
+      // The backend sets 60s while the session timeout is 30s, so a return
+      // between the two begins a session the floor then refuses. Pinned because
+      // the obvious repair — raising the session timeout to the cooldown —
+      // makes it worse: it would also swallow the *later* return that currently
+      // works, since that gap is itself only 35s.
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      h.source.cooldown = const Duration(seconds: 60);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['msg_cold']);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(seconds: 35)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      expect(h.presenter.shownMessageIds, ['msg_cold'],
+          reason: 'a new session began, but the floor has not cleared');
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(seconds: 70)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      expect(h.presenter.shownMessageIds, ['msg_cold', 'msg_warm'],
+          reason: 'the occurrence was suppressed, not consumed, so the next '
+              'session start still gets it');
+    });
+
+    test('says so in the log when the cooldown is what stopped a message',
+        () async {
+      // "Why didn't my campaign fire" has to be answerable from the log, which
+      // this path was the one exception to: a matched campaign inside the floor
+      // returned null and said nothing, so it read as a broken trigger.
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) =>
+          lines.add(message ?? '');
+      addTearDown(() => debugPrint = original);
+
+      final h = build(campaigns: [
+        campaign('cold', priority: 100),
+        campaign('warm', priority: 50),
+      ]);
+      h.source.cooldown = const Duration(seconds: 60);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(seconds: 35)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(lines.where((l) => l.contains('cooldown has not elapsed')),
+          isNotEmpty,
+          reason: 'a suppressed message must name the cooldown as the reason');
+    });
+
     test('a brief resume stays in the same session', () async {
       final h = build(campaigns: [
         campaign('cold', priority: 100),
@@ -1046,6 +1180,224 @@ void main() {
       h.service.onAppResumed();
 
       expect(h.presenter.shownMessageIds, isEmpty);
+    });
+  });
+
+  group('a failed artwork load is retried later in the session', () {
+    test('the campaign becomes displayable again once the host recovers',
+        () async {
+      final h = build(campaigns: [
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+      ]);
+      // The image host is down when the session starts, which is the only
+      // moment artwork was ever checked.
+      h.prefetcher.failing.add('msg_promo');
+
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('promo');
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'nothing to show: its artwork is not ready');
+
+      // The host comes back. Nothing tells the SDK, so the only way it can find
+      // out is by asking again.
+      h.prefetcher.failing.clear();
+
+      // A trigger past the retry floor re-attempts the failed set. It is fired
+      // and forgotten, so this occurrence still misses.
+      h.setNow(t0.add(const Duration(seconds: 40)));
+      h.service.onCustomEvent('promo');
+      await pumpEventQueue();
+      expect(h.presenter.shownMessageIds, isEmpty);
+
+      // The next one benefits.
+      h.setNow(t0.add(const Duration(seconds: 80)));
+      h.service.onCustomEvent('promo');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_promo'],
+          reason: 'the verdict was computed once at sync and cached for the '
+              'whole session, so a transient failure cost every later trigger');
+    });
+
+    test('the retry asks only about the campaigns that failed', () async {
+      final h = build(campaigns: [
+        campaign('ok', trigger: const GameballCustomEventTrigger('ping')),
+        campaign('broken', trigger: const GameballCustomEventTrigger('ping')),
+      ]);
+      h.prefetcher.failing.add('msg_broken');
+
+      await h.service.start(customerId: 'c1');
+      h.prefetcher.requested.clear();
+
+      h.setNow(t0.add(const Duration(seconds: 40)));
+      h.service.onCustomEvent('ping');
+      await pumpEventQueue();
+
+      expect(h.prefetcher.requested, ['msg_broken'],
+          reason: 'artwork already decoded must not be fetched again');
+    });
+
+    test('it does not re-attempt on every trigger', () async {
+      final h = build(campaigns: [
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+      ]);
+      h.prefetcher.failing.add('msg_promo');
+
+      await h.service.start(customerId: 'c1');
+      h.prefetcher.requested.clear();
+
+      // Three triggers inside the floor. A dead host must not be hammered once
+      // per event.
+      for (final at in [1, 2, 3]) {
+        h.setNow(t0.add(Duration(seconds: at)));
+        h.service.onCustomEvent('promo');
+        await pumpEventQueue();
+      }
+
+      expect(h.prefetcher.requested, isEmpty,
+          reason: 'the last attempt was at sync, well inside the floor');
+    });
+  });
+
+  group('quiet hours', () {
+    // UTC, never local: the backend sends the window in UTC, so a local literal
+    // here would be judged by its UTC equivalent and the test would pass or
+    // fail depending on the machine's timezone.
+    const night = GameballQuietHours(startMinute: 22 * 60, endMinute: 8 * 60);
+
+    test('a message that would display is suppressed inside the window',
+        () async {
+      final h = build(campaigns: [campaign('a')]);
+      h.source.quietHours = night;
+      h.setNow(DateTime.utc(2026, 8, 24, 23, 30));
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('the same message displays outside the window', () async {
+      final h = build(campaigns: [campaign('a')]);
+      h.source.quietHours = night;
+      h.setNow(DateTime.utc(2026, 8, 24, 12, 0));
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_a']);
+    });
+
+    test('an event inside the window is suppressed too', () async {
+      final h = build(campaigns: [
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+      ]);
+      h.source.quietHours = night;
+      h.setNow(DateTime.utc(2026, 8, 25, 3, 0));
+
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('promo');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'the window applies to every trigger, not just session start');
+    });
+
+    test('suppression costs the occurrence, not the campaign', () async {
+      final h = build(campaigns: [
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+      ]);
+      h.source.quietHours = night;
+      h.setNow(DateTime.utc(2026, 8, 24, 23, 30));
+
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('promo');
+      await pumpEventQueue();
+      expect(h.presenter.shownMessageIds, isEmpty);
+
+      h.setNow(DateTime.utc(2026, 8, 25, 9, 0));
+      h.service.onCustomEvent('promo');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['msg_promo'],
+          reason: 'nothing was recorded, so the campaign is still owed');
+    });
+
+    test('a window from the cache applies when the sync failed', () async {
+      final cache = InMemoryCampaignCache();
+      await cache.write('c1', rawSync(
+        campaignId: 4242,
+        quietHours: '{"enabled": true, "start": "22:00", "end": "08:00"}',
+      ));
+      final h = build(campaigns: [campaign('a')], cache: cache);
+      h.source.throwOnFetch = StateError('offline');
+      h.setNow(DateTime.utc(2026, 8, 24, 23, 30));
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'the cached payload carries the window, so going offline '
+              'must not become a way to message people at 3am');
+    });
+  });
+
+  group('restoring display history', () {
+    test('a slow history read still gates a campaign that has already shown',
+        () async {
+      // The real store is a platform channel, and on a cold start it is at its
+      // slowest — exactly when the first session-start message is decided.
+      // Giving up and proceeding with no history is what shows a once-ever
+      // campaign a second time.
+      final h = build(
+        campaigns: [campaign('a')],
+        frequencyCap: SlowFrequencyCap(
+          delay: const Duration(milliseconds: 150),
+          stored: <int, DateTime>{
+            idFor('a'): t0.subtract(const Duration(hours: 1)),
+          },
+        ),
+        storeTimeout: const Duration(milliseconds: 30),
+        historyTimeout: const Duration(milliseconds: 400),
+      );
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'the campaign is not repeatable and the stored history says '
+              'it has already displayed');
+    });
+  });
+
+  group('the pending slot', () {
+    test('keeps a repeatable campaign that is eligible to show again',
+        () async {
+      final h = build(campaigns: [
+        campaign('promo',
+            trigger: const GameballCustomEventTrigger('promo'),
+            repeatable: true),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.service.onCustomEvent('promo');
+      expect(h.presenter.shownMessageIds, ['msg_promo']);
+      h.presenter.dismiss();
+
+      // Past the global floor, so nothing but the repeat rule is in play.
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.setWidgetOpen(true);
+      h.service.onCustomEvent('promo');
+      expect(h.service.pendingCampaign?.campaignId, idFor('promo'),
+          reason: 'the widget was open, so it was deferred rather than shown');
+
+      h.setWidgetOpen(false);
+      h.service.onHostWidgetClosed();
+
+      expect(h.presenter.shownMessageIds, ['msg_promo', 'msg_promo'],
+          reason: 'the retry asks only whether the campaign has ever shown, '
+              'so a repeatable one is thrown away the moment it has — and a '
+              'message deferred behind the widget is silently lost');
     });
   });
 
@@ -1432,15 +1784,16 @@ void main() {
       expect(h.presenter.shownBodies, ['You have 1,250']);
     });
 
-    test('an empty map displays the text already held', () async {
+    test('an empty map still displays, with the tokens blanked', () async {
       final h = build(campaigns: [tokenCampaign('promo')]);
       h.variables.values = const <String, String>{};
 
       await h.service.start(customerId: 'c1');
       await pumpEventQueue();
 
-      expect(h.presenter.shownHeaders, ['Hi {first_name}'],
-          reason: 'never block or drop a display on this call');
+      expect(h.presenter.shownHeaders, ['Hi '],
+          reason: 'never block or drop a display on this call — but the copy '
+              'is a template now, so what displays must not be the template');
     });
 
     test('a hung fetch is bounded and the message still displays', () async {
@@ -1453,7 +1806,23 @@ void main() {
       await h.service.start(customerId: 'c1');
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      expect(h.presenter.shownHeaders, ['Hi {first_name}']);
+      expect(h.presenter.shownHeaders, ['Hi '],
+          reason: 'the message still displays — a value the SDK could not get '
+              'is a backend problem to fix there, not a reason to withhold the '
+              'campaign — but it displays blank, never as a raw brace');
+    });
+
+    test('a token the values do not cover is blanked, not left as a brace',
+        () async {
+      final h = build(campaigns: [tokenCampaign('promo')]);
+      // The endpoint answered, but knows nothing about points_balance.
+      h.variables.values = const <String, String>{'first_name': 'Ahmed'};
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownHeaders, ['Hi Ahmed']);
+      expect(h.presenter.shownBodies, ['You have ']);
     });
 
     test('the impression is still logged once, at display', () async {

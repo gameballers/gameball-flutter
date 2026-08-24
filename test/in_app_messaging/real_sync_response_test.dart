@@ -6,6 +6,7 @@ import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
+import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
 /// Parses a response captured from the live V4 endpoint, rather than one we
 /// wrote to match our own reading of the contract.
@@ -158,5 +159,47 @@ void main() {
 
   test('the raw payload is carried through for the cache to store', () {
     expect(parseSyncResponse(raw).rawJson, raw);
+  });
+
+  /// A second capture, taken 2026-08-24, for the one thing the 2026-08-17 one
+  /// cannot show: `quietHours` was `null` on that date and is populated now.
+  ///
+  /// Kept beside the original rather than replacing it. The earlier capture
+  /// holds more campaign shapes, so overwriting it to gain this field would
+  /// have cost coverage of the thing this file mostly exists to check.
+  group('the root settings block, captured 2026-08-24', () {
+    late Map<String, dynamic> raw;
+    late GameballSyncResult parsed;
+
+    setUpAll(() {
+      final text = File('test/fixtures/v4-sync-response-quiet-hours.json')
+          .readAsStringSync();
+      raw = jsonDecode(text) as Map<String, dynamic>;
+      parsed = parseSyncResponse(text);
+    });
+
+    test('the quiet-hours window is read, and matches the payload', () {
+      final sent = raw['quietHours'] as Map<String, dynamic>;
+      // Derived from the capture, so an account edit changes the expectation
+      // rather than breaking the test.
+      final start = (sent['start'] as String).split(':');
+      final end = (sent['end'] as String).split(':');
+
+      expect(sent['enabled'], isTrue,
+          reason: 'this capture exists because the account has it switched on');
+      expect(parsed.quietHours, isNotNull,
+          reason: 'the backend sent a window and the SDK must hold it');
+      expect(parsed.quietHours!.startMinute,
+          int.parse(start[0]) * 60 + int.parse(start[1]));
+      expect(parsed.quietHours!.endMinute,
+          int.parse(end[0]) * 60 + int.parse(end[1]));
+    });
+
+    test('it wraps past midnight, which is the hard case', () {
+      expect(parsed.quietHours!.startMinute,
+          greaterThan(parsed.quietHours!.endMinute),
+          reason: 'if the account is ever reconfigured to a same-day window, '
+              'real data stops exercising the wrap');
+    });
   });
 }

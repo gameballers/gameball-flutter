@@ -1,5 +1,6 @@
 import '../models/gameball_audience.dart';
 import '../models/in_app_message_campaign.dart';
+import '../models/quiet_hours.dart';
 
 /// Fallback gap between any two displayed messages.
 ///
@@ -18,18 +19,24 @@ class GameballSyncResult {
   const GameballSyncResult({
     required this.campaigns,
     this.cooldown = defaultDisplayCooldown,
+    this.quietHours,
     this.rawJson,
   });
 
   const GameballSyncResult.empty()
       : campaigns = const <InAppMessageCampaign>[],
         cooldown = defaultDisplayCooldown,
+        quietHours = null,
         rawJson = null;
 
   final List<InAppMessageCampaign> campaigns;
 
   /// Minimum gap between any two displays, from any campaign.
   final Duration cooldown;
+
+  /// The daily UTC window during which nothing may display, or null when the
+  /// account has none. Global, like [cooldown].
+  final GameballQuietHours? quietHours;
 
   /// The response exactly as it arrived, when there was one.
   ///

@@ -4,6 +4,30 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [Unreleased] 🔧
+
+> **Fixes** from a QA pass over in-app messaging on iOS and Android. Ten defects, each with a regression test.
+
+### 🐛 Fixed
+- ⏰ **Warm session start never fired.** `AppLifecycleState.inactive` was treated as "app paused", and both platforms emit it again on the way *back* to the foreground — so the pause timestamp was overwritten an instant before it was read, every absence measured as zero, and `session_start` only ever fired on a cold launch. The first pause of a departure now wins. Reproduced on iOS and on Android including a physical device
+- 🛒 **`logPurchase()` fired the trigger engine twice.** It delegates to `sendEvent`, which already notifies messaging under the reserved `purchase` name, and then notified it again — so a purchase-triggered message was emitted twice on `onInAppMessage` and the duplicate took the single pending slot, displacing whatever was legitimately waiting there
+- ✅ **Accepted events were reported to the host as failures.** The events endpoint answers `202`; success was narrowed to exactly `200`
+- 📞 **Failed requests never called back.** Neither `initializeCustomer` nor `sendEvent` attached a `catchError`, so a non-2xx or a transport failure escaped as an unhandled async error and the host's callback was never invoked — indistinguishable from a slow network
+- 🔤 **Unresolved `{tokens}` reached the screen.** Sync no longer substitutes, so the sync-time text is a template; on a timeout it was displayed verbatim. Any token still unresolved at display is now blanked. A message never renders its own placeholders
+- 🌙 **Quiet hours are enforced.** `quietHours` arrives at the response root as `{enabled, start, end}`, in **UTC**, and applies globally. A message caught by the window is suppressed rather than deferred, so the occurrence is lost and the campaign is not
+- 🗂️ **The display history could be skipped on a cold start.** It shared a 2-second budget with the campaign cache, sequentially; a slow platform channel meant proceeding with no history, which is how a once-ever campaign displays twice. The two reads now run concurrently, and the history gets its own, longer budget
+- 🖼️ **Fullscreen cropped campaign artwork** that a modal rendered whole. The stacked layout now uses `BoxFit.contain`; the image-only variant still bleeds
+- ⏳ **A slideup could have no way out.** It never draws a close glyph and has no scrim — by design — so a campaign setting neither an action nor `autoDismissSeconds` left a banner over the host's app bar until the user guessed at a swipe. One with no duration now gets an 8-second default; an explicit `0` still means "stay"
+- 🔁 **A deferred repeatable campaign was discarded.** The pending slot asked "has this ever shown" instead of "may it show now", so a repeat held back behind the Gameball widget was lost when the widget closed
+- 🎨 **Artwork that failed to load stayed failed for the session.** The verdict was computed once at sync and cached, so a brief network blip made a campaign undisplayable for every later trigger. The failed set is now re-attempted, at most once every 30 seconds
+
+### 📝 Notes
+- 🔍 **Diagnostics**: a message suppressed by the cooldown now says so. It was the one path where a campaign matched, was in date, was repeat-eligible and renderable, and still produced nothing without explanation — which reads as a broken trigger
+- 📐 **Tie-breaks are the order the backend listed campaigns in**, which is the order chosen in the dashboard. Unchanged behaviour, now documented and pinned by a test, because the previous comment justified it only as "deterministic" and so invited replacing it with something tidier that would have silently re-ranked every tie
+- 🧭 `campaignOrdering` on the sync response is **not** that ranking despite the name, and is correctly ignored
+
+---
+
 ## [3.3.0] - 2026-08-17 💬
 
 > **Minor Release**: In-app messaging — an opt-in module that displays campaigns authored in the Gameball dashboard

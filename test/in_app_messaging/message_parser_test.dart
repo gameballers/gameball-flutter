@@ -1109,4 +1109,95 @@ void main() {
               'worse than showing it');
     });
   });
+
+  group('quiet hours', () {
+    test('are read from the response root', () {
+      final result = parseSyncResponse('''
+{
+  "cooldownSeconds": 60,
+  "quietHours": {"enabled": true, "start": "22:00", "end": "08:00"},
+  "messages": []
+}
+''');
+
+      expect(result.quietHours, isNotNull);
+      expect(result.quietHours!.startMinute, 22 * 60);
+      expect(result.quietHours!.endMinute, 8 * 60);
+    });
+
+    test('a response without them has none', () {
+      final result = parseSyncResponse('{"cooldownSeconds": 60, "messages": []}');
+
+      expect(result.quietHours, isNull);
+    });
+
+    test('a null block has none', () {
+      final result = parseSyncResponse(
+          '{"quietHours": null, "cooldownSeconds": 60, "messages": []}');
+
+      expect(result.quietHours, isNull);
+    });
+  });
+
+  group('a slideup always has a way out', () {
+    String slideupPayload({String extra = ''}) => '''
+{
+  "cooldownSeconds": 60,
+  "messages": [
+    {
+      "campaignId": 2041, "messageType": 1,
+      "trigger": {"type": "session_start"},
+      "content": {$extra},
+      "locale": {"message": "New slideup A"}
+    }
+  ]
+}
+''';
+
+    test('one with no close behaviour and no duration gets the default', () {
+      // Campaigns 2041, 2042 and 2046 on the live account are exactly this.
+      // A slideup never draws a close glyph and has no scrim, so without a
+      // duration the only exit is a swipe gesture nobody is told about — and it
+      // sits on the host's app bar until then. Braze cannot express this state:
+      // its `message_close` defaults to `auto_dismiss`.
+      final message = parseSyncResponse(slideupPayload()).campaigns.single.message;
+
+      expect(message.autoDismissAfter, defaultSlideupAutoDismiss);
+    });
+
+    test('an explicit duration is never overridden', () {
+      final message = parseSyncResponse(
+        slideupPayload(extra: '"autoDismissSeconds": 8'),
+      ).campaigns.single.message;
+
+      expect(message.autoDismissAfter, const Duration(seconds: 8));
+    });
+
+    test('an explicit zero is honoured as "no auto-dismiss"', () {
+      // Zero is a deliberate "stay until dismissed", so the default must not
+      // quietly reinstate a timer the author turned off.
+      final message = parseSyncResponse(
+        slideupPayload(extra: '"autoDismissSeconds": 0'),
+      ).campaigns.single.message;
+
+      expect(message.autoDismissAfter, isNull);
+    });
+
+    test('a modal is left alone — it has a close glyph and a scrim', () {
+      final message = parseSyncResponse('''
+{
+  "messages": [
+    {
+      "campaignId": 2052, "messageType": 2,
+      "trigger": {"type": "session_start"},
+      "content": {},
+      "locale": {"message": "body"}
+    }
+  ]
+}
+''').campaigns.single.message;
+
+      expect(message.autoDismissAfter, isNull);
+    });
+  });
 }

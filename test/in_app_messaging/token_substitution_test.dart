@@ -178,4 +178,55 @@ void main() {
       expect(result.header, isNull);
     });
   });
+
+  group('clearUnresolvedTokens', () {
+    test('removes a token nothing resolved', () {
+      final result = clearUnresolvedTokens(
+        message(body: 'Nice pick, {player_name} - it earns you points!'),
+      );
+
+      expect(result.body, 'Nice pick,  - it earns you points!',
+          reason: 'a brace on screen is the one outcome nobody would choose');
+    });
+
+    test('clears the header and button labels too', () {
+      final result = clearUnresolvedTokens(message(
+        header: 'Hi {first_name}',
+        body: 'plain',
+        buttons: const [
+          GameballMessageButton(
+            id: 'b1',
+            text: 'Claim {points_balance}',
+            action: GameballDismissAction(),
+          ),
+        ],
+      ));
+
+      expect(result.header, 'Hi ');
+      expect(result.buttons.single.text, 'Claim ');
+      expect(result.body, 'plain');
+    });
+
+    test('a message with nothing left to clear is returned untouched', () {
+      final original = message(header: 'Hi Ahmed', body: 'no tokens here');
+
+      expect(clearUnresolvedTokens(original), same(original),
+          reason: 'the common case must not allocate a copy');
+    });
+
+    test('the button id survives, so a click stays attributable', () {
+      final result = clearUnresolvedTokens(message(
+        body: 'x',
+        buttons: const [
+          GameballMessageButton(
+            id: 'cta',
+            text: '{unknown}',
+            action: GameballDismissAction(),
+          ),
+        ],
+      ));
+
+      expect(result.buttons.single.id, 'cta');
+    });
+  });
 }

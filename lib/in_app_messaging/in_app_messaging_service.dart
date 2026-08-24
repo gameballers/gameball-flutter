@@ -12,6 +12,7 @@ import 'models/gameball_audience.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
+import 'models/quiet_hours.dart';
 import 'personalisation/token_substitution.dart';
 import 'personalisation/variable_source.dart';
 import 'presentation/artwork_prefetcher.dart';
@@ -86,9 +87,42 @@ const Duration defaultArtworkPrefetchTimeout = Duration(seconds: 5);
 /// How long to wait for current personalisation values before displaying.
 ///
 /// The document's figure. Bounded because a message must never be blocked or
-/// dropped by this call — on timeout the sync-time text is displayed, which is
-/// the same text the customer would have seen with no personalisation at all.
+/// dropped by this call.
+///
+/// It used to be free to lapse: sync substituted, so the text already held on
+/// the device was the personalised text and waiting bought only freshness. That
+/// is no longer true — the copy now arrives as a template — so a lapse costs the
+/// real values, and `clearUnresolvedTokens` is what keeps the result presentable
+/// rather than a screen full of braces.
 const Duration defaultVariableTimeout = Duration(seconds: 2);
+
+/// How long to wait on local storage before giving up on it.
+const Duration defaultStoreTimeout = Duration(seconds: 2);
+
+/// Shortest gap between two attempts at artwork that failed to load.
+///
+/// Artwork is warmed once per sync, and the verdict used to stand for the whole
+/// session — so a campaign whose image was briefly unreachable stayed
+/// undisplayable until the next session start, which on a long session is hours.
+/// Braze and CleverTap both skip a message whose image did not load, so skipping
+/// is right; caching the *reason* for a whole session is not. CleverTap in
+/// particular downloads "only before presenting the In-App", i.e. per display.
+///
+/// A floor rather than a retry count, because the failure mode this guards
+/// against is an unreachable host and the cost of asking it again is a request
+/// per campaign. Thirty seconds is frequent enough that a blip costs one or two
+/// triggers instead of the session.
+const Duration defaultArtworkRetryInterval = Duration(seconds: 30);
+
+/// How long to wait for the display history specifically.
+///
+/// More generous than [defaultStoreTimeout], because the two failures are not
+/// comparable. Losing the cached campaigns costs one offline session; losing the
+/// history means a campaign the backend marked once-ever displays a second time,
+/// which is the guarantee this module is judged on. Two seconds was measured as
+/// too tight on a real cold start — the platform channel is at its slowest
+/// exactly when the first session-start message is being decided.
+const Duration defaultHistoryTimeout = Duration(seconds: 5);
 
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
@@ -111,6 +145,9 @@ class InAppMessagingService {
     this.sessionTimeout = defaultSessionTimeout,
     this.prefetchTimeout = defaultArtworkPrefetchTimeout,
     this.variableTimeout = defaultVariableTimeout,
+    this.storeTimeout = defaultStoreTimeout,
+    this.historyTimeout = defaultHistoryTimeout,
+    this.artworkRetryInterval = defaultArtworkRetryInterval,
   })  : _source = source,
         _navigator = navigator,
         _presenter = presenter,
@@ -147,7 +184,13 @@ class InAppMessagingService {
   final Duration variableTimeout;
 
   /// How long to wait on local storage before giving up on it.
-  static const Duration _storeTimeout = Duration(seconds: 2);
+  final Duration storeTimeout;
+
+  /// How long to wait for the display history specifically.
+  final Duration historyTimeout;
+
+  /// Shortest gap between two attempts at artwork that failed to load.
+  final Duration artworkRetryInterval;
 
   /// How long to wait for telemetry to go out before leaving the app.
   static const Duration _preActionFlushTimeout = Duration(milliseconds: 800);
@@ -160,6 +203,13 @@ class InAppMessagingService {
   GameballOnAction? _onAction;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
 
+  /// When artwork was last attempted, so a failure is not cached for the whole
+  /// session and a dead host is not asked once per trigger.
+  DateTime? _artworkCheckedAt;
+
+  /// Guards against a second refresh starting while one is still running.
+  bool _artworkRefreshInFlight = false;
+
   /// Campaigns whose artwork is decoded and safe to display.
   ///
   /// Held beside [_campaigns] rather than filtering them, so the list stays a
@@ -169,6 +219,10 @@ class InAppMessagingService {
 
   /// Minimum gap between any two displays, as the last sync reported it.
   Duration _cooldown = defaultDisplayCooldown;
+
+  /// The daily UTC window during which nothing displays, as the last sync
+  /// reported it. Null when the account has none.
+  GameballQuietHours? _quietHours;
 
   /// The one message waiting for a display opportunity, if any.
   ///
@@ -338,9 +392,16 @@ class InAppMessagingService {
   }
 
   /// Called when the app leaves the foreground, to time the absence.
+  ///
+  /// The first notification wins, and later ones are ignored until a resume
+  /// clears it. One departure produces several: iOS follows `inactive` with
+  /// `hidden`, and — the case that matters — sends `inactive` again immediately
+  /// *before* `resumed` on the way back in. Overwriting on each would measure
+  /// every absence from the instant before the return, making it zero, and no
+  /// warm session would ever begin.
   void onAppPaused() {
     if (!isStarted) return;
-    _lastPausedAt = _clock();
+    _lastPausedAt ??= _clock();
     // The last point at which the OS reliably gives us time. An app killed from
     // the background never resumes, so anything still buffered would otherwise
     // wait for the next launch.
@@ -357,6 +418,8 @@ class InAppMessagingService {
     _pending = null;
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <int>{};
+    _artworkCheckedAt = null;
+    _quietHours = null;
     _presentationInFlight = false;
     _variables.clear();
     _audience = audience;
@@ -371,16 +434,44 @@ class InAppMessagingService {
   /// to "no history" risks showing a once-ever campaign twice, which is a far
   /// smaller failure than the feature being dead.
   Future<GameballSyncResult?> _readPersisted(String customerId) async {
+    // Started together rather than in series. They are independent reads, and
+    // sequencing them made the history wait out the cache before it even began
+    // — which is what pushed it past its budget on a cold start.
+    final history = _loadHistory(customerId);
+    final cache = _readCachedCampaigns(customerId);
+    await history;
+    return cache;
+  }
+
+  /// Restores the display history, bounded by [historyTimeout].
+  ///
+  /// Bounded rather than awaited outright because an unregistered
+  /// `shared_preferences` never completes, and that is not something a `try` can
+  /// catch — left unbounded it means no message ever displays, silently.
+  Future<void> _loadHistory(String customerId) async {
     try {
-      await _cap.load(customerId).timeout(_storeTimeout);
-      final cached = await _cache.read(customerId).timeout(_storeTimeout);
+      await _cap.load(customerId).timeout(historyTimeout);
+    } on TimeoutException {
+      // Named separately from the cache, and stated plainly: this is the branch
+      // where the once-ever guarantee is knowingly given up.
+      iamLog('display history did not arrive within '
+          '${historyTimeout.inSeconds}s; continuing without it, so a campaign '
+          'marked once-ever may display again');
+    } catch (error) {
+      iamLog('could not read display history ($error)');
+    }
+  }
+
+  Future<GameballSyncResult?> _readCachedCampaigns(String customerId) async {
+    try {
+      final cached = await _cache.read(customerId).timeout(storeTimeout);
       return cached.campaigns.isEmpty ? null : cached;
     } on TimeoutException {
-      iamLog('local storage did not respond within '
-          '${_storeTimeout.inSeconds}s; continuing without history or cache');
+      iamLog('cached campaigns did not arrive within '
+          '${storeTimeout.inSeconds}s; a failed sync will have no fallback');
       return null;
     } catch (error) {
-      iamLog('could not read local state ($error)');
+      iamLog('could not read cached campaigns ($error)');
       return null;
     }
   }
@@ -412,6 +503,7 @@ class InAppMessagingService {
       final result = await _source.fetch(audience);
       _campaigns = result.campaigns;
       _cooldown = result.cooldown;
+      _quietHours = result.quietHours;
       synced = true;
       iamLog('synced ${_campaigns.length} campaign(s), '
           'cooldown ${_cooldown.inSeconds}s');
@@ -428,6 +520,9 @@ class InAppMessagingService {
     if (!synced && cached != null) {
       _campaigns = cached.campaigns;
       _cooldown = cached.cooldown;
+      // Taken from the cache too. The window is on the payload, so a failed
+      // sync must not become a way to message somebody at 3am.
+      _quietHours = cached.quietHours;
       iamLog('falling back to ${_campaigns.length} cached campaign(s)');
     }
 
@@ -469,6 +564,7 @@ class InAppMessagingService {
   /// what is displayable, and re-selecting when it turns out not to be.
   Future<void> _prefetchArtwork() async {
     final campaigns = _campaigns;
+    _artworkCheckedAt = _clock();
     if (campaigns.isEmpty) {
       _artworkReady = const <int>{};
       return;
@@ -508,6 +604,40 @@ class InAppMessagingService {
     }
   }
 
+  /// Re-attempts [notReady], at most once per [artworkRetryInterval].
+  void _maybeRefreshArtwork(List<InAppMessageCampaign> notReady) {
+    if (_artworkRefreshInFlight) return;
+    final last = _artworkCheckedAt;
+    if (last != null && _clock().difference(last) < artworkRetryInterval) return;
+
+    _artworkRefreshInFlight = true;
+    // Stamped at the start, not on completion, so a slow attempt cannot let a
+    // burst of triggers queue up behind it.
+    _artworkCheckedAt = _clock();
+    unawaited(_refreshArtwork(notReady));
+  }
+
+  /// Warms only the artwork that previously failed, and unions in what loaded.
+  ///
+  /// Only the failed set: re-fetching what is already decoded would cost a
+  /// request per campaign per retry for nothing.
+  Future<void> _refreshArtwork(List<InAppMessageCampaign> notReady) async {
+    try {
+      final ready = await Future.wait(notReady.map(_isArtworkReady));
+      final recovered = <int>{
+        for (var i = 0; i < notReady.length; i++)
+          if (ready[i]) notReady[i].campaignId,
+      };
+      if (recovered.isEmpty) return;
+
+      _artworkReady = <int>{..._artworkReady, ...recovered};
+      iamLog('artwork for ${recovered.length} campaign(s) loaded on retry; '
+          'they can display again for the rest of this session');
+    } finally {
+      _artworkRefreshInFlight = false;
+    }
+  }
+
   void _evaluate(GameballTriggerOccurrence occurrence) {
     if (_campaigns.isEmpty) {
       iamLog('trigger ignored: no campaigns loaded');
@@ -518,14 +648,23 @@ class InAppMessagingService {
     // image belongs, and log an impression for it. Passing the campaign over
     // lets a lower-priority one that *is* ready take the slot instead.
     final displayable = <InAppMessageCampaign>[];
+    final notReady = <InAppMessageCampaign>[];
     for (final candidate in _campaigns) {
       if (_artworkReady.contains(candidate.campaignId)) {
         displayable.add(candidate);
       } else {
+        notReady.add(candidate);
         iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
             'ready');
       }
     }
+
+    // Asked again here, not only at sync. Deliberately before the early return
+    // below: a session where *everything* failed is exactly the one that must
+    // still be able to recover. Fired and forgotten, so this occurrence is
+    // unaffected — the next one benefits.
+    if (notReady.isNotEmpty) _maybeRefreshArtwork(notReady);
+
     if (displayable.isEmpty) return;
 
     final campaign = selectCampaign(
@@ -534,6 +673,7 @@ class InAppMessagingService {
       capState: _cap.snapshot(),
       now: _clock(),
       cooldown: _cooldown,
+      quietHours: _quietHours,
     );
     if (campaign == null) return;
 
@@ -609,6 +749,12 @@ class InAppMessagingService {
     } finally {
       _presentationInFlight = false;
     }
+
+    // Applied on every path out of this method, including the two above where
+    // substitution never ran. Sync no longer sends pre-substituted copy, so an
+    // unresolved token is not a missed enhancement any more — it is a raw
+    // template, and this is the only thing standing between one and the screen.
+    message = clearUnresolvedTokens(message);
 
     // Re-checked rather than trusted: the screen can change during the await,
     // and the host can log out.
@@ -740,8 +886,17 @@ class InAppMessagingService {
     _pending = null;
 
     final capState = _cap.snapshot();
-    if (capState.shownCampaignIds.contains(campaign.campaignId)) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: already shown');
+    // Asked as "may it display now", not "has it ever displayed". A repeatable
+    // campaign has by definition already displayed by the time it is deferred a
+    // second time, so the cruder question threw away every repeat that happened
+    // to be waiting behind the widget.
+    if (!isRepeatEligible(
+      campaign: campaign,
+      capState: capState,
+      now: _clock(),
+    )) {
+      iamLog('pending campaign "${campaign.campaignId}" dropped: it may not '
+          'display again yet');
       return;
     }
     // Re-validated so a message deferred before another was displayed cannot

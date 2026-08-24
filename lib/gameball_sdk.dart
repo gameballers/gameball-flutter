@@ -150,7 +150,16 @@ class GameballApp extends StatelessWidget {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
-        responseCallback!(response, null);
+        responseCallback?.call(response, null);
+      }).catchError((Object error) {
+        // initializeCustomerRequest throws on a non-2xx and on a transport
+        // failure. Without this the chain has nothing to catch it: the error
+        // escapes as an unhandled async error and the callback is never
+        // invoked, so the host cannot tell a failure from a slow network.
+        responseCallback?.call(
+          null,
+          error is Exception ? error : Exception('$error'),
+        );
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
@@ -193,11 +202,17 @@ class GameballApp extends StatelessWidget {
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
       sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
-        if (response.statusCode == 200) {
-          callback!(true, null);
-        } else {
-          callback!(false, null);
-        }
+        // The whole 2xx range, matching what sendEventRequest itself accepts.
+        // The events endpoint answers 202, not 200, so narrowing this to an
+        // exact 200 reported every accepted event to the host as a failure.
+        final accepted = response.statusCode >= 200 && response.statusCode < 300;
+        callback?.call(accepted, null);
+      }).catchError((Object error) {
+        // sendEventRequest throws on a non-2xx and on a transport failure.
+        // Without this the chain has nothing to catch it: the error escapes as
+        // an unhandled async error and the callback is never invoked at all, so
+        // a host waiting on it waits forever.
+        callback?.call(false, error is Exception ? error : Exception('$error'));
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.sendEvent', params: event.toJson());
@@ -268,22 +283,14 @@ class GameballApp extends StatelessWidget {
       builder.eventMetaData(entry.key, entry.value);
     }
 
+    // In-app messaging is notified from inside [sendEvent], by the custom-event
+    // hook, and deliberately not a second time here. A purchase reaches the
+    // trigger engine as the reserved event named `purchase` carrying exactly
+    // the metadata assembled above — which is the same occurrence the explicit
+    // purchase hook would build, so calling both emitted every purchase message
+    // twice and parked the duplicate in the pending slot, displacing whatever
+    // was legitimately waiting there.
     sendEvent(builder.build(), callback, sessionToken: sessionToken);
-
-    // Additive and guarded, like the other in-app messaging hooks. Note this
-    // runs in addition to the custom-event hook inside sendEvent, so a campaign
-    // can trigger on either the purchase or the reserved event name.
-    try {
-      _inAppMessaging?.onPurchase(
-        productId: productId,
-        price: price,
-        currency: currency,
-        quantity: quantity,
-        properties: properties,
-      );
-    } catch (error) {
-      iamLog('onPurchase hook failed: $error');
-    }
   }
 
   /// Opts in to in-app messaging for [customerId].

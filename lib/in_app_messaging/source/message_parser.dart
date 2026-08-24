@@ -6,6 +6,7 @@ import '../models/in_app_message.dart';
 import '../models/in_app_message_campaign.dart';
 import '../models/message_trigger.dart';
 import '../models/property_filter.dart';
+import '../models/quiet_hours.dart';
 import 'message_source.dart';
 
 /// Message types the backend can send, as its numeric enum.
@@ -20,6 +21,27 @@ const Map<int, String> _messageTypeNames = <int, String>{
   4: 'htmlFullscreen',
   5: 'emailCapture',
 };
+
+/// How long a slideup stays when the campaign names no duration.
+///
+/// A slideup is the one type with no guaranteed exit. It never draws a close
+/// glyph and has no scrim to tap — both by design, matching Braze, because a
+/// banner that size has no room for either — so its only affordances are a swipe
+/// towards its own edge and the passage of time. A campaign that sets neither
+/// leaves a banner sitting over the host's app bar, including whatever
+/// navigation control is up there, until the user guesses at a gesture nobody
+/// told them about.
+///
+/// Braze cannot express that state: `message_close` is a closed pair,
+/// `swipe | auto_dismiss`, and it **defaults to auto_dismiss**. Ours are two
+/// independent fields, so "no exit at all" is representable — and three
+/// campaigns on the live account are exactly that. This makes it unrepresentable
+/// again, at the parser, rather than asking every campaign author to remember.
+///
+/// Eight seconds because that is what the one slideup on the account that *did*
+/// set a duration chose. Braze's own default is unusable as a reference: its SDK
+/// ships `duration = 5` while documenting the field as milliseconds.
+const Duration defaultSlideupAutoDismiss = Duration(seconds: 8);
 
 const int _slideupMessageType = 1;
 const int _modalMessageType = 2;
@@ -72,6 +94,7 @@ GameballSyncResult parseSyncResponse(String rawJson) {
     cooldown: cooldownSeconds == null || cooldownSeconds < 0
         ? defaultDisplayCooldown
         : Duration(seconds: cooldownSeconds),
+    quietHours: parseQuietHours(decoded['quietHours']),
     rawJson: rawJson,
   );
 }
@@ -318,6 +341,20 @@ GameballInAppMessage? _parseMessage(
   final autoSeconds = _asNum(content['autoDismissSeconds']);
   final close = _parseCloseBehaviour(content['closeBehaviour'], label);
 
+  // Absent, not zero. Zero is an author saying "stay until dismissed", and
+  // reinstating a timer they turned off would be overriding intent rather than
+  // supplying a default.
+  final autoDismiss = autoSeconds == null
+      ? (type == GameballMessageType.slideup ? defaultSlideupAutoDismiss : null)
+      : (autoSeconds > 0
+          ? Duration(milliseconds: (autoSeconds * 1000).round())
+          : null);
+  if (autoSeconds == null && type == GameballMessageType.slideup) {
+    iamLog('campaign $label: slideup has no autoDismissSeconds, applying the '
+        '${defaultSlideupAutoDismiss.inSeconds}s default so it cannot sit over '
+        "the host's app bar indefinitely");
+  }
+
   return GameballInAppMessage(
     id: id,
     type: type,
@@ -330,9 +367,7 @@ GameballInAppMessage? _parseMessage(
     clickAction: _parseOptionalAction(content['action'], label),
     showCloseButton: close.showCloseButton,
     dismissOnScrimTap: close.dismissOnScrimTap,
-    autoDismissAfter: (autoSeconds != null && autoSeconds > 0)
-        ? Duration(milliseconds: (autoSeconds * 1000).round())
-        : null,
+    autoDismissAfter: autoDismiss,
     layout: _resolveLayout(content, type, label),
     orientation: _parseOrientation(content['orientation'], label),
     slidePosition: _parseSlidePosition(content['slideFrom'], label),

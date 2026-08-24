@@ -234,4 +234,53 @@ void main() {
               'whatever is scrolling underneath');
     });
   });
+
+  group('the safe area', () {
+    // A real device surface, not a hand-made MediaQuery. The default test
+    // window is 800x600, so an assertion written against an invented 844-tall
+    // screen is satisfied by any layout at all — which is exactly the vacuous
+    // test this replaces.
+    const height = 844.0;
+    const inset = (top: 59.0, bottom: 34.0);
+
+    Future<Rect> bannerRect(
+      WidgetTester tester,
+      GameballSlidePosition position,
+    ) async {
+      const ratio = 3.0;
+      tester.view.devicePixelRatio = ratio;
+      tester.view.physicalSize = const Size(390 * ratio, height * ratio);
+      tester.view.padding = const FakeViewPadding(
+        top: 59 * ratio,
+        bottom: 34 * ratio,
+      );
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        home: GameballInAppMessageSlideup(
+          message: slideup(position: position),
+          onMessagePressed: () {},
+          onDismissRequested: () {},
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return tester.getRect(find.byKey(const Key('gb_iam_slideup_surface')));
+    }
+
+    testWidgets('a top banner clears the notch', (tester) async {
+      final rect = await bannerRect(tester, GameballSlidePosition.top);
+
+      expect(rect.top, greaterThanOrEqualTo(inset.top),
+          reason: 'a banner drawn under the notch loses its first line, and its '
+              'tap target ends up under the status bar');
+    });
+
+    testWidgets('a bottom banner clears the home indicator', (tester) async {
+      final rect = await bannerRect(tester, GameballSlidePosition.bottom);
+
+      expect(rect.bottom, lessThanOrEqualTo(height - inset.bottom),
+          reason: 'the home-indicator strip swallows swipes, which for a '
+              'slideup is the only way out by hand');
+    });
+  });
 }

@@ -144,7 +144,15 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
                   child: Image.network(
                     message.imageUrl!,
                     key: const Key('gb_iam_fullscreen_image'),
-                    fit: BoxFit.cover,
+                    // Contain, unlike the image-only variant above. There the
+                    // artwork *is* the message and bleeding to every edge is
+                    // the point; here it shares the screen with copy, so
+                    // cropping buys nothing and costs whatever the designer
+                    // baked into the top and bottom of the image — which for a
+                    // promo is usually the offer itself. The modal already
+                    // reasons this way, and the same campaign artwork should
+                    // not be whole in one type and sliced in the other.
+                    fit: BoxFit.contain,
                     width: double.infinity,
                     errorBuilder: (context, error, stackTrace) =>
                         const SizedBox.shrink(),

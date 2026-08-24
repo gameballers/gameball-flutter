@@ -85,6 +85,18 @@ void main() {
           reason: 'a fullscreen call to action fills the width; the modal row '
               'would look lost here');
     });
+    testWidgets('shows the whole artwork rather than cropping it',
+        (tester) async {
+      await pump(tester, fullscreen());
+
+      final image = tester
+          .widget<Image>(find.byKey(const Key('gb_iam_fullscreen_image')));
+      expect(image.fit, BoxFit.contain,
+          reason: 'here the image shares the screen with copy instead of '
+              'bleeding to the edges, and promotional artwork usually has text '
+              'baked into it — cropping deletes the offer. The modal already '
+              'reasons this way; the two must not treat one image differently');
+    });
   });
 
   group('the image-only variant', () {

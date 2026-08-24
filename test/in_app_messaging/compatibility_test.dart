@@ -40,11 +40,12 @@ void main() {
     testWidgets('sendEvent does not start in-app messaging', (tester) async {
       app().init(GameballConfigBuilder().apiKey('test-key').lang('en').build());
 
-      // `sendEvent` attaches `.then()` with no `catchError`, so the 400 that
-      // TestWidgetsFlutterBinding returns for every request escapes as an
-      // unhandled async error. That is a PRE-EXISTING SDK defect, documented
-      // and deliberately out of scope here, so it is captured in a guarded zone
-      // rather than allowed to fail a test that is about something else.
+      // TestWidgetsFlutterBinding answers every request with a 400, which
+      // sendEventRequest turns into a throw. That used to escape the zone as an
+      // unhandled async error because the future chain had no catchError; it now
+      // reaches the caller's callback instead, which is what this asserts.
+      Object? reportedError;
+      bool? reportedSuccess;
       final escaped = <Object>[];
       await tester.runAsync(() async {
         await runZonedGuarded(
@@ -53,7 +54,10 @@ void main() {
               EventBuilder().customerId('c1').eventName('add_to_cart').build(),
               // Language version is 3.4 here (pubspec pins sdk >=3.4.4), which
               // predates wildcard `_` parameters, so the second must be named.
-              (_, __) {},
+              (success, error) {
+                reportedSuccess = success;
+                reportedError = error;
+              },
             );
             await Future<void>.delayed(const Duration(milliseconds: 100));
           },
@@ -61,12 +65,10 @@ void main() {
         );
       });
 
-      expect(
-        escaped.map((e) => e.toString()).join('\n'),
-        contains('Failed to send event'),
-        reason: 'documents the pre-existing missing catchError; if this stops '
-            'escaping, that defect was fixed and this zone can be removed',
-      );
+      expect(escaped, isEmpty,
+          reason: 'a failed send must reach the callback, not escape the zone');
+      expect(reportedSuccess, isFalse);
+      expect(reportedError.toString(), contains('Failed to send event'));
       expect(app().isInAppMessagingStarted, isFalse,
           reason: 'the additive hook must never start the module');
     });

@@ -4,6 +4,7 @@ import 'package:gameball_sdk/in_app_messaging/evaluation/trigger_evaluator.dart'
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
+import 'package:gameball_sdk/in_app_messaging/models/quiet_hours.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_source.dart';
 
 final DateTime t0 = DateTime.utc(2026, 8, 5, 12);
@@ -147,6 +148,39 @@ void main() {
 
       expect(result?.campaignId,
         idFor('c0'));
+    });
+
+    test('response order wins even when it contradicts campaign-id order', () {
+      // The array order IS the ranking: the backend returns campaigns in the
+      // sequence the marketer arranged in the dashboard — confirmed with the
+      // backend team 2026-08-24. So response order is not an arbitrary
+      // tie-break that any deterministic rule could replace; it carries intent.
+      //
+      // This is the test that fails if someone swaps in a "tidier" total order.
+      // Ascending campaignId is the tempting one, and it is wrong: it would
+      // silently re-rank every tie the dashboard had already settled. The ids
+      // here are the live 2041/2046 pair, deliberately returned highest-first.
+      InAppMessageCampaign withId(int id) => InAppMessageCampaign(
+            campaignId: id,
+            trigger: const GameballSessionStartTrigger(),
+            priority: 9,
+            message: GameballInAppMessage(
+              id: 'msg_$id',
+              type: GameballMessageType.modal,
+              body: 'body',
+            ),
+          );
+
+      final result = selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [withId(2046), withId(2041)],
+        capState: emptyCaps,
+        now: t0,
+      );
+
+      expect(result?.campaignId, 2046,
+          reason: 'the campaign the backend listed first must win, even though '
+              'it has the higher id');
     });
 
     test('the winner is the first of the top priority in response order', () {
@@ -396,6 +430,85 @@ void main() {
       );
 
       expect(result?.campaignId, idFor('live'));
+    });
+  });
+
+  group('quiet hours', () {
+    const night = GameballQuietHours(startMinute: 22 * 60, endMinute: 8 * 60);
+
+    InAppMessageCampaign anyCampaign() => campaign('a');
+
+    test('nothing displays inside the window', () {
+      final chosen = selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [anyCampaign()],
+        capState: const CapState(),
+        now: DateTime.utc(2026, 8, 24, 23, 30),
+        quietHours: night,
+      );
+
+      expect(chosen, isNull);
+    });
+
+    test('the same campaign displays outside it', () {
+      final chosen = selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [anyCampaign()],
+        capState: const CapState(),
+        now: DateTime.utc(2026, 8, 24, 12, 0),
+        quietHours: night,
+      );
+
+      expect(chosen, isNotNull);
+    });
+
+    test('the small hours are still inside a window that wraps midnight', () {
+      final chosen = selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [anyCampaign()],
+        capState: const CapState(),
+        now: DateTime.utc(2026, 8, 25, 3, 0),
+        quietHours: night,
+      );
+
+      expect(chosen, isNull);
+    });
+
+    test('suppressing costs the occurrence, never the campaign', () {
+      // Nothing is recorded, so the next trigger outside the window still gets
+      // it. This is why a quiet window suppresses rather than defers: the
+      // pending slot is in-memory and the window is hours long.
+      const caps = CapState();
+
+      selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [anyCampaign()],
+        capState: caps,
+        now: DateTime.utc(2026, 8, 24, 23, 30),
+        quietHours: night,
+      );
+
+      expect(
+        selectCampaign(
+          occurrence: const GameballSessionStartOccurrence(),
+          campaigns: [anyCampaign()],
+          capState: caps,
+          now: DateTime.utc(2026, 8, 25, 9, 0),
+          quietHours: night,
+        ),
+        isNotNull,
+      );
+    });
+
+    test('no window means no suppression', () {
+      final chosen = selectCampaign(
+        occurrence: const GameballSessionStartOccurrence(),
+        campaigns: [anyCampaign()],
+        capState: const CapState(),
+        now: DateTime.utc(2026, 8, 24, 23, 30),
+      );
+
+      expect(chosen, isNotNull);
     });
   });
 }
