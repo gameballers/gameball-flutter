@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
 import 'message_presenter.dart' show messageEntrance;
+import 'message_view_metrics.dart';
 
 /// The fullscreen layout, covering both of its variants.
 ///
@@ -106,7 +107,7 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
               child: Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+                  padding: FullscreenMetrics.imageOnlyButtonsPadding,
                   child: _buttons(stretch: true),
                 ),
               ),
@@ -165,12 +166,13 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
                 // buttons underneath stay on screen and reachable.
                 constraints: BoxConstraints(
                   maxHeight: hasImage
-                      ? constraints.maxHeight * 0.6
+                      ? constraints.maxHeight *
+                          FullscreenMetrics.copyHeightFractionWithImage
                       : constraints.maxHeight,
                 ),
                 child: SingleChildScrollView(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                    padding: FullscreenMetrics.contentPadding,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -178,7 +180,9 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
                         if (message.header != null)
                           Padding(
                             padding: EdgeInsets.only(
-                                bottom: message.body != null ? 12 : 0),
+                                bottom: message.body != null
+                                    ? FullscreenMetrics.headerToBodySpacing
+                                    : 0),
                             child: Text(
                               message.header!,
                               key: const Key('gb_iam_fullscreen_header'),
@@ -199,7 +203,7 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
                           ),
                         if (message.buttons.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(top: 28),
+                            padding: FullscreenMetrics.buttonsPadding,
                             child: _buttons(stretch: true),
                           ),
                       ],
@@ -227,7 +231,9 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
         for (final button in message.buttons)
           Padding(
             padding: EdgeInsets.only(
-              top: button == message.buttons.first ? 0 : 12,
+              top: button == message.buttons.first
+                  ? 0
+                  : FullscreenMetrics.buttonSpacing,
             ),
             child: SizedBox(
               width: stretch ? double.infinity : null,
@@ -245,9 +251,10 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
       style: TextButton.styleFrom(
         backgroundColor: style.backgroundColor,
         foregroundColor: style.textColor,
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: FullscreenMetrics.buttonPadding,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius:
+              BorderRadius.circular(MessageMetrics.buttonCornerRadius),
           side: style.borderColor != null
               ? BorderSide(color: style.borderColor!)
               : BorderSide.none,
@@ -255,7 +262,9 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
       ),
       child: Text(
         button.text,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        style: const TextStyle(
+            fontSize: FullscreenMetrics.buttonFontSize,
+            fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -272,12 +281,12 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
     return Align(
       alignment: AlignmentDirectional.topEnd,
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: FullscreenMetrics.closePadding,
         child: DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: overArtwork && style.closeButtonColor == null
-                ? const Color(0x59000000)
+                ? MessageMetrics.closeDiscOverArtwork
                 : null,
           ),
           child: IconButton(
@@ -285,7 +294,7 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
             icon: const Icon(Icons.close),
             iconSize: 24,
             color: style.closeButtonColor ??
-                (overArtwork ? const Color(0xFFFFFFFF) : null),
+                (overArtwork ? MessageMetrics.closeGlyphOverArtwork : null),
             // Flutter's own localised string, so it is already correct in
             // every locale the host app ships — including Arabic. A literal
             // here would be the only untranslated word in the module.

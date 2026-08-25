@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
+import 'message_view_metrics.dart';
 import 'message_presenter.dart' show messageEntrance;
 
 /// The modal layout, covering both of Braze's modal variants.
@@ -42,13 +43,13 @@ class GameballInAppMessageModal extends StatelessWidget {
       child: _entrance(
         context,
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: ModalMetrics.margin,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: ModalMetrics.maxWidth),
             child: Material(
               key: const Key('gb_iam_surface'),
               color: style.backgroundColor ?? theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(ModalMetrics.cornerRadius),
               clipBehavior: Clip.antiAlias,
               child: Stack(
                 children: [
@@ -77,7 +78,7 @@ class GameballInAppMessageModal extends StatelessWidget {
                           if (_hasText || message.buttons.isNotEmpty)
                             Padding(
                               padding:
-                                  const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                                  ModalMetrics.contentPadding,
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -85,7 +86,9 @@ class GameballInAppMessageModal extends StatelessWidget {
                                   if (message.header != null)
                                     Padding(
                                       padding: EdgeInsets.only(
-                                          bottom: message.body != null ? 8 : 0),
+                                          bottom: message.body != null
+                                              ? ModalMetrics.headerToBodySpacing
+                                              : 0),
                                       child: Text(
                                         message.header!,
                                         key: const Key('gb_iam_header'),
@@ -161,19 +164,19 @@ class GameballInAppMessageModal extends StatelessWidget {
   Widget _closeButton(BuildContext context, GameballMessageStyle style) {
     final overArtwork = message.imageUrl != null;
     final glyphColour = style.closeButtonColor ??
-        (overArtwork ? const Color(0xFFFFFFFF) : null);
+        (overArtwork ? MessageMetrics.closeGlyphOverArtwork : null);
 
     // `end` rather than `right`: in Arabic the trailing corner is the left one,
     // and a close glyph pinned to the wrong corner reads as someone else's UI.
     return Positioned.directional(
       textDirection: Directionality.of(context),
-      top: 4,
-      end: 4,
+      top: ModalMetrics.closeInset,
+      end: ModalMetrics.closeInset,
       child: DecoratedBox(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: overArtwork && style.closeButtonColor == null
-              ? const Color(0x59000000)
+              ? MessageMetrics.closeDiscOverArtwork
               : null,
         ),
         child: IconButton(
@@ -222,7 +225,10 @@ class GameballInAppMessageModal extends StatelessWidget {
     // and only an unusually tall one letterboxes, where the alternative
     // (cropping) would be worse.
     final screenHeight = MediaQuery.sizeOf(context).height;
-    final maxHeight = screenHeight * (_hasText ? 0.4 : 0.65);
+    final maxHeight = screenHeight *
+        (_hasText
+            ? ModalMetrics.imageHeightFraction
+            : ModalMetrics.imageOnlyHeightFraction);
 
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
@@ -239,15 +245,15 @@ class GameballInAppMessageModal extends StatelessWidget {
   Widget _buttons(BuildContext context) {
     return Padding(
       key: const Key('gb_iam_buttons'),
-      padding: const EdgeInsets.only(top: 20),
+      padding: ModalMetrics.buttonsPadding,
       // Wrap, not Row. Two German or Arabic labels are wider than two English
       // ones and overflowed the card by 360 logical pixels; a second line is
       // always better than a clipped button. `spacing` also removes the
       // hand-rolled left padding, which put the gap on the wrong side in Arabic.
       child: Wrap(
         alignment: WrapAlignment.end,
-        spacing: 8,
-        runSpacing: 8,
+        spacing: ModalMetrics.buttonSpacing,
+        runSpacing: ModalMetrics.buttonSpacing,
         children: [
           for (final button in message.buttons) _button(context, button),
         ],
@@ -262,9 +268,10 @@ class GameballInAppMessageModal extends StatelessWidget {
       style: TextButton.styleFrom(
         backgroundColor: style.backgroundColor,
         foregroundColor: style.textColor,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        padding: ModalMetrics.buttonPadding,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius:
+              BorderRadius.circular(MessageMetrics.buttonCornerRadius),
           side: style.borderColor != null
               ? BorderSide(color: style.borderColor!)
               : BorderSide.none,

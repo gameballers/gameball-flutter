@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
+import 'message_view_metrics.dart';
 
 /// How long the banner takes to slide in and out.
 const Duration slideupTransition = Duration(milliseconds: 220);
@@ -79,9 +80,10 @@ class _GameballInAppMessageSlideupState
       child: Align(
         alignment: _fromTop ? Alignment.topCenter : Alignment.bottomCenter,
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: SlideupMetrics.margin,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints:
+                const BoxConstraints(maxWidth: SlideupMetrics.maxWidth),
             child: SlideTransition(
               position: Tween<Offset>(
                 begin: Offset(0, _fromTop ? -1 : 1),
@@ -101,15 +103,13 @@ class _GameballInAppMessageSlideupState
                 child: Material(
                   key: const Key('gb_iam_slideup_surface'),
                   color: style.backgroundColor ?? theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  elevation: 6,
+                  borderRadius:
+                      BorderRadius.circular(SlideupMetrics.cornerRadius),
+                  elevation: SlideupMetrics.elevation,
                   clipBehavior: Clip.antiAlias,
                   child: _wrapTappable(
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
+                      padding: SlideupMetrics.contentPadding,
                       child: Row(
                         children: [
                           if (message.iconUrl != null) _icon(message.iconUrl!),
@@ -125,7 +125,7 @@ class _GameballInAppMessageSlideupState
                               // Three lines then ellipsis, matching Braze. A
                               // banner that grows with its copy would eventually
                               // cover the screen it is meant not to block.
-                              maxLines: 3,
+                              maxLines: SlideupMetrics.maxTextLines,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium
                                   ?.copyWith(color: style.bodyColor),
@@ -134,7 +134,7 @@ class _GameballInAppMessageSlideupState
                           if (message.clickAction != null)
                             Padding(
                               padding:
-                                  const EdgeInsetsDirectional.only(start: 8),
+                                  SlideupMetrics.chevronSpacing,
                               child: Icon(
                                 // Flipped for Arabic: a right-pointing chevron
                                 // in a right-to-left layout points backwards,
@@ -142,7 +142,7 @@ class _GameballInAppMessageSlideupState
                                 Directionality.of(context) == TextDirection.rtl
                                     ? Icons.chevron_left
                                     : Icons.chevron_right,
-                                size: 20,
+                                size: SlideupMetrics.chevronSize,
                                 color: style.bodyColor ??
                                     theme.colorScheme.onSurfaceVariant,
                               ),
@@ -181,14 +181,14 @@ class _GameballInAppMessageSlideupState
     return Padding(
       // `end`, not `right`: the Row itself flips for Arabic, so a hard-coded
       // right margin would put the gap on the outside of the banner.
-      padding: const EdgeInsetsDirectional.only(end: 12),
+      padding: SlideupMetrics.iconSpacing,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(SlideupMetrics.iconCornerRadius),
         child: Image.network(
           url,
           key: const Key('gb_iam_slideup_icon'),
-          width: 40,
-          height: 40,
+          width: SlideupMetrics.iconSize,
+          height: SlideupMetrics.iconSize,
           fit: BoxFit.cover,
           // An icon that fails to load must not leave a gap where it would have
           // been, or every broken image shifts the copy.

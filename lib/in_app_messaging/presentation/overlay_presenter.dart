@@ -8,6 +8,7 @@ import 'in_app_message_fullscreen.dart';
 import 'in_app_message_modal.dart';
 import 'in_app_message_slideup.dart';
 import 'message_presenter.dart';
+import 'message_view_metrics.dart';
 
 /// Presents messages in an [OverlayEntry] above every route.
 ///
@@ -235,7 +236,7 @@ class _MessageLayer extends StatelessWidget {
             // out, so a tap outside must do nothing rather than nothing visible.
             onTap: message.dismissOnScrimTap ? onDismiss : null,
             child: ColoredBox(
-              color: message.style.scrimColor ?? const Color(0x99000000),
+              color: message.style.scrimColor ?? MessageMetrics.defaultScrim,
             ),
           ),
         ),
