@@ -24,11 +24,19 @@ const List<String> ltrLanguageCodes = [
 /// List of right-to-left (RTL) languages.
 const List<String> rtlLanguageCodes = ["ar"];
 
-/// Handles language selection based on global and preferred languages.
+/// Handles language selection, in priority order:
+/// 1. Explicit per-call [override] (e.g. passed to showProfile)
+/// 2. Customer preferred language ([preferredLang], set via CustomerAttributes)
+/// 3. Global preferred language ([globalLang], set during SDK init)
+/// 4. "en" if none of the above are valid
 ///
-/// Returns the selected language, which is either the preferred language,
-/// the global language, or "en" if both are invalid.
-String handleLanguage(String globalLang, String? preferredLang) {
+/// Returns the selected language.
+String handleLanguage(String globalLang, String? preferredLang, [String? override]) {
+  // Highest priority: explicit per-call override
+  if (!isNullOrEmpty(override) && override?.length == 2) {
+    return override!;
+  }
+
   String? lang = preferredLang;
   // If the preferred language is valid (not null, empty, or not 2 characters), use it.
   if (isNullOrEmpty(lang) || lang?.length != 2) {

@@ -40,6 +40,12 @@ class ShowProfileRequest {
   @JsonKey(name: "email")
   final String? email;
 
+  /// An optional 2-letter language code (e.g. "en", "ar") to use for this widget
+  /// presentation only. When not provided, falls back to the SDK's existing language
+  /// resolution (customer preferred language, then global preferred language, then "en").
+  @JsonKey(name: "lang")
+  final String? lang;
+
   /// Optional handler for links tagged gbExternalBrowser=true. When provided, the link is
   /// delegated to this callback instead of being opened by the SDK in the system browser.
   @JsonKey(includeToJson: false, includeFromJson: false)
@@ -62,6 +68,7 @@ class ShowProfileRequest {
     this.closeButtonColor,
     this.mobile,
     this.email,
+    this.lang,
     this.externalLinkCallback,
     this.widgetEventCallback,
   });
@@ -82,6 +89,7 @@ class ShowProfileRequest {
         closeButtonColor: json['closeButtonColor'] as String?,
         mobile: json['mobile'] as String?,
         email: json['email'] as String?,
+        lang: json['lang'] as String?,
       );
 }
 
@@ -97,6 +105,7 @@ class ShowProfileRequestBuilder {
   String? _closeButtonColor;
   String? _mobile;
   String? _email;
+  String? _lang;
   void Function(String url)? _externalLinkCallback;
   void Function(Map<String, dynamic>? event, Exception? error)? _widgetEventCallback;
 
@@ -148,6 +157,13 @@ class ShowProfileRequestBuilder {
     return this;
   }
 
+  /// Set the optional 2-letter language code (e.g. "en", "ar") to use for this widget
+  /// presentation only.
+  ShowProfileRequestBuilder lang(String? lang) {
+    _lang = lang;
+    return this;
+  }
+
   /// Set the optional handler for links tagged gbExternalBrowser=true.
   ShowProfileRequestBuilder externalLinkCallback(void Function(String url)? externalLinkCallback) {
     _externalLinkCallback = externalLinkCallback;
@@ -172,6 +188,7 @@ class ShowProfileRequestBuilder {
       closeButtonColor: _closeButtonColor,
       mobile: _mobile,
       email: _email,
+      lang: _lang,
       externalLinkCallback: _externalLinkCallback,
       widgetEventCallback: _widgetEventCallback,
     );
