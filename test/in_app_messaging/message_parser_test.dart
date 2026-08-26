@@ -291,6 +291,31 @@ void main() {
       expect(m.dismissOnScrimTap, isTrue);
     });
 
+    test('swipe on a fullscreen campaign is promoted to both', () {
+      // A fullscreen message has no scrim to tap and no swipe gesture of its
+      // own, so suppressing the close glyph leaves only the system back
+      // gesture — which exists on Android and does not exist on iOS. Unless the
+      // campaign also set autoDismissSeconds the message is unclosable, so the
+      // parser refuses to produce it, exactly as it already refuses an
+      // undismissable modal.
+      final m = one(minimal(content: '{"closeBehaviour":"swipe"}')
+          .replaceFirst('"messageType": 2', '"messageType": 3'))!.message;
+
+      expect(m.type, GameballMessageType.fullscreen);
+      expect(m.showCloseButton, isTrue,
+          reason: 'the glyph is the only exit a fullscreen message has');
+      expect(m.dismissOnScrimTap, isTrue);
+    });
+
+    test('swipe on a modal still suppresses only the glyph', () {
+      // The modal keeps its scrim, so swipe remains a usable instruction there.
+      final m = one(minimal(content: '{"closeBehaviour":"swipe"}'))!.message;
+
+      expect(m.type, GameballMessageType.modal);
+      expect(m.showCloseButton, isFalse);
+      expect(m.dismissOnScrimTap, isTrue);
+    });
+
     test('an absent or unknown value offers both', () {
       expect(one(minimal())!.message.showCloseButton, isTrue);
       final unknown =

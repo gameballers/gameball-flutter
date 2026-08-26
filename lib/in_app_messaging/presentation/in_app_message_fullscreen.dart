@@ -36,7 +36,17 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
   /// set a message-level action.
   final VoidCallback onMessagePressed;
 
-  bool get _imageOnly => message.layout == GameballMessageLayout.imageOnly;
+  /// Whether to draw the full-bleed composition.
+  ///
+  /// Requires artwork as well as the declared layout. This composition renders
+  /// the image and the buttons and nothing else, so a campaign that asks for
+  /// image-only and supplies no image would otherwise show bare background with
+  /// its copy silently dropped — and still log an impression. Falling back to
+  /// the stacked composition is the one case where overriding the declared
+  /// layout is right, because the alternative is a blank screen.
+  bool get _imageOnly =>
+      message.layout == GameballMessageLayout.imageOnly &&
+      message.imageUrl != null;
 
   @override
   Widget build(BuildContext context) {
@@ -141,35 +151,34 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (hasImage)
-                Expanded(
+                SizedBox(
+                  // A fixed share, not the slack the copy leaves. Sized by
+                  // subtraction the image inherited whatever ratio was left
+                  // over and letterboxed whenever that did not match the
+                  // artwork — 35 of background either side of the live portrait
+                  // poster on a 390-wide screen. Braze pins its fullscreen
+                  // image to half the content height for the same reason.
+                  height: constraints.maxHeight *
+                      FullscreenMetrics.imageHeightFraction,
                   child: Image.network(
                     message.imageUrl!,
                     key: const Key('gb_iam_fullscreen_image'),
-                    // Contain, unlike the image-only variant above. There the
-                    // artwork *is* the message and bleeding to every edge is
-                    // the point; here it shares the screen with copy, so
-                    // cropping buys nothing and costs whatever the designer
-                    // baked into the top and bottom of the image — which for a
-                    // promo is usually the offer itself. The modal already
-                    // reasons this way, and the same campaign artwork should
-                    // not be whole in one type and sliced in the other.
-                    fit: BoxFit.contain,
+                    // Cover, as in the image-only variant and as in both
+                    // references — Braze crops to its fixed half-screen,
+                    // CleverTap to the whole screen. A stacked fullscreen reads
+                    // as a poster with copy beneath it rather than a framed
+                    // picture, and bars break that reading.
+                    fit: BoxFit.cover,
                     width: double.infinity,
                     errorBuilder: (context, error, stackTrace) =>
                         const SizedBox.shrink(),
                   ),
                 ),
-              ConstrainedBox(
-                // Copy may claim at most 60% of the height when it shares the
-                // screen with artwork, and all of it when it does not. Either
-                // way it scrolls past that rather than overflowing, so the
-                // buttons underneath stay on screen and reachable.
-                constraints: BoxConstraints(
-                  maxHeight: hasImage
-                      ? constraints.maxHeight *
-                          FullscreenMetrics.copyHeightFractionWithImage
-                      : constraints.maxHeight,
-                ),
+              // Expanded when there is artwork, so the copy takes the rest
+              // exactly and the buttons land at the bottom; Flexible when there
+              // is not, so the block can centre in a screen it does not fill.
+              _flex(
+                expand: hasImage,
                 child: SingleChildScrollView(
                   child: Padding(
                     padding: FullscreenMetrics.contentPadding,
@@ -201,22 +210,27 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
                             style: theme.textTheme.bodyLarge
                                 ?.copyWith(color: style.bodyColor),
                           ),
-                        if (message.buttons.isNotEmpty)
-                          Padding(
-                            padding: FullscreenMetrics.buttonsPadding,
-                            child: _buttons(stretch: true),
-                          ),
                       ],
                     ),
                   ),
                 ),
               ),
+              if (message.buttons.isNotEmpty)
+                Padding(
+                  padding: FullscreenMetrics.buttonsPadding,
+                  child: _buttons(stretch: true),
+                ),
             ],
           ),
         ),
       ),
     );
   }
+
+  /// [Expanded] or [Flexible] around the copy, depending on whether artwork is
+  /// taking its fixed share above it.
+  Widget _flex({required bool expand, required Widget child}) =>
+      expand ? Expanded(child: child) : Flexible(child: child);
 
   /// Buttons stacked full-width rather than in a right-aligned row.
   ///
@@ -269,38 +283,31 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
     );
   }
 
-  /// The close affordance, kept legible over anything behind it.
+  /// The close affordance, coloured to stay legible on the surface.
   ///
-  /// Always over artwork in the image-only variant, and usually over it in the
-  /// other, so it defaults to a light glyph on a scrim disc unless the campaign
-  /// named a colour. A dark glyph on a dark photograph is invisible.
+  /// No disc behind it. [resolveCloseGlyphColor] derives the colour from the
+  /// message background, which is what sits behind the glyph in the stacked
+  /// composition. Over a full-bleed image the background is not what is behind
+  /// it, so that is the case a campaign should name `closeButton` for.
   Widget _closeButton(BuildContext context, GameballMessageStyle style) {
-    final overArtwork = message.imageUrl != null;
-
     // `topEnd`, not `topRight`: in Arabic the trailing corner is the left one.
     return Align(
       alignment: AlignmentDirectional.topEnd,
       child: Padding(
         padding: FullscreenMetrics.closePadding,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: overArtwork && style.closeButtonColor == null
-                ? MessageMetrics.closeDiscOverArtwork
-                : null,
+        child: IconButton(
+          key: const Key('gb_iam_fullscreen_close'),
+          icon: const Icon(Icons.close),
+          iconSize: MessageMetrics.closeGlyphSize,
+          color: resolveCloseGlyphColor(
+            campaignColor: style.closeButtonColor,
+            backgroundColor: style.backgroundColor,
           ),
-          child: IconButton(
-            key: const Key('gb_iam_fullscreen_close'),
-            icon: const Icon(Icons.close),
-            iconSize: 24,
-            color: style.closeButtonColor ??
-                (overArtwork ? MessageMetrics.closeGlyphOverArtwork : null),
-            // Flutter's own localised string, so it is already correct in
-            // every locale the host app ships — including Arabic. A literal
-            // here would be the only untranslated word in the module.
-            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-            onPressed: onClosePressed,
-          ),
+          // Flutter's own localised string, so it is already correct in
+          // every locale the host app ships — including Arabic. A literal
+          // here would be the only untranslated word in the module.
+          tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+          onPressed: onClosePressed,
         ),
       ),
     );

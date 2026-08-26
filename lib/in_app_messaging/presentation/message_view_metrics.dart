@@ -18,6 +18,12 @@
 /// and iOS caps a slideup's container where this clamps its text
 /// ([SlideupMetrics.maxTextLines]). Both are flagged where they are declared.
 ///
+/// The close glyph is the one appearance rule here that is computed rather than
+/// declared — [resolveCloseGlyphColor] at the bottom of this file. It is kept
+/// alongside the constants because a port that reimplements it differently
+/// produces a control the customer cannot see, which is the failure this whole
+/// group exists to prevent.
+///
 /// A value here that is load-bearing rather than cosmetic says so on its own
 /// doc comment — those are contract, and a port that changes them changes
 /// behaviour, not appearance.
@@ -32,18 +38,33 @@ abstract final class MessageMetrics {
   /// The dimmed layer behind a modal, when the campaign names no scrim colour.
   static const Color defaultScrim = Color(0x99000000);
 
-  /// Glyph colour for a close button drawn over artwork, when the campaign
-  /// names none.
+  /// Close glyph for a light message surface, when the campaign names none.
   ///
-  /// Load-bearing: a close button over an unknown photograph needs a colour that
-  /// cannot vanish into it. See the disc below.
-  static const Color closeGlyphOverArtwork = Color(0xFFFFFFFF);
+  /// Load-bearing, and only half of a pair — see [resolveCloseGlyphColor].
+  /// Neither value is safe on its own: this one measures 1.6:1 against the
+  /// live slideup background, which is why the choice is derived rather than
+  /// defaulted.
+  static const Color closeGlyphOnLight = Color(0xFF111827);
 
-  /// The disc drawn behind a close glyph that sits over artwork.
+  /// Close glyph for a dark message surface, when the campaign names none.
+  static const Color closeGlyphOnDark = Color(0xFFFFFFFF);
+
+  /// Relative luminance at which [closeGlyphOnLight] and [closeGlyphOnDark]
+  /// change places.
   ///
-  /// Only applied when the campaign named no close-button colour — if it named
-  /// one, it is used directly and no disc is drawn.
-  static const Color closeDiscOverArtwork = Color(0x59000000);
+  /// 0.179 is where black and white give identical contrast against the same
+  /// background — 4.58:1 each — so picking either side of it is picking the
+  /// better of the two, always. Not a taste value: moving it makes one glyph
+  /// win a background the other reads better on.
+  static const double closeGlyphLuminanceThreshold = 0.179;
+
+  /// Size of the close glyph, on every type that draws one.
+  ///
+  /// One number rather than two. It was 20 on a modal and 24 on fullscreen, and
+  /// nothing about a modal argues for a smaller control — 24 in a 48 hit target
+  /// is the same proportion CleverTap uses. Kept separate from the hit target,
+  /// which stays 48 everywhere and is the accessibility floor on both platforms.
+  static const double closeGlyphSize = 24;
 
   /// Corner radius of a message button, on every type.
   static const double buttonCornerRadius = 8;
@@ -59,15 +80,15 @@ abstract final class ModalMetrics {
 
   static const double cornerRadius = 16;
 
-  /// Around the text block and buttons. Bottom is tighter because the button
-  /// row carries its own top padding.
-  static const EdgeInsets contentPadding = EdgeInsets.fromLTRB(20, 20, 20, 16);
+  /// Around the text block. No bottom inset: the button block below carries its
+  /// own, and the two are separate children now that only the copy scrolls.
+  static const EdgeInsets contentPadding = EdgeInsets.fromLTRB(20, 20, 20, 0);
 
   /// Between the header and the body, applied only when both are present.
   static const double headerToBodySpacing = 8;
 
-  /// Above the button row.
-  static const EdgeInsets buttonsPadding = EdgeInsets.only(top: 20);
+  /// Around the button block, which sits outside the scrolling copy.
+  static const EdgeInsets buttonsPadding = EdgeInsets.fromLTRB(20, 20, 20, 16);
 
   /// Between buttons, and between wrapped rows of them.
   static const double buttonSpacing = 8;
@@ -75,21 +96,39 @@ abstract final class ModalMetrics {
   static const EdgeInsets buttonPadding =
       EdgeInsets.symmetric(horizontal: 20, vertical: 12);
 
+  /// Around the buttons floated over a full-bleed image, in the image-only
+  /// layout. Narrower than the fullscreen equivalent because a card is
+  /// narrower, and it reuses the card's own 20 so the two compositions line up.
+  static const EdgeInsets imageOnlyButtonsPadding =
+      EdgeInsets.fromLTRB(20, 0, 20, 20);
+
   /// Inset of the close glyph from the card's top trailing corner.
   static const double closeInset = 4;
 
-  /// How much of the screen's height the artwork may occupy.
+  /// The tallest artwork that still fills the card's width without bars.
   ///
-  /// **A mechanism, not a number** — iOS gives the modal image a fixed height
-  /// instead, so on a tall phone the two differ by roughly a factor of two for
-  /// the same campaign. Whichever survives reconciliation, changing this to a
-  /// fixed height is a rewrite of `_image`, not an edit here.
+  /// Expressed as an **aspect ratio, not a fraction of the screen** — that is
+  /// the whole point. The previous rule capped the image at 40% of screen
+  /// height while the card's width came from screen width, so the ratio at
+  /// which bars appeared slid with the device: 1.013 on a tall phone, 1.226 on
+  /// a short one. The same square image was clean on one and letterboxed on the
+  /// other, which nobody chose and no marketer could preview.
   ///
-  /// Proportional rather than fixed because a fixed band letterboxes a square
-  /// image — lossless, but the bars read as a bug. At these fractions a square
-  /// or landscape banner fills the card's width exactly, and only an unusually
-  /// tall one letterboxes, where the alternative (cropping) would be worse.
-  static const double imageHeightFraction = 0.4;
+  /// Against a ratio the crossover is the same number everywhere. At 0.55
+  /// nothing a campaign realistically ships letterboxes — the live 3:5 poster
+  /// included — which is Braze's outcome, reached without their cost: they
+  /// impose no cap at all, so a portrait poster grows the card until the copy
+  /// is crushed into a 23-point sliver.
+  static const double minImageRatio = 0.55;
+
+  /// Height always kept for the copy and buttons, whatever the artwork wants.
+  ///
+  /// Roughly one line of copy plus a button block. Braze has no equivalent and
+  /// relies on a required aspect constraint winning, which on a small screen
+  /// means a broken constraint rather than a considered outcome. This bars the
+  /// image slightly on a genuinely cramped device instead — the one place bars
+  /// remain, and the better failure.
+  static const double copyReserve = 120;
 
   /// The same, for an image-only modal where the artwork is the whole message.
   static const double imageOnlyHeightFraction = 0.65;
@@ -139,8 +178,21 @@ abstract final class SlideupMetrics {
 
 /// Fullscreen: edge to edge, covering the app.
 abstract final class FullscreenMetrics {
-  /// Around the copy and the buttons in the stacked composition.
-  static const EdgeInsets contentPadding = EdgeInsets.fromLTRB(24, 24, 24, 24);
+  /// Around the scrolling copy in the stacked composition. No bottom inset:
+  /// the button block below carries its own.
+  static const EdgeInsets contentPadding = EdgeInsets.fromLTRB(24, 24, 24, 0);
+
+  /// How much of the available height the artwork takes in the stacked
+  /// composition.
+  ///
+  /// A fixed share, not "whatever the copy leaves". Braze pins its fullscreen
+  /// image to exactly half the content height with a required constraint, and
+  /// the reason is the same one that drove the modal: an image sized by
+  /// subtraction lands on whatever ratio is left over and letterboxes when that
+  /// does not match the artwork. Half of the *safe* area rather than half the
+  /// screen, because we keep the stack inside it where Braze hides the status
+  /// bar instead.
+  static const double imageHeightFraction = 0.5;
 
   /// Around the buttons floated over a full-bleed image.
   static const EdgeInsets imageOnlyButtonsPadding =
@@ -149,8 +201,8 @@ abstract final class FullscreenMetrics {
   /// Between the header and the body, applied only when both are present.
   static const double headerToBodySpacing = 12;
 
-  /// Above the button stack.
-  static const EdgeInsets buttonsPadding = EdgeInsets.only(top: 28);
+  /// Around the button block, which sits outside the scrolling copy.
+  static const EdgeInsets buttonsPadding = EdgeInsets.fromLTRB(24, 28, 24, 24);
 
   /// Between stacked buttons.
   static const double buttonSpacing = 12;
@@ -162,10 +214,43 @@ abstract final class FullscreenMetrics {
   /// Inset of the close glyph, inside the safe area.
   static const EdgeInsets closePadding = EdgeInsets.all(8);
 
-  /// How much of the height the copy may claim when it shares the screen with
-  /// artwork. It scrolls past this rather than overflowing.
+  /// The copy takes what the artwork does not, and scrolls inside it.
   ///
-  /// Load-bearing: clipping removes the buttons first, which is the one part of
-  /// the message that has to stay reachable.
-  static const double copyHeightFractionWithImage = 0.6;
+  /// There is no separate cap any more: with the image on a fixed share, the
+  /// remainder *is* the copy's bound. Load-bearing all the same — the buttons
+  /// sit outside the scroll view, so copy can never push them off.
+}
+
+/// The colour to paint a close glyph, or null to let the host's theme decide.
+///
+/// Three cases, in order:
+///
+/// 1. The campaign named a colour — use it verbatim, readable or not. It asked
+///    for exactly this, and quietly substituting something else is how a brand
+///    colour becomes a colour nobody chose.
+/// 2. The campaign named a message background — derive the half of the pair
+///    that contrasts with it. Worst case, at the threshold itself, is 3.8:1,
+///    which clears the 3:1 that WCAG 2.1 asks of a non-text control.
+/// 3. Neither — return null and let the platform's own on-surface colour apply.
+///    Material already guarantees that contrasts with the surface it sits on,
+///    so computing our own would be second-guessing a solved problem.
+///
+/// Deliberately **not** a function of whether the message has artwork. That was
+/// the previous rule and it was wrong twice over: a contained portrait image
+/// letterboxes, so the glyph often sits on card background while the message
+/// does have an image; and it made naming a close colour switch off the
+/// contrast treatment, so the one field a marketer is most likely to touch was
+/// the one that could hide the control.
+///
+/// Over full-bleed artwork the background is not what is behind the glyph, so
+/// the derived answer there is a reasonable guess rather than a guarantee —
+/// which is the case a campaign should name a colour for, and the case Braze
+/// leaves to the marketer too.
+Color? resolveCloseGlyphColor({Color? campaignColor, Color? backgroundColor}) {
+  if (campaignColor != null) return campaignColor;
+  if (backgroundColor == null) return null;
+  return backgroundColor.computeLuminance() >
+          MessageMetrics.closeGlyphLuminanceThreshold
+      ? MessageMetrics.closeGlyphOnLight
+      : MessageMetrics.closeGlyphOnDark;
 }

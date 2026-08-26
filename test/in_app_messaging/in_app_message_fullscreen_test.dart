@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/in_app_message_fullscreen.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/message_view_metrics.dart';
 
 GameballInAppMessage fullscreen({
   GameballMessageLayout layout = GameballMessageLayout.textWithImage,
@@ -85,17 +86,62 @@ void main() {
           reason: 'a fullscreen call to action fills the width; the modal row '
               'would look lost here');
     });
-    testWidgets('shows the whole artwork rather than cropping it',
-        (tester) async {
+    testWidgets('fills the width rather than letterboxing', (tester) async {
+      // Was `contain`, which barred a portrait poster by 35 either side on a
+      // 390-wide screen. Both references crop in fullscreen — Braze to a fixed
+      // half-screen, CleverTap to the whole screen — and a stacked fullscreen
+      // reads as a poster with copy under it, not as a framed picture.
       await pump(tester, fullscreen());
 
       final image = tester
           .widget<Image>(find.byKey(const Key('gb_iam_fullscreen_image')));
-      expect(image.fit, BoxFit.contain,
-          reason: 'here the image shares the screen with copy instead of '
-              'bleeding to the edges, and promotional artwork usually has text '
-              'baked into it — cropping deletes the offer. The modal already '
-              'reasons this way; the two must not treat one image differently');
+      expect(image.fit, BoxFit.cover);
+      expect(image.width, double.infinity,
+          reason: 'anything narrower leaves message background at the sides, '
+              'which is the bars by another name');
+    });
+
+    testWidgets('takes exactly half the available height', (tester) async {
+      // Braze pins its fullscreen image to half the content height with a
+      // required constraint rather than letting it absorb slack. Half of the
+      // *safe* area here rather than half the screen, because we keep the
+      // stack inside the safe area where Braze hides the status bar.
+      const surface = Size(390, 844);
+      await pump(tester, fullscreen(), surface: surface);
+
+      final box = tester.widget<SizedBox>(find.ancestor(
+        of: find.byKey(const Key('gb_iam_fullscreen_image')),
+        matching: find.byType(SizedBox),
+      ).first);
+
+      expect(box.height,
+          closeTo(surface.height * FullscreenMetrics.imageHeightFraction, 0.5));
+    });
+
+    testWidgets('the buttons sit outside the scrolling copy', (tester) async {
+      // The same structural fix the modal got. With everything in one scroll
+      // view, long copy pushed the call to action below the fold.
+      await pump(tester, fullscreen());
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_fullscreen_buttons')),
+          matching: find.byType(SingleChildScrollView),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('the copy scrolls in what the artwork leaves', (tester) async {
+      await pump(tester, fullscreen());
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_fullscreen_body')),
+          matching: find.byType(SingleChildScrollView),
+        ),
+        findsOneWidget,
+      );
     });
   });
 
@@ -153,17 +199,51 @@ void main() {
       expect(h.log, ['close']);
     });
 
-    testWidgets('gets a scrim disc when it sits over artwork', (tester) async {
+    testWidgets('uses the shared glyph size', (tester) async {
       await pump(tester, fullscreen());
 
-      final decorated = tester.widget<DecoratedBox>(find.ancestor(
+      final button = tester.widget<IconButton>(
+          find.byKey(const Key('gb_iam_fullscreen_close')));
+      expect(button.iconSize, MessageMetrics.closeGlyphSize);
+    });
+
+    testWidgets('draws no disc behind the glyph', (tester) async {
+      await pump(tester, fullscreen());
+
+      final circles = tester.widgetList<DecoratedBox>(find.ancestor(
         of: find.byKey(const Key('gb_iam_fullscreen_close')),
         matching: find.byType(DecoratedBox),
-      ).first);
-      final decoration = decorated.decoration as BoxDecoration;
+      )).where((box) {
+        final decoration = box.decoration;
+        return decoration is BoxDecoration &&
+            decoration.shape == BoxShape.circle;
+      });
 
-      expect(decoration.color, isNotNull,
-          reason: 'a dark glyph on a dark photograph is invisible');
+      expect(circles, isEmpty);
+    });
+
+    testWidgets('derives its colour from the message background',
+        (tester) async {
+      await pump(tester, fullscreen(
+        style: const GameballMessageStyle(backgroundColor: Color(0xFF111827)),
+      ));
+
+      final icon = tester.widget<IconButton>(
+          find.byKey(const Key('gb_iam_fullscreen_close')));
+      expect(icon.color, MessageMetrics.closeGlyphOnDark);
+    });
+
+    testWidgets('image_only with no artwork falls back to the stack',
+        (tester) async {
+      // Otherwise this renders bare background plus buttons, drops the copy
+      // silently, and still logs an impression. The modal already guards it.
+      await pump(tester, fullscreen(
+        layout: GameballMessageLayout.imageOnly,
+        imageUrl: null,
+      ));
+
+      expect(find.byKey(const Key('gb_iam_fullscreen_header')), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_fullscreen_body')), findsOneWidget);
     });
 
     testWidgets('can be omitted', (tester) async {

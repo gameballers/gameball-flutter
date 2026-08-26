@@ -339,7 +339,7 @@ GameballInAppMessage? _parseMessage(
   }
 
   final autoSeconds = _asNum(content['autoDismissSeconds']);
-  final close = _parseCloseBehaviour(content['closeBehaviour'], label);
+  final close = _parseCloseBehaviour(content['closeBehaviour'], type, label);
 
   // Absent, not zero. Zero is an author saying "stay until dismissed", and
   // reinstating a timer they turned off would be overriding intent rather than
@@ -449,15 +449,30 @@ GameballSlidePosition _parseSlidePosition(Object? value, String label) {
 /// How the message may be closed.
 ///
 /// Defaults to offering both, and refuses to produce a message offering neither —
-/// an undismissable modal traps the user in the app.
+/// an undismissable message traps the user in the app.
+///
+/// The type matters for exactly one combination. `swipe` means "no close glyph,
+/// dismiss by tapping outside", which a modal can honour because it has a scrim.
+/// A fullscreen message has no scrim and no swipe gesture of its own, so the
+/// same instruction leaves only the system back gesture — which exists on
+/// Android and does not exist on iOS. Unless the campaign also set
+/// `autoDismissSeconds` the result is unclosable, so it is promoted rather than
+/// obeyed.
 ({bool showCloseButton, bool dismissOnScrimTap}) _parseCloseBehaviour(
   Object? value,
+  GameballMessageType type,
   String label,
 ) {
   switch (_asString(value)?.toLowerCase()) {
     case 'button':
       return (showCloseButton: true, dismissOnScrimTap: false);
     case 'swipe':
+      if (type == GameballMessageType.fullscreen) {
+        iamLog('campaign $label: closeBehaviour "swipe" on a fullscreen '
+            'message would leave no way out on iOS — there is no scrim to tap '
+            'and no swipe gesture. Offering the close button as well');
+        return (showCloseButton: true, dismissOnScrimTap: true);
+      }
       return (showCloseButton: false, dismissOnScrimTap: true);
     case 'both':
     case null:

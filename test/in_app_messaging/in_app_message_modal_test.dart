@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/presentation/in_app_message_modal.dart';
+import 'package:gameball_sdk/in_app_messaging/presentation/message_view_metrics.dart';
 
 GameballInAppMessage message({
+  GameballMessageLayout layout = GameballMessageLayout.textWithImage,
   String? body = 'body text',
   String? header,
   String? imageUrl,
@@ -15,6 +17,7 @@ GameballInAppMessage message({
   return GameballInAppMessage(
     id: 'msg',
     type: GameballMessageType.modal,
+    layout: layout,
     body: body,
     header: header,
     imageUrl: imageUrl,
@@ -134,56 +137,108 @@ void main() {
   });
 
   group('close button legibility', () {
-    testWidgets('over artwork it gets a scrim disc and a light glyph',
-        (tester) async {
+    Color? glyph(WidgetTester tester) =>
+        tester.widget<IconButton>(find.byKey(const Key('gb_iam_close'))).color;
+
+    Iterable<DecoratedBox> discs(WidgetTester tester) =>
+        tester.widgetList<DecoratedBox>(find.ancestor(
+          of: find.byKey(const Key('gb_iam_close')),
+          matching: find.byType(DecoratedBox),
+        )).where((box) {
+          final decoration = box.decoration;
+          return decoration is BoxDecoration &&
+              decoration.shape == BoxShape.circle;
+        });
+
+    testWidgets('draws no disc, even over artwork', (tester) async {
       await pump(tester, message(imageUrl: 'https://example.com/dark.png'));
 
-      final icon = tester.widget<IconButton>(find.byKey(const Key('gb_iam_close')));
-      expect(icon.color, const Color(0xFFFFFFFF),
-          reason: 'a dark glyph on a dark photograph is invisible');
-
-      final disc = tester.widget<DecoratedBox>(
-        find.ancestor(
-          of: find.byKey(const Key('gb_iam_close')),
-          matching: find.byType(DecoratedBox),
-        ).first,
-      );
-      expect((disc.decoration as BoxDecoration).color, isNotNull);
+      expect(discs(tester), isEmpty,
+          reason: 'legibility comes from the derived glyph colour now, not '
+              'from a scrim behind it');
     });
 
-    testWidgets('over the plain surface it needs no disc', (tester) async {
+    testWidgets('uses the same glyph size as fullscreen', (tester) async {
+      // Was 20 on a modal and 24 on fullscreen. Nothing about a modal argues
+      // for a smaller control, and one number is one fewer thing for four
+      // platforms to get differently.
       await pump(tester, message());
 
-      final disc = tester.widget<DecoratedBox>(
-        find.ancestor(
-          of: find.byKey(const Key('gb_iam_close')),
-          matching: find.byType(DecoratedBox),
-        ).first,
-      );
-      expect((disc.decoration as BoxDecoration).color, isNull);
+      final button =
+          tester.widget<IconButton>(find.byKey(const Key('gb_iam_close')));
+      expect(button.iconSize, MessageMetrics.closeGlyphSize);
     });
 
-    testWidgets('a campaign colour always wins', (tester) async {
+    testWidgets('a light card takes a dark glyph', (tester) async {
       await pump(tester, message(
-        imageUrl: 'https://example.com/dark.png',
-        style: const GameballMessageStyle(closeButtonColor: Color(0xFFFF0000)),
+        style: const GameballMessageStyle(backgroundColor: Color(0xFFFFFFFF)),
       ));
 
-      final icon = tester.widget<IconButton>(find.byKey(const Key('gb_iam_close')));
-      expect(icon.color, const Color(0xFFFF0000));
+      expect(glyph(tester), MessageMetrics.closeGlyphOnLight);
+    });
 
-      final disc = tester.widget<DecoratedBox>(
-        find.ancestor(
-          of: find.byKey(const Key('gb_iam_close')),
-          matching: find.byType(DecoratedBox),
-        ).first,
-      );
-      expect((disc.decoration as BoxDecoration).color, isNull,
-          reason: 'the campaign chose a colour, so do not second-guess it');
+    testWidgets('a dark card takes a light glyph', (tester) async {
+      await pump(tester, message(
+        style: const GameballMessageStyle(backgroundColor: Color(0xFF111827)),
+      ));
+
+      expect(glyph(tester), MessageMetrics.closeGlyphOnDark);
+    });
+
+    testWidgets('artwork does not change the derivation', (tester) async {
+      // The regression this replaces. A contained portrait image letterboxes,
+      // so the glyph lands on card background rather than on the artwork —
+      // and keying the colour off "this message has an image" painted a white
+      // glyph onto a white card. Three live campaigns were exactly that.
+      await pump(tester, message(
+        imageUrl: 'https://example.com/portrait.png',
+        style: const GameballMessageStyle(backgroundColor: Color(0xFFFFFFFF)),
+      ));
+
+      expect(glyph(tester), MessageMetrics.closeGlyphOnLight);
+    });
+
+    testWidgets('a campaign colour wins', (tester) async {
+      await pump(tester, message(
+        imageUrl: 'https://example.com/dark.png',
+        style: const GameballMessageStyle(
+          backgroundColor: Color(0xFFFFFFFF),
+          closeButtonColor: Color(0xFFFF0000),
+        ),
+      ));
+
+      expect(glyph(tester), const Color(0xFFFF0000));
+    });
+
+    testWidgets('with no background it defers to the host theme',
+        (tester) async {
+      await pump(tester, message());
+
+      expect(glyph(tester), isNull,
+          reason: 'null lets IconButton take the theme colour, which Material '
+              'already guarantees contrasts with its own surface');
     });
   });
 
   group('image sizing', () {
+    Future<void> pumpOn(WidgetTester tester, Size surface,
+        GameballInAppMessage m) async {
+      await tester.binding.setSurfaceSize(surface);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await pump(tester, m);
+    }
+
+    double imageCap(WidgetTester tester) => tester
+        .widget<ConstrainedBox>(find.ancestor(
+          of: find.byKey(const Key('gb_iam_image')),
+          matching: find.byType(ConstrainedBox),
+        ).first)
+        .constraints
+        .maxHeight;
+
+    double cardWidth(WidgetTester tester) =>
+        tester.getSize(find.byKey(const Key('gb_iam_surface'))).width;
+
     testWidgets('never crops — the image is fitted, not covered', (tester) async {
       await pump(tester, message(imageUrl: 'https://example.com/a.png'));
 
@@ -194,39 +249,128 @@ void main() {
           reason: 'height comes from the image aspect ratio, not a fixed band');
     });
 
-    testWidgets('a banner above copy is capped modestly', (tester) async {
-      await pump(tester, message(
-        body: 'text alongside',
-        imageUrl: 'https://example.com/a.png',
-      ));
+    testWidgets('the bar threshold is a shape, identical on every device',
+        (tester) async {
+      // The rule this replaces capped the image at 40% of screen height while
+      // the card's width came from screen width, so the ratio at which bars
+      // appeared slid with the device — 1.013 on a tall phone, 1.226 on a short
+      // one, and the same square image was clean on one and barred on the
+      // other. Against a ratio it is one number everywhere.
+      for (final surface in const [Size(390, 844), Size(414, 896)]) {
+        await pumpOn(tester, surface, message(
+          body: 'text alongside',
+          imageUrl: 'https://example.com/a.png',
+        ));
 
-      final box = tester.widget<ConstrainedBox>(
-        find.ancestor(
-          of: find.byKey(const Key('gb_iam_image')),
-          matching: find.byType(ConstrainedBox),
-        ).first,
-      );
-      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
-      expect(box.constraints.maxHeight, closeTo(screenHeight * 0.4, 0.5),
-          reason: 'proportional, so a square banner fills the width rather than '
-              'letterboxing inside a fixed band');
+        expect(
+          imageCap(tester) / cardWidth(tester),
+          closeTo(1 / ModalMetrics.minImageRatio, 0.01),
+          reason: 'on $surface the threshold must still be '
+              '${ModalMetrics.minImageRatio}',
+        );
+      }
     });
 
-    testWidgets('an image-only message gets most of the screen', (tester) async {
-      await pump(tester, message(
+    testWidgets('a portrait poster fills the card width without bars',
+        (tester) async {
+      // The live campaign artwork is 384x640 — ratio 0.60. Under the old cap it
+      // painted 203 wide inside a 342 card and left 70 of background either
+      // side. It must now fit under the cap, which is what "no bars" means.
+      await pumpOn(tester, const Size(390, 844), message(
+        body: 'text alongside',
+        imageUrl: 'https://example.com/poster.png',
+      ));
+
+      const liveArtworkRatio = 0.6;
+      expect(
+        cardWidth(tester) / liveArtworkRatio,
+        lessThanOrEqualTo(imageCap(tester)),
+        reason: 'the poster at full card width is shorter than the cap, so it '
+            'is never clamped and never letterboxed',
+      );
+    });
+
+    testWidgets('artwork can never squeeze out the copy and buttons',
+        (tester) async {
+      // Braze has no equivalent guard: its aspect constraint simply wins, which
+      // on a cramped screen means a broken constraint rather than a decision.
+      const surface = Size(360, 640);
+      await pumpOn(tester, surface, message(
+        body: 'text alongside',
+        imageUrl: 'https://example.com/tall.png',
+        buttons: const [
+          GameballMessageButton(
+            id: 'b', text: 'Go', action: GameballDismissAction()),
+        ],
+      ));
+
+      final available = surface.height - ModalMetrics.margin.vertical;
+      expect(
+        imageCap(tester),
+        closeTo(available - ModalMetrics.copyReserve, 0.5),
+        reason: 'on a short screen the reserve binds before the shape does',
+      );
+    });
+
+    testWidgets('with nothing below it, the artwork keeps the whole card',
+        (tester) async {
+      await pumpOn(tester, const Size(390, 844), message(
         body: null,
         imageUrl: 'https://example.com/promo.png',
       ));
 
-      final box = tester.widget<ConstrainedBox>(
-        find.ancestor(
-          of: find.byKey(const Key('gb_iam_image')),
-          matching: find.byType(ConstrainedBox),
-        ).first,
+      expect(
+        imageCap(tester) / cardWidth(tester),
+        closeTo(1 / ModalMetrics.minImageRatio, 0.01),
+        reason: 'no copy and no buttons means no reserve to keep',
       );
-      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
-      expect(box.constraints.maxHeight, closeTo(screenHeight * 0.65, 0.5),
-          reason: 'the artwork is the content, so it gets the room');
+    });
+  });
+
+  group('only the copy scrolls', () {
+    testWidgets('the buttons sit outside the scroll view', (tester) async {
+      // The whole point of the restructure. When image, copy and buttons shared
+      // one scroll view, a tall poster pushed the buttons below the fold and
+      // the customer had to scroll to reach the only control that does
+      // anything.
+      await pump(tester, message(
+        header: 'Header',
+        body: 'body',
+        imageUrl: 'https://example.com/a.png',
+        buttons: const [
+          GameballMessageButton(
+            id: 'b', text: 'Go', action: GameballDismissAction()),
+        ],
+      ));
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_buttons')),
+          matching: find.byType(SingleChildScrollView),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('the copy is inside it, and yields to the artwork',
+        (tester) async {
+      await pump(tester, message(header: 'Header', body: 'body'));
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_body')),
+          matching: find.byType(SingleChildScrollView),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_body')),
+          matching: find.byType(Flexible),
+        ),
+        findsWidgets,
+        reason: 'Flexible is what lets the copy give way rather than the image',
+      );
     });
   });
 
@@ -346,6 +490,114 @@ void main() {
 
       expect(closed, 1);
       expect(messagePressed, 0);
+    });
+  });
+
+  group('layout: image_only', () {
+    const cta = GameballMessageButton(
+      id: 'cta',
+      text: 'Shop the sale',
+      action: GameballDismissAction(),
+    );
+
+    GameballInAppMessage imageOnly({
+      String? imageUrl = 'https://example.com/poster.png',
+      List<GameballMessageButton> buttons = const [cta],
+      String? header = 'ignored',
+      String? body = 'also ignored',
+    }) =>
+        message(
+          layout: GameballMessageLayout.imageOnly,
+          imageUrl: imageUrl,
+          header: header,
+          body: body,
+          buttons: buttons,
+        );
+
+    testWidgets('the artwork fills the card rather than sitting above the copy',
+        (tester) async {
+      await pump(tester, imageOnly());
+
+      final image = tester.widget<Image>(find.byKey(const Key('gb_iam_image')));
+      expect(image.fit, BoxFit.cover,
+          reason: 'the card takes the artwork\'s own ratio, so there is '
+              'normally nothing to crop — cover only matters once the height '
+              'cap clamps a very tall poster, and bars would defeat the '
+              'composition');
+    });
+
+    testWidgets('no text is drawn, even when the campaign supplied some',
+        (tester) async {
+      await pump(tester, imageOnly());
+
+      expect(find.byKey(const Key('gb_iam_header')), findsNothing);
+      expect(find.byKey(const Key('gb_iam_body')), findsNothing);
+    });
+
+    testWidgets('the buttons are laid over the artwork, not beneath it',
+        (tester) async {
+      await pump(tester, imageOnly());
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_buttons')),
+          matching: find.byType(Positioned),
+        ),
+        findsWidgets,
+        reason: 'a Positioned in the surface Stack is what puts them over the '
+            'artwork; in the default layout they sit in the content column',
+      );
+    });
+
+    testWidgets('the default layout still puts its buttons in the column',
+        (tester) async {
+      // Guards the branch: a message with buttons and no text used to reach the
+      // image-only-ish rendering by accident, and must not now be overlaid.
+      await pump(tester, message(
+        body: null,
+        imageUrl: 'https://example.com/poster.png',
+        buttons: const [cta],
+      ));
+
+      expect(
+        find.ancestor(
+          of: find.byKey(const Key('gb_iam_buttons')),
+          matching: find.byType(Positioned),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('with no artwork it falls back to the stacked composition',
+        (tester) async {
+      // Otherwise this renders a blank card that still logs an impression.
+      await pump(tester, imageOnly(imageUrl: null));
+
+      expect(find.byKey(const Key('gb_iam_header')), findsOneWidget);
+      expect(find.byKey(const Key('gb_iam_body')), findsOneWidget);
+    });
+
+    testWidgets('carries no button band, so there is no blank strip',
+        (tester) async {
+      await pump(tester, imageOnly());
+
+      final paddings = tester.widgetList<Padding>(find.ancestor(
+        of: find.byKey(const Key('gb_iam_buttons')),
+        matching: find.byType(Padding),
+      ));
+      expect(
+        paddings.where((p) => p.padding == ModalMetrics.contentPadding),
+        isEmpty,
+        reason: 'the content padding exists for a text block that is not here; '
+            'stacking it with the button padding is what produced the 40 dead '
+            'band this layout replaces',
+      );
+    });
+
+    testWidgets('the close button is still drawn', (tester) async {
+      await pump(tester, imageOnly());
+
+      expect(find.byKey(const Key('gb_iam_close')), findsOneWidget);
     });
   });
 }
