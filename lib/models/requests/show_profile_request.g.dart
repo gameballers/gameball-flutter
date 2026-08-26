@@ -16,4 +16,5 @@ Map<String, dynamic> _$ShowProfileRequestToJson(ShowProfileRequest instance) =>
       'closeButtonColor': instance.closeButtonColor,
       'mobile': instance.mobile,
       'email': instance.email,
+      'lang': instance.lang,
     };

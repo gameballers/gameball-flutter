@@ -67,6 +67,23 @@ class GameballApp extends StatelessWidget {
     });
   }
 
+  /// Changes the SDK's global language on demand, without re-calling [init]. Affects everything
+  /// that isn't overridden per-call: future [showProfile] presentations that don't pass their own
+  /// `lang`, and [initializeCustomer]/[sendEvent] requests.
+  ///
+  /// A `showProfile` call with an explicit `lang` still takes precedence over this for that one
+  /// presentation — this only changes the fallback used when no per-call override is given.
+  ///
+  /// Arguments:
+  ///   - `lang`: A 2-letter language code (e.g. "en", "ar"). Ignored if invalid.
+  void setLanguage(String lang) {
+    if (isNullOrEmpty(lang) || lang.length != 2) return;
+
+    _lang = lang;
+    GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
+    GameballLogger.instance.log('sdk.setLanguage', params: {'lang': lang});
+  }
+
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
   ///
   /// This method validates the API key, stores essential customer data for widget display,
@@ -357,7 +374,7 @@ class GameballApp extends StatelessWidget {
             Navigator.of(context).pop();
           }
         };
-        String language = handleLanguage(_lang, _customerPreferredLanguage);
+        String language = handleLanguage(_lang, _customerPreferredLanguage, request.lang);
 
         return Dialog(
           shape: const RoundedRectangleBorder(
@@ -411,7 +428,7 @@ class GameballApp extends StatelessWidget {
   /// Arguments:
   ///   - `request`: The ShowProfileRequest containing widget configuration parameters.
   String _buildWidgetUrl(ShowProfileRequest request) {
-    String language = handleLanguage(_lang, _customerPreferredLanguage);
+    String language = handleLanguage(_lang, _customerPreferredLanguage, request.lang);
 
     String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
 
