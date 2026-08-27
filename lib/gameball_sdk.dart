@@ -17,6 +17,7 @@ import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
 import 'models/requests/gameball_config.dart';
 import 'network/models/callbacks.dart';
+import 'network/request_calls/report_push_click_request.dart';
 import 'network/request_calls/send_event_request.dart';
 
 import 'network/utils/constants.dart';
@@ -164,6 +165,50 @@ class GameballApp extends StatelessWidget {
     } catch (e) {
       callback!(null, e as Exception);
     }
+  }
+
+  /// Handle a tap on a push notification, called from the host app's own
+  /// notification handler with the notification's data payload (e.g.
+  /// `RemoteMessage.data` from `onMessageOpenedApp` / `getInitialMessage`).
+  ///
+  /// Returns `true` when the notification is a Gameball one. When it also
+  /// carries a click token, the tap is reported to Gameball to count the
+  /// campaign click; the optional `callback` receives that report's result.
+  ///
+  /// Arguments:
+  ///   - `payload`: The notification's data payload.
+  ///   - `callback`: Optional callback receiving whether the report succeeded.
+  ///   - `sessionToken`: Optional session token for this request.
+  ///                     If provided, overrides the global sessionToken.
+  ///                     If not provided, nullifies the global sessionToken.
+  bool handlePushClick(Map<String, dynamic> payload, {HandlePushClickCallback? callback, String? sessionToken}) {
+    if (!(payload['isGB']?.toString().toLowerCase() == 'true')) {
+      return false;
+    }
+
+    final token = payload['gbClickToken'] as String?;
+    // Fire telemetry immediately, regardless of what happens below.
+    GameballLogger.instance.log('sdk.handlePushClick', params: {'hasToken': !isNullOrEmpty(token)});
+
+    // Override or nullify sessionToken based on parameter
+    _sessionToken = sessionToken;
+
+    if (isNullOrEmpty(_apiKey)) {
+      callback?.call(null, Exception('API key is not initialized. Call init() first'));
+      return true;
+    }
+
+    if (isNullOrEmpty(token)) {
+      return true;
+    }
+
+    final language = handleLanguage(_lang, _customerPreferredLanguage);
+    reportPushClickRequest(token!, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
+      callback?.call(true, null);
+    }).catchError((e) {
+      callback?.call(false, e is Exception ? e : Exception(e.toString()));
+    });
+    return true;
   }
 
   /// Displays the Gameball profile in a bottom sheet.

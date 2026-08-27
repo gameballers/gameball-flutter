@@ -28,3 +28,13 @@ typedef ReferralCodeCallback = void Function(
 ///   - `status`: A boolean indicating whether the event was sent successfully.
 ///   - `error`: An `Exception` object if an error occurred.
 typedef SendEventCallback = void Function(bool? status, Exception? error);
+
+/// Callback function type for push notification click reporting.
+///
+/// Defines the signature for a callback function that handles the result of reporting
+/// a push notification tap to count a campaign click.
+///
+/// Arguments:
+///   - `status`: A boolean indicating whether the tap was reported successfully.
+///   - `error`: An `Exception` object if an error occurred.
+typedef HandlePushClickCallback = void Function(bool? status, Exception? error);
