@@ -4,4 +4,5 @@ const integrationsUrlV4_1 = "/api/v4.1/integrations";
 const initializeCustomerEndpoint = "/customers";
 const sendEventEndpoint = "/events";
 const mobileLogsPath = "/api/v4.0/integrations/mobile/logs";
+const pushClickEndpoint = "/mobile/push-click";
 const widgetBaseUrl = "https://m.gameball.app";
