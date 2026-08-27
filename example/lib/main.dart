@@ -108,6 +108,17 @@ class _MyHomePageState extends State<MyHomePage> {
           // Host-initiated dismiss (v3.2.0+) - close the widget programmatically, e.g. on logout:
           // gameballApp.hideProfile();
 
+          // Language control (v3.3.0+):
+          // - Per-call: present this one widget in Arabic via ShowProfileRequestBuilder()...lang("ar")
+          // - Global: switch the SDK language on demand (no re-init needed):
+          // gameballApp.setLanguage("ar");
+
+          // Push click tracking (v3.3.0+) - call from your notification-tap handler
+          // (e.g. FirebaseMessaging.onMessageOpenedApp) with the notification's data payload:
+          // final isGameball = gameballApp.handlePushClick(message.data, callback: (reported, error) {
+          //   print(error == null ? 'Click reported: $reported' : 'Click report failed: $error');
+          // });
+
           // Guest Mode Example (v3.1.1+) - Show widget without customer ID
           // final guestRequest = ShowProfileRequestBuilder()
           //     .showCloseButton(true)
@@ -208,7 +219,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.2.1',
+              'Gameball Flutter SDK v3.3.0',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),

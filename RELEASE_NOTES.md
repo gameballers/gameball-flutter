@@ -4,37 +4,75 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v3.2.1
+## Latest Release: v3.3.0
 
-**Release Date**: 2026-08-06
-**Version**: 3.2.1
-**Type**: Patch Release
+**Release Date**: 2026-08-29
+**Version**: 3.3.0
+**Type**: Minor Release
 
 ---
 
-## 🎉 What's New
+## ✨ What's New
 
-v3.2.1 is a bug-fix release that corrects how the `shop` value is sent to the Gameball widget. There are no API changes — upgrading from any 3.x version requires no code changes.
+v3.3.0 adds **per-call and global language control** and **push notification click tracking**. All v3.2.x and v3.1.x code continues to work without modification — every addition is backward compatible.
 
-### 🐛 Fixed: Widget Shop Parameter
+### Per-Call Widget Language
 
-When `GameballConfigBuilder` was configured with both `.platform(...)` and `.shop(...)`, the SDK appended the shop value to the widget URL as a **second `platform` key**:
+`ShowProfileRequestBuilder` now accepts an optional `lang` (2-letter code, e.g. `"en"`, `"ar"`) to present that one widget in a specific language:
 
-```
-...&platform=<platform>&platform=<shop>&...
-```
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .lang("ar")
+    .build();
 
-The widget parses duplicate query keys into an array, and its coupon-redemption flow calls `platform.toLowerCase()` — which throws a `TypeError` on an array. The visible symptom: tapping redeem showed an infinite loading spinner and no request ever reached the backend.
-
-The SDK now sends the value under its own key:
-
-```
-...&platform=<platform>&shop=<shop>&...
+GameballApp.getInstance().showProfile(context, request);
 ```
 
-### Who should upgrade
+When `lang` is omitted, the SDK's existing resolution applies: customer preferred language, then global preferred language, then `"en"`.
 
-Any app that sets both `platform` and `shop` in `GameballConfigBuilder` — widget coupon redemption is broken for that configuration in all prior releases.
+### Global Language Switch
+
+`GameballApp.setLanguage(lang)` changes the SDK's global language on demand, without re-calling `init`:
+
+```dart
+GameballApp.getInstance().setLanguage("ar");
+```
+
+This changes the fallback used by future `showProfile` presentations that don't pass their own `lang` (a per-call `lang` still wins) and `initializeCustomer`/`sendEvent` requests. Invalid codes are ignored.
+
+### Push Click Tracking
+
+`GameballApp.handlePushClick(payload, {callback, sessionToken})` reports taps on Gameball push notifications so campaign clicks are counted. Call it from your notification-tap handler with the notification's data payload (e.g. `RemoteMessage.data` from `onMessageOpenedApp` / `getInitialMessage`):
+
+```dart
+FirebaseMessaging.onMessageOpenedApp.listen((message) {
+  final isGameball = GameballApp.getInstance().handlePushClick(
+    message.data,
+    callback: (reported, error) {
+      if (error != null) {
+        print('Click report failed: $error');
+      } else {
+        print('Click reported: $reported');
+      }
+    },
+  );
+
+  if (!isGameball) {
+    // Not a Gameball notification — run your own handling.
+  }
+});
+```
+
+It returns `true` when the notification is a Gameball one; the tap is reported to Gameball when the payload carries a click token. An optional `sessionToken` overrides the global session token for this request.
+
+---
+
+## 🔄 Changes
+
+- Added optional `ShowProfileRequestBuilder.lang(...)` (per-presentation language override)
+- Added `GameballApp.setLanguage(lang)` (global language switch)
+- Added `GameballApp.handlePushClick(payload, {callback, sessionToken})` (push click tracking)
 
 ---
 
@@ -59,7 +97,7 @@ See [MIGRATION.md](MIGRATION.md) for details.
 
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.1
+  gameball_sdk: ^3.3.0
 ```
 
 ---
@@ -72,9 +110,9 @@ dependencies:
 
 ---
 
-## Previous Release: v3.2.0
+## Previous Release: v3.2.1
 
-**Release Date**: 2026-07-01
-**Type**: Minor Release
+**Release Date**: 2026-08-06
+**Type**: Patch Release
 
-Widget event channel (`widgetEventCallback` receiving events such as `gameCompleted`), widget dismissal controls (`GameballApp.hideProfile()` and web-initiated `window.GameballWidget.closeWidget()`), external-link handling with optional `externalLinkCallback`, optional `mobile`/`email` channel-merging parameters, diagnostic logging, and widened dependency ranges. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+Fixed the widget `shop` parameter being sent as a duplicate `platform` key, which broke widget coupon redemption for apps setting both `platform` and `shop`. See [CHANGELOG.md](CHANGELOG.md) for the full history.

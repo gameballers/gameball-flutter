@@ -1,6 +1,6 @@
 # Gameball Flutter SDK Example
 
-This is a demo application showcasing the Gameball Flutter SDK v3.2.1 with builder pattern architecture.
+This is a demo application showcasing the Gameball Flutter SDK v3.3.0 with builder pattern architecture.
 
 ## Features Demonstrated
 
@@ -10,6 +10,8 @@ This is a demo application showcasing the Gameball Flutter SDK v3.2.1 with build
 - **Profile Widget** display with ShowProfileRequest builder
 - **Guest Mode** support for profile widget (v3.1.1+)
 - **Widget Events & Dismissal** - react to events the widget posts, e.g. game completion (v3.2.0+)
+- **Language Control** - per-call widget language and global language switch (v3.3.0+)
+- **Push Click Tracking** - report taps on Gameball push notifications (v3.3.0+)
 - **Session Token Authentication** (optional, v3.1.0+)
 - **Push Notifications** setup (Firebase & Huawei)
 
