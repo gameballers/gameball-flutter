@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.1
+  gameball_sdk: ^3.3.0
 ```
 
 ### Flutter CLI
@@ -208,6 +208,56 @@ final request = ShowProfileRequestBuilder()
 
 The SDK also records internal diagnostic logs automatically to aid troubleshooting. This requires no integration changes.
 
+### Language Control (v3.3.0+)
+
+Present a single widget in a specific language with `ShowProfileRequestBuilder().lang(...)` (2-letter code, e.g. `"en"`, `"ar"`):
+
+```dart
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .lang("ar")
+    .build();
+
+GameballApp.getInstance().showProfile(context, request);
+```
+
+When `lang` is omitted, the SDK's existing resolution applies: customer preferred language, then global preferred language, then `"en"`.
+
+Or switch the SDK's global language on demand — no re-`init` needed:
+
+```dart
+GameballApp.getInstance().setLanguage("ar");
+```
+
+This changes the fallback used by future `showProfile` presentations (a per-call `lang` still wins) and `initializeCustomer`/`sendEvent` requests. Invalid codes are ignored.
+
+### Push Click Tracking (v3.3.0+)
+
+Report taps on Gameball push notifications so campaign clicks are counted. Call `handlePushClick` from your notification-tap handler with the notification's data payload (e.g. `RemoteMessage.data` from `onMessageOpenedApp` / `getInitialMessage`):
+
+> **Call this from wherever your app handles the notification tap — not on receive/delivery.** If you call it as soon as the notification arrives, you'll count every delivery as a click; call it from the tap handler so it only counts when the user actually opens it.
+
+```dart
+FirebaseMessaging.onMessageOpenedApp.listen((message) {
+  final isGameball = GameballApp.getInstance().handlePushClick(
+    message.data,
+    callback: (reported, error) {
+      if (error != null) {
+        print('Click report failed: $error');
+      } else {
+        print('Click reported: $reported');
+      }
+    },
+  );
+
+  if (!isGameball) {
+    // Not a Gameball notification — run your own handling.
+  }
+});
+```
+
+It returns `true` when the notification is a Gameball one; the tap is reported to Gameball when the payload carries a click token. An optional `sessionToken` parameter overrides the global session token for this request.
+
 ## API Methods
 
 The SDK provides the following public methods:
@@ -216,6 +266,8 @@ The SDK provides the following public methods:
 - `sendEvent(event, callback, {sessionToken})` - Track events with Event builder
 - `showProfile(context, request, {sessionToken})` - Show profile widget with ShowProfileRequest
 - `hideProfile()` - Dismiss the currently shown profile widget (no-op when nothing is shown)
+- `setLanguage(lang)` - Change the SDK's global language on demand without re-calling `init`
+- `handlePushClick(payload, {callback, sessionToken})` - Report a tap on a Gameball push notification for click tracking
 
 ### Session Token Per-Request Override
 
@@ -471,6 +523,7 @@ Request object for displaying the Gameball customer profile widget with customiz
 | `widgetUrlPrefix` | String | ❌ | Custom widget URL prefix |
 | `mobile` | String | ❌ | Customer mobile number (for channel merging) |
 | `email` | String | ❌ | Customer email address (for channel merging) |
+| `lang` | String | ❌ | 2-letter language code for this presentation only (v3.3.0+) |
 | `externalLinkCallback` | void Function(String) | ❌ | Handler for links tagged `gbExternalBrowser=true`. When provided, the link is delegated to it; otherwise the SDK opens it in the system browser |
 | `widgetEventCallback` | void Function(Map<String, dynamic>?, Exception?) | ❌ | Receives events the widget posts (e.g. game completion) as a `{type, metadata}` map; called with `(null, exception)` on a parse failure |
 
@@ -487,6 +540,7 @@ Request object for displaying the Gameball customer profile widget with customiz
 - `widgetUrlPrefix(String widgetUrlPrefix)` - Sets custom widget URL prefix
 - `mobile(String mobile)` - Sets customer mobile number (channel merging)
 - `email(String email)` - Sets customer email address (channel merging)
+- `lang(String? lang)` - Sets the 2-letter language code for this presentation only (v3.3.0+)
 - `externalLinkCallback(void Function(String) callback)` - Sets handler for links tagged `gbExternalBrowser=true`
 - `widgetEventCallback(void Function(Map<String, dynamic>?, Exception?) callback)` - Registers a listener for widget events
 

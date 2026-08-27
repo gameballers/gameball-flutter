@@ -6,10 +6,51 @@ This guide provides migration instructions for upgrading between major versions 
 
 ## Table of Contents
 
+- [v3.2.x → v3.3.0](#migration-guide-v32x--v330)
 - [v3.1.1 → v3.2.0](#migration-guide-v311--v320)
 - [v3.1.0 → v3.1.1](#migration-guide-v310--v311)
 - [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
 - [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.2.x → v3.3.0
+
+Version 3.3.0 adds per-call and global language control, and push notification click tracking. This is a **minor update** with no breaking changes — all v3.2.x and v3.1.x code continues to work.
+
+### Overview of Changes
+
+#### ✨ What's New
+- **Per-call widget language** - `ShowProfileRequestBuilder().lang("ar")` presents that one widget in a specific language (2-letter code)
+- **Global language switch** - `GameballApp.getInstance().setLanguage("ar")` changes the SDK's global language on demand, without re-calling `init`
+- **Push click tracking** - `GameballApp.getInstance().handlePushClick(payload)` reports Gameball push notification taps for campaign click counting
+
+### Update Dependencies
+
+Update your dependency to v3.3.0:
+
+```yaml
+dependencies:
+  gameball_sdk: ^3.3.0
+```
+
+Run `flutter pub get` to update.
+
+### Action Required
+
+None. To adopt the new features, use the optional APIs:
+
+```dart
+// Per-call language
+final request = ShowProfileRequestBuilder()
+    .customerId("customer_123")
+    .lang("ar")
+    .build();
+GameballApp.getInstance().showProfile(context, request);
+
+// Push click tracking — from your notification-tap handler
+GameballApp.getInstance().handlePushClick(message.data);
+```
 
 ---
 
