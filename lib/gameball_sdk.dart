@@ -207,19 +207,41 @@ class GameballApp extends StatelessWidget {
     } catch (e) {}
   }
 
-  // Navigation handling — consumes every intercepted link (nothing loads in-widget):
-  //   1) gbExternalBrowser=true → device browser (flag outranks the callback)
-  //   2) else if externalLinkCallback set → delegate to it
-  //   3) else → device browser
+  // Decides how an intercepted navigation is handled. Returns true when the link was
+  // consumed as external (caller must prevent in-widget navigation); false when the link
+  // is internal to the widget and should load in-widget (caller navigates normally).
+  //
+  // A link is treated as external only when:
+  //   1) it carries gbExternalBrowser=true → device browser (flag outranks the callback), or
+  //   2) its host differs from the loaded widget's host (a genuinely off-widget destination).
+  // For an external link with an externalLinkCallback set, the host delegates; otherwise the
+  // SDK opens it in the device browser. Same-host links (including the widget's own initial
+  // load) return false so they render inside the WebView.
   bool _handleExternalBrowserLink(String url, ShowProfileRequest request) {
-    if (url.contains('gbExternalBrowser=true')) {
-      _openExternalInAppBrowser(url);
-    } else if (request.externalLinkCallback != null) {
+    final bool forcedExternal = url.contains('gbExternalBrowser=true');
+
+    if (!forcedExternal && !_isExternalHost(url, request)) {
+      // Internal widget navigation — let it load in-widget.
+      return false;
+    }
+
+    if (request.externalLinkCallback != null) {
       request.externalLinkCallback!(url);
     } else {
       _openExternalInAppBrowser(url);
     }
     return true;
+  }
+
+  // True when [url]'s host differs from the loaded widget's host. Unparseable or hostless
+  // URLs (e.g. about:blank, data:, mailto:) are treated as internal so they don't get
+  // wrongly kicked out to the browser.
+  bool _isExternalHost(String url, ShowProfileRequest request) {
+    final Uri? target = Uri.tryParse(url);
+    if (target == null || target.host.isEmpty) return false;
+
+    final String widgetHost = Uri.parse(request.widgetUrlPrefix ?? widgetBaseUrl).host;
+    return target.host != widgetHost;
   }
 
   /// Opens a bottom sheet to display the Gameball profile.
