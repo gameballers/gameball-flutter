@@ -1,6 +1,6 @@
 # Gameball Flutter SDK Example
 
-This is a demo application showcasing the Gameball Flutter SDK v3.2.1 with builder pattern architecture.
+This is a demo application showcasing the Gameball Flutter SDK v3.2.2 with builder pattern architecture.
 
 ## Features Demonstrated
 

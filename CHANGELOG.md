@@ -4,6 +4,15 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.2.2] - 2026-08-30 🔧
+
+> **Patch Release**: Widget external-link fix
+
+### 🐛 Fixed
+- 🔗 **Widget Opening in Browser**: the navigation handler treated every intercepted link as external and always prevented in-widget navigation, so the widget — including its own initial load and normal same-host navigation — opened in the device browser instead of in-app. A link is now treated as external only when it carries `gbExternalBrowser=true` or points to a different host than the loaded widget; same-host and hostless URLs (`about:blank`, `data:`, `mailto:`) load in-widget as before.
+
+---
+
 ## [3.2.1] - 2026-08-06 🔧
 
 > **Patch Release**: Widget URL shop-parameter fix

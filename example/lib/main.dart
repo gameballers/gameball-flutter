@@ -208,7 +208,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.2.1',
+              'Gameball Flutter SDK v3.2.2',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),

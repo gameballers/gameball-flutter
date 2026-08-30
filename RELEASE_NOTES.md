@@ -4,37 +4,32 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v3.2.1
+## Latest Release: v3.2.2
 
-**Release Date**: 2026-08-06
-**Version**: 3.2.1
+**Release Date**: 2026-08-30
+**Version**: 3.2.2
 **Type**: Patch Release
 
 ---
 
 ## 🎉 What's New
 
-v3.2.1 is a bug-fix release that corrects how the `shop` value is sent to the Gameball widget. There are no API changes — upgrading from any 3.x version requires no code changes.
+v3.2.2 is a bug-fix release that corrects widget links opening in the device browser instead of in-app. There are no API changes — upgrading from any 3.x version requires no code changes.
 
-### 🐛 Fixed: Widget Shop Parameter
+### 🐛 Fixed: Widget Opening in Browser
 
-When `GameballConfigBuilder` was configured with both `.platform(...)` and `.shop(...)`, the SDK appended the shop value to the widget URL as a **second `platform` key**:
+The navigation handler treated **every** intercepted link as external and always prevented in-widget navigation. As a result the widget — including its own initial load and normal same-host navigation — opened in the device browser instead of rendering in-app. The visible symptom: opening the widget bounced the user out to their browser.
 
-```
-...&platform=<platform>&platform=<shop>&...
-```
+A link is now treated as external only when it either:
 
-The widget parses duplicate query keys into an array, and its coupon-redemption flow calls `platform.toLowerCase()` — which throws a `TypeError` on an array. The visible symptom: tapping redeem showed an infinite loading spinner and no request ever reached the backend.
+1. carries `gbExternalBrowser=true` (the flag still outranks any callback), or
+2. points to a **different host** than the loaded widget (a genuinely off-widget destination).
 
-The SDK now sends the value under its own key:
-
-```
-...&platform=<platform>&shop=<shop>&...
-```
+Same-host links (including the widget's initial load) and hostless URLs (`about:blank`, `data:`, `mailto:`) now load in-widget as intended. When a link is external and an `externalLinkCallback` is set, the host still receives it; otherwise the SDK opens it in the device browser as before.
 
 ### Who should upgrade
 
-Any app that sets both `platform` and `shop` in `GameballConfigBuilder` — widget coupon redemption is broken for that configuration in all prior releases.
+Any app displaying the Gameball profile widget — the widget opened in the device browser instead of in-app in all prior 3.2.x releases.
 
 ---
 
@@ -59,7 +54,7 @@ See [MIGRATION.md](MIGRATION.md) for details.
 
 ```yaml
 dependencies:
-  gameball_sdk: ^3.2.1
+  gameball_sdk: ^3.2.2
 ```
 
 ---
@@ -72,9 +67,9 @@ dependencies:
 
 ---
 
-## Previous Release: v3.2.0
+## Previous Release: v3.2.1
 
-**Release Date**: 2026-07-01
-**Type**: Minor Release
+**Release Date**: 2026-08-06
+**Type**: Patch Release
 
-Widget event channel (`widgetEventCallback` receiving events such as `gameCompleted`), widget dismissal controls (`GameballApp.hideProfile()` and web-initiated `window.GameballWidget.closeWidget()`), external-link handling with optional `externalLinkCallback`, optional `mobile`/`email` channel-merging parameters, diagnostic logging, and widened dependency ranges. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+Fixed the widget `shop` parameter being sent as a duplicate `platform` key, which broke widget coupon redemption for apps setting both `platform` and `shop`. See [CHANGELOG.md](CHANGELOG.md) for the full history.
