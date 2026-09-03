@@ -621,6 +621,26 @@ html{scroll-behavior:smooth}
           <div style="flex:1;font-size:14px;line-height:1.43;font-family:var(--ui)">&#1575;&#1582;&#1578;&#1610;&#1575;&#1585; &#1605;&#1605;&#1578;&#1575;&#1586; &#1548; &#1607;&#1584;&#1575; &#1610;&#1603;&#1587;&#1576;&#1603; &#1606;&#1602;&#1575;&#1591;&#1611;&#1575;</div>
           <div style="margin-inline-start:8px;font-size:20px;line-height:1">&#8249;</div>
         </div>
+
+        <div class="note flag" style="font-size:13.5px;margin:16px 0 0;max-width:none">
+          <h4>Mirror it once, not twice</h4>
+          <p style="margin:0">&ldquo;Flips to point left&rdquo; describes the
+          <em>outcome</em>, not the implementation &mdash; and the difference has already cost us a
+          release. Every platform here can mirror a directional glyph on its own: Flutter through
+          <code>IconData.matchTextDirection</code>, which <code>Icons.chevron_right</code> and
+          <code>chevron_left</code> both set; Android through
+          <code>android:autoMirrored</code>; iOS through the SF Symbol's own RTL behaviour, which is
+          per-symbol and worth confirming rather than assuming. Where that applies, pick
+          <b>one</b> glyph and let the platform turn it &mdash; swapping the asset
+          <em>as well</em> flips it twice and it comes out pointing the original way. Only a
+          platform that does not auto-mirror should swap by hand, and no port should ever do both.</p>
+          <p style="margin:10px 0 0">The Flutter SDK shipped exactly that double flip: it chose
+          <code>chevron_left</code> under RTL and the framework mirrored it back to the right, so
+          Arabic customers saw a chevron pointing backwards. <b>A test asserting the icon's
+          name cannot see this</b> &mdash; the codepoint was correct and the paint was not, and a
+          green test by that name is what let it ship. Assert the direction actually rendered:
+          <code>drawnLeft != (matchTextDirection &amp;&amp; isRtl)</code>.</p>
+        </div>
       </div>
       <div class="grp">
         <h4>Never rendered on a slideup</h4>
