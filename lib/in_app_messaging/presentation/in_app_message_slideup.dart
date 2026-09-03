@@ -136,12 +136,21 @@ class _GameballInAppMessageSlideupState
                               padding:
                                   SlideupMetrics.chevronSpacing,
                               child: Icon(
-                                // Flipped for Arabic: a right-pointing chevron
-                                // in a right-to-left layout points backwards,
-                                // which reads as "go back" rather than "open".
-                                Directionality.of(context) == TextDirection.rtl
-                                    ? Icons.chevron_left
-                                    : Icons.chevron_right,
+                                // One icon, never swapped by hand.
+                                // `Icons.chevron_right` carries
+                                // `matchTextDirection: true`, so the Icon widget
+                                // mirrors the glyph itself under RTL — which is
+                                // what makes it point left in Arabic, where a
+                                // right-pointing chevron reads as "go back"
+                                // rather than "open".
+                                //
+                                // Choosing `chevron_left` here as well flipped it
+                                // twice and it came out pointing right. A test
+                                // cannot catch that by name: `find.byIcon`
+                                // matches the codepoint, not the rendered
+                                // geometry, so assert the direction the customer
+                                // actually sees.
+                                Icons.chevron_right,
                                 size: SlideupMetrics.chevronSize,
                                 color: style.bodyColor ??
                                     theme.colorScheme.onSurfaceVariant,

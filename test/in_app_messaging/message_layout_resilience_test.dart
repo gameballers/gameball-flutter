@@ -297,28 +297,45 @@ void main() {
           reason: 'in Arabic the trailing corner is the left one');
     });
 
-    testWidgets('the slideup chevron points the way the text reads',
-        (tester) async {
-      await pumpOn(
-        tester,
-        GameballInAppMessageSlideup(
-          message: const GameballInAppMessage(
-            id: 'm',
-            type: GameballMessageType.slideup,
-            body: 'لديك نقاط جاهزة للاستبدال',
-            clickAction: GameballDismissAction(),
+    for (final (direction, expectLeft) in <(TextDirection, bool)>[
+      (TextDirection.ltr, false),
+      (TextDirection.rtl, true),
+    ]) {
+      testWidgets(
+          'the slideup chevron points the way the text reads '
+          '(${direction.name})', (tester) async {
+        await pumpOn(
+          tester,
+          GameballInAppMessageSlideup(
+            message: const GameballInAppMessage(
+              id: 'm',
+              type: GameballMessageType.slideup,
+              body: 'لديك نقاط جاهزة للاستبدال',
+              clickAction: GameballDismissAction(),
+            ),
+            onMessagePressed: () {},
+            onDismissRequested: () {},
           ),
-          onMessagePressed: () {},
-          onDismissRequested: () {},
-        ),
-        direction: TextDirection.rtl,
-      );
-      await tester.pumpAndSettle();
+          direction: direction,
+        );
+        await tester.pumpAndSettle();
 
-      final icon = tester.widget<Icon>(find.byType(Icon));
-      expect(icon.icon, Icons.chevron_left,
-          reason: 'a right-pointing chevron in Arabic points backwards');
-    });
+        // Which icon was chosen is not the question — which way it is painted
+        // is. Both chevrons carry `matchTextDirection: true`, so under RTL the
+        // Icon widget mirrors the glyph before painting it and a `chevron_left`
+        // comes out pointing right. The previous assertion here compared the
+        // codepoint, so it passed against exactly that defect: the icon was
+        // swapped by hand *and* mirrored by Flutter, and Arabic customers saw a
+        // chevron pointing backwards for as long as this test was green.
+        final icon = tester.widget<Icon>(find.byType(Icon));
+        final mirrored =
+            icon.icon!.matchTextDirection && direction == TextDirection.rtl;
+        final pointsLeft = (icon.icon == Icons.chevron_left) != mirrored;
+
+        expect(pointsLeft, expectLeft,
+            reason: 'a right-pointing chevron in Arabic points backwards');
+      });
+    }
 
     testWidgets('the slideup icon sits at the leading edge for the reader',
         (tester) async {
