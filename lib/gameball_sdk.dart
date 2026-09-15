@@ -1,8 +1,13 @@
 library gameball_sdk;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:gameball_sdk/network/request_calls/initialize_customer_request.dart';
+import 'package:gameball_sdk/network/request_calls/send_message_events_request.dart';
+import 'package:gameball_sdk/network/request_calls/fetch_message_variables_request.dart';
+import 'package:gameball_sdk/network/request_calls/sync_in_app_messages_request.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:gameball_sdk/utils/gameball_utils.dart';
 import 'package:gameball_sdk/utils/gameball_logger.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
@@ -12,6 +17,21 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'in_app_messaging/analytics/batched_message_analytics.dart';
+import 'in_app_messaging/analytics/message_analytics.dart';
+import 'in_app_messaging/evaluation/frequency_cap.dart';
+import 'in_app_messaging/iam_log.dart';
+import 'in_app_messaging/in_app_messaging_service.dart';
+import 'in_app_messaging/models/in_app_message.dart';
+import 'in_app_messaging/models/in_app_message_campaign.dart';
+import 'in_app_messaging/models/message_trigger.dart';
+import 'in_app_messaging/personalisation/variable_source.dart';
+import 'in_app_messaging/presentation/artwork_prefetcher.dart';
+import 'in_app_messaging/presentation/message_navigator.dart';
+import 'in_app_messaging/presentation/overlay_presenter.dart';
+import 'in_app_messaging/source/campaign_cache.dart';
+import 'in_app_messaging/source/http_message_source.dart';
+import 'in_app_messaging/source/message_source.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
@@ -21,6 +41,9 @@ import 'network/request_calls/report_push_click_request.dart';
 import 'network/request_calls/send_event_request.dart';
 
 import 'network/utils/constants.dart';
+
+/// The in-app messaging public surface, so hosts need only one import.
+export 'in_app_messaging/in_app_messaging.dart';
 
 class GameballApp extends StatelessWidget {
   const GameballApp({super.key});
@@ -34,6 +57,30 @@ class GameballApp extends StatelessWidget {
   static String? _apiPrefix;
   static String? _sessionToken;
   static VoidCallback? _dismissActiveWidget;
+
+  /// Null until [startInAppMessaging] is called. Everything in-app-messaging
+  /// related no-ops while this is null, so upgrading changes nothing for a
+  /// client that does not opt in.
+  static InAppMessagingService? _inAppMessaging;
+
+  /// Created on first access of [onInAppMessage], so a host that never listens
+  /// pays nothing.
+  static StreamController<GameballInAppMessage>? _inAppMessageController;
+
+  /// The navigator key the current presenter is bound to, so a changed key can
+  /// be detected and the presenter rebuilt.
+  static GlobalKey<NavigatorState>? _inAppMessagingNavigatorKey;
+
+  /// Who analytics events are attributed to.
+  ///
+  /// Held here rather than captured in the sender closure because the analytics
+  /// buffer is built once, while `startInAppMessaging` may later run for a
+  /// different customer — a closure would keep sending under the first identity.
+  static String? _inAppMessagingCustomerId;
+
+  /// Registered on first [startInAppMessaging] so warm resumes begin new
+  /// sessions. Null for any client that never opts in.
+  static _GameballLifecycleObserver? _lifecycleObserver;
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -121,12 +168,31 @@ class GameballApp extends StatelessWidget {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
-        responseCallback!(response, null);
+        responseCallback?.call(response, null);
+      }).catchError((Object error) {
+        // initializeCustomerRequest throws on a non-2xx and on a transport
+        // failure. Without this the chain has nothing to catch it: the error
+        // escapes as an unhandled async error and the callback is never
+        // invoked, so the host cannot tell a failure from a slow network.
+        responseCallback?.call(
+          null,
+          error is Exception ? error : Exception('$error'),
+        );
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
     } catch (e) {
       responseCallback!(null, e as Exception);
+    }
+
+    // Additive: tell in-app messaging the customer may have changed. Guarded,
+    // and deliberately outside the request's future chain — that chain has no
+    // catchError, so anything thrown inside it escapes unhandled.
+    try {
+      _inAppMessagingCustomerId = request.customerId;
+      _inAppMessaging?.onCustomerChanged(request.customerId);
+    } catch (error) {
+      iamLog('onCustomerChanged hook failed: $error');
     }
   }
 
@@ -154,18 +220,355 @@ class GameballApp extends StatelessWidget {
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
       sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
-        if (response.statusCode == 200) {
-          callback!(true, null);
-        } else {
-          callback!(false, null);
-        }
+        // The whole 2xx range, matching what sendEventRequest itself accepts.
+        // The events endpoint answers 202, not 200, so narrowing this to an
+        // exact 200 reported every accepted event to the host as a failure.
+        final accepted = response.statusCode >= 200 && response.statusCode < 300;
+        callback?.call(accepted, null);
+      }).catchError((Object error) {
+        // sendEventRequest throws on a non-2xx and on a transport failure.
+        // Without this the chain has nothing to catch it: the error escapes as
+        // an unhandled async error and the callback is never invoked at all, so
+        // a host waiting on it waits forever.
+        callback?.call(false, error is Exception ? error : Exception('$error'));
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.sendEvent', params: event.toJson());
     } catch (e) {
       callback!(null, e as Exception);
     }
+
+    // Additive: an event may trigger an in-app message. Guarded, and
+    // deliberately outside the request's future chain — that chain has no
+    // catchError, so anything thrown inside it escapes unhandled.
+    try {
+      final service = _inAppMessaging;
+      if (service != null) {
+        // Iterating entries, not keys: `Event.events` maps a name to its
+        // metadata, and a campaign's property filters are evaluated against that
+        // metadata. Passing only the name made every filtered custom-event
+        // campaign unmatchable, because a filter on an absent property never
+        // matches — the filters were built and unit-tested but unreachable.
+        for (final entry in event.events.entries) {
+          service.onCustomEvent(entry.key, properties: entry.value);
+        }
+      }
+    } catch (error) {
+      iamLog('onCustomEvent hook failed: $error');
+    }
   }
+
+  /// Logs a purchase.
+  ///
+  /// Additive: no existing behaviour changes and no client is required to call
+  /// it. Sends an event to the same events endpoint as [sendEvent], using the
+  /// reserved name `purchase` with the purchase details as metadata, and — when
+  /// in-app messaging is running — notifies it so any-purchase and
+  /// specific-purchase campaigns can trigger.
+  ///
+  /// Arguments:
+  ///   - `customerId`: who bought. Required for the same reason [sendEvent]
+  ///     takes it on the `Event` — this SDK keeps no ambient customer.
+  ///   - `productId`: identifier of the item bought.
+  ///   - `price`: unit price.
+  ///   - `currency`: ISO currency code, e.g. `USD`.
+  ///   - `quantity`: number of units, defaulting to 1.
+  ///   - `properties`: extra metadata, also available to campaign filters.
+  ///   - `callback`: invoked with the send result, as [sendEvent] does.
+  ///   - `sessionToken`: optional session token for this request.
+  void logPurchase({
+    required String customerId,
+    required String productId,
+    required double price,
+    required String currency,
+    int quantity = 1,
+    Map<String, Object>? properties,
+    SendEventCallback? callback,
+    String? sessionToken,
+  }) {
+    final metadata = <String, Object>{
+      'productId': productId,
+      'price': price,
+      'currency': currency,
+      'quantity': quantity,
+      ...?properties,
+    };
+
+    final builder = EventBuilder()
+        .customerId(customerId)
+        .eventName(gameballPurchaseEventName);
+    for (final entry in metadata.entries) {
+      builder.eventMetaData(entry.key, entry.value);
+    }
+
+    // In-app messaging is notified from inside [sendEvent], by the custom-event
+    // hook, and deliberately not a second time here. A purchase reaches the
+    // trigger engine as the reserved event named `purchase` carrying exactly
+    // the metadata assembled above — which is the same occurrence the explicit
+    // purchase hook would build, so calling both emitted every purchase message
+    // twice and parked the duplicate in the pending slot, displacing whatever
+    // was legitimately waiting there.
+    sendEvent(builder.build(), callback, sessionToken: sessionToken);
+  }
+
+  /// Opts in to in-app messaging for [customerId].
+  ///
+  /// Nothing in the in-app messaging module runs until this is called: no
+  /// requests, no timers, no state. Existing integrations are unaffected by
+  /// upgrading.
+  ///
+  /// [navigatorKey] must be the key assigned to your `MaterialApp.navigatorKey`
+  /// — it is how the SDK finds a surface to draw on without needing a
+  /// `BuildContext` at every call site.
+  ///
+  /// [beforeDisplay] is consulted immediately before each message is shown, and
+  /// can show, defer or discard it. Omit it to always show.
+  ///
+  /// [sessionTimeout] is how long the app must be in the background before a
+  /// return to the foreground counts as a new session and fires the session-start
+  /// trigger again. Defaults to 30 seconds.
+  ///
+  /// Matched to the 30-second minimum interval between displays: because a
+  /// message can only be shown while the app is in the foreground,
+  /// time-since-last-display is always at least the time spent in the background,
+  /// so aligning the two guarantees a new session is never blocked by the display
+  /// floor. Lowering this below that floor opens a gap where a session-start
+  /// campaign is selected and then silently suppressed.
+  ///
+  /// Takes effect when messaging first starts. To change it later, call
+  /// [stopInAppMessaging] first.
+  ///
+  /// Calling this again with a different [customerId] refetches campaigns and
+  /// resets frequency caps. Calling it with the same one does nothing.
+  void startInAppMessaging({
+    required String customerId,
+    required GlobalKey<NavigatorState> navigatorKey,
+    GameballBeforeDisplay? beforeDisplay,
+    GameballOnAction? onAction,
+    GameballOnNavigate? onNavigate,
+    Duration sessionTimeout = defaultSessionTimeout,
+  }) {
+    if (isNullOrEmpty(_apiKey)) {
+      iamLog('startInAppMessaging ignored: API key is not initialized. '
+          'Call init() first');
+      return;
+    }
+
+    // Rebuild when the host supplies a different navigator key — which is what
+    // a hot restart does. Reusing the old presenter would leave it bound to a
+    // key whose widget is gone, and messages would silently never appear.
+    if (_inAppMessaging != null && _inAppMessagingNavigatorKey != navigatorKey) {
+      iamLog('navigator key changed; rebuilding the presenter');
+      _inAppMessaging!.stop();
+      _inAppMessaging = null;
+    }
+    _inAppMessagingNavigatorKey = navigatorKey;
+    // Read by the analytics sender on every batch rather than captured once, so a
+    // later start() for a different customer attributes events correctly.
+    _inAppMessagingCustomerId = customerId;
+
+    if (_inAppMessaging != null && sessionTimeout != _inAppMessaging!.sessionTimeout) {
+      iamLog('sessionTimeout ignored: messaging is already running with '
+          '${_inAppMessaging!.sessionTimeout.inSeconds}s. Call '
+          'stopInAppMessaging() first to change it');
+    }
+
+    final service = _inAppMessaging ??= InAppMessagingService(
+      source: debugMessageSource ?? HttpMessageSource(_syncInAppMessages),
+      presenter: OverlayPresenter(navigatorKey),
+      // Persisted, both of them: the backend's contract requires that a
+      // non-repeatable campaign never shows again "locally too", and that a
+      // failed sync falls back to the previous cache. Neither survives a restart
+      // in memory.
+      frequencyCap: StoredFrequencyCap(),
+      campaignCache: StoredCampaignCache(),
+      analytics: debugAnalytics ??
+          BatchedMessageAnalytics(send: _sendInAppMessageEvents),
+      sessionTimeout: sessionTimeout,
+      isHostWidgetOpen: () => _dismissActiveWidget != null,
+      // The host routes when it told us how; otherwise fall back to named
+      // routes, which is right for a plain MaterialApp but cannot see the routes
+      // of go_router or any other Navigator 2.0 router.
+      navigator: onNavigate != null
+          ? CallbackNavigator(onNavigate)
+          : NavigatorKeyNavigator(navigatorKey),
+      // Artwork is loaded at sync rather than at display, so the impression is
+      // logged for a message the user can actually see.
+      prefetcher: debugArtworkPrefetcher ?? ImageCacheArtworkPrefetcher(),
+      // Personalisation values, fetched just before display and cached briefly.
+      // Inert until the backend sends text that still contains {tokens}.
+      variables: debugVariableSource ??
+          CachingVariableSource(fetcher: _fetchMessageVariables),
+      emit: (message) => _inAppMessageController?.add(message),
+    );
+
+    // Watch the app lifecycle so a resume after the session timeout starts a new
+    // session and fires session_start again. Registered once, and only for hosts
+    // that opted in, so a client who never starts messaging gains no observer.
+    if (_lifecycleObserver == null) {
+      final observer = _GameballLifecycleObserver();
+      _lifecycleObserver = observer;
+      WidgetsBinding.instance.addObserver(observer);
+    }
+
+    service.start(
+      customerId: customerId,
+      beforeDisplay: beforeDisplay,
+      onAction: onAction,
+    );
+  }
+
+  /// Ships one batch of in-app message analytics events.
+  ///
+  /// A plain static function so it can be handed to the analytics buffer as a
+  /// value: the buffer owns batching, persistence and retry, and this owns nothing
+  /// but the request. Returning false leaves the batch queued, which is why an
+  /// unconfigured SDK is a false rather than a drop — the events go out once
+  /// [init] and [startInAppMessaging] have run.
+  /// Replaces the campaign source. Tests only — never set this in an app.
+  ///
+  /// The end-to-end suite drives the real module through this class, and without a
+  /// substitute every test would perform a live sync.
+  @visibleForTesting
+  static GameballMessageSource? debugMessageSource;
+
+  /// The host app's version, resolved once.
+  ///
+  /// Cached because `PackageInfo` is an async platform call and a sync happens on
+  /// every session start; re-reading it would put a channel round trip on the path
+  /// to the first message.
+  static String? _appVersion;
+
+  /// Performs one sync request for [customerId].
+  ///
+  /// Reads credentials at call time rather than capturing them, so a later
+  /// `init` or `initializeCustomer` is picked up without rebuilding the source.
+  static Future<String?> _syncInAppMessages(String customerId) async {
+    if (isNullOrEmpty(_apiKey)) return null;
+
+    if (_appVersion == null) {
+      try {
+        _appVersion = (await PackageInfo.fromPlatform()).version;
+      } catch (_) {
+        // Targeting by app version degrades; syncing must not.
+        _appVersion = '';
+      }
+    }
+
+    return syncInAppMessagesRequest(
+      customerId: customerId,
+      platform: getDevicePlatformCode(),
+      locale: handleLanguage(_lang, _customerPreferredLanguage),
+      appVersion: _appVersion ?? '',
+      sdkVersion: getSdkVersion(),
+      apiKey: _apiKey,
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+    );
+  }
+
+  /// Replaces the analytics implementation. Tests only — never set this in an app.
+  ///
+  /// The end-to-end tests drive the module through this class's public API, which
+  /// is the point of them. Left alone they would post batches to the live API and
+  /// leave the ten-second flush timer pending, which a widget test rightly rejects.
+  @visibleForTesting
+  static MessageAnalytics? debugAnalytics;
+
+  /// Replaces the artwork prefetcher. Tests only — never set this in an app.
+  ///
+  /// `flutter_test` answers every HTTP request with a 400, so the real
+  /// prefetcher correctly reports the fixtures' artwork as unloadable and the
+  /// module correctly suppresses those campaigns. Right behaviour, but it leaves
+  /// the end-to-end suite with nothing to display.
+  @visibleForTesting
+  static ArtworkPrefetcher? debugArtworkPrefetcher;
+
+  /// Replaces the personalisation source. Tests only — never set this in an app.
+  ///
+  /// Without it a token-bearing message would reach for the live endpoint, which
+  /// `flutter_test` answers with a 400 — harmless, but it makes a suite's
+  /// behaviour depend on a network call it never meant to make.
+  @visibleForTesting
+  static VariableSource? debugVariableSource;
+
+  /// Fetches the customer's current personalisation values.
+  static Future<Map<String, String>> _fetchMessageVariables(
+    String customerId,
+  ) async {
+    if (isNullOrEmpty(_apiKey)) return const <String, String>{};
+    return fetchMessageVariablesRequest(
+      customerId: customerId,
+      apiKey: _apiKey,
+      lang: handleLanguage(_lang, _customerPreferredLanguage),
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+    );
+  }
+
+  static Future<GameballAnalyticsSendResult> _sendInAppMessageEvents(
+    List<Map<String, dynamic>> events,
+  ) async {
+    final customerId = _inAppMessagingCustomerId;
+    if (isNullOrEmpty(_apiKey) || customerId == null) {
+      // Retry rather than discard: the events are valid, we just cannot address
+      // them yet. They go out once init() and startInAppMessaging() have run.
+      return GameballAnalyticsSendResult.retry;
+    }
+
+    return sendMessageEventsRequest(
+      events,
+      customerId: customerId,
+      platform: getDevicePlatformCode(),
+      apiKey: _apiKey,
+      lang: handleLanguage(_lang, _customerPreferredLanguage),
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+    );
+  }
+
+  /// Stops in-app messaging, dismissing anything on screen and clearing state.
+  ///
+  /// Call on logout. Safe to call when it was never started.
+  void stopInAppMessaging() => _inAppMessaging?.stop();
+
+  /// Forwards a foreground resume to in-app messaging. Called by the lifecycle
+  /// observer; guarded so a host that never opted in is unaffected.
+  static void notifyAppResumed() {
+    try {
+      _inAppMessaging?.onAppResumed();
+    } catch (error) {
+      iamLog('onAppResumed hook failed: $error');
+    }
+  }
+
+  /// Forwards leaving the foreground to in-app messaging, so the time away can
+  /// be measured against the session timeout.
+  static void notifyAppPaused() {
+    try {
+      _inAppMessaging?.onAppPaused();
+    } catch (error) {
+      iamLog('onAppPaused hook failed: $error');
+    }
+  }
+
+  /// Whether in-app messaging is currently running.
+  bool get isInAppMessagingStarted => _inAppMessaging?.isStarted ?? false;
+
+  /// The message waiting for a display opportunity, if any. Diagnostic.
+  InAppMessageCampaign? get pendingInAppMessageCampaign =>
+      _inAppMessaging?.pendingCampaign;
+
+  /// Every in-app message the SDK selects for display.
+  ///
+  /// Observation only — the SDK owns impression and click logging, so there is
+  /// no way to double-count from here. Safe to subscribe before
+  /// [startInAppMessaging]. The controller is created on first access, so hosts
+  /// that never listen pay nothing.
+  Stream<GameballInAppMessage> get onInAppMessage =>
+      (_inAppMessageController ??=
+              StreamController<GameballInAppMessage>.broadcast())
+          .stream;
 
   /// Handle a tap on a push notification, called from the host app's own
   /// notification handler with the notification's data payload (e.g.
@@ -485,6 +888,13 @@ class GameballApp extends StatelessWidget {
       },
     ).then((_) {
       _dismissActiveWidget = null;
+      // Additive: the screen is free again, so a deferred message may now be
+      // presentable.
+      try {
+        _inAppMessaging?.onHostWidgetClosed();
+      } catch (error) {
+        iamLog('onHostWidgetClosed hook failed: $error');
+      }
     });
   }
 
@@ -541,5 +951,26 @@ class GameballApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container();
+  }
+}
+
+/// Turns app lifecycle changes into session boundaries for in-app messaging.
+///
+/// Separate from [GameballApp] because that class is a `StatelessWidget` and
+/// cannot mix in [WidgetsBindingObserver]. Registered only once a host opts into
+/// in-app messaging, so a client that never calls `startInAppMessaging` pays
+/// nothing.
+class _GameballLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        GameballApp.notifyAppResumed();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        GameballApp.notifyAppPaused();
+    }
   }
 }
