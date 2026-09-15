@@ -12,3 +12,15 @@ String getDevicePlatform() {
     return 'Unknown';
   }
 }
+
+/// The device platform as the backend's numeric enum: 1 iOS, 2 Android.
+///
+/// Zero for anything else, which is neither and is what an unsupported host
+/// should report rather than guessing.
+int getDevicePlatformCode() {
+  return switch (getDevicePlatform()) {
+    'iOS' => 1,
+    'Android' => 2,
+    _ => 0,
+  };
+}
