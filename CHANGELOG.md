@@ -4,6 +4,58 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.4.0] - 2026-09-15 💬
+
+> **Minor Release**: In-app messaging — an opt-in module that displays campaigns authored in the Gameball dashboard
+
+### ✨ Added
+- 💬 **In-App Messaging**: `GameballApp.getInstance().startInAppMessaging(customerId: ..., navigatorKey: ...)` opts a host in. Nothing runs until that call — no requests, no timers, no overlay, no stored state — so upgrading without calling it changes nothing
+- 🖼️ **Three message types**: modal (a centred card over a scrim), slideup (a non-blocking banner at either edge, dismissed by swiping toward its own edge) and fullscreen (edge to edge, in a stacked or an image-only composition)
+- 🎯 **Triggers**: session start — fired on launch and on a return to the foreground after the session timeout — and custom events, matched on the event name and optionally filtered on its metadata with seven operators. A purchase logged via `logPurchase` reaches campaigns as an event named `purchase`, with `productId`, `price`, `currency` and `quantity` available to filters
+- 🚦 **Display rules**: per-campaign frequency caps that survive a restart, a server-driven minimum interval between any two displays, campaign expiry, and priority ordering
+- 📊 **Message analytics**: impressions, clicks (carrying `buttonId` when a button was tapped) and dismissals, batched and written to device storage after every change, so an impression logged a second before a force-quit still arrives
+- 🖐️ **Host hooks**: `beforeDisplay` to show, postpone or drop a message; `onAction` to intercept a tap and handle it yourself; `onNavigate` to route through go_router or any other Navigator 2.0 router; and an `onInAppMessage` stream of everything selected
+- 🗂️ **Offline behaviour**: campaigns are cached per customer, so a failed sync falls back to the last unexpired set rather than showing nothing
+- 🎨 **Artwork prefetch**: a message's image and icon are loaded at sync rather than at display, so an impression is only ever logged for something the user could actually see
+- 🔤 **Personalisation**: message text is refreshed with the customer's current values just before display, so points and names are not a snapshot from session start. Bounded and non-blocking — on any failure the message displays with the text it already had
+
+### 🐛 Fixed
+- ⏰ **Warm session start never fired.** `AppLifecycleState.inactive` was treated as "app paused", and both platforms emit it again on the way *back* to the foreground — so the pause timestamp was overwritten an instant before it was read, every absence measured as zero, and `session_start` only ever fired on a cold launch. The first pause of a departure now wins. Reproduced on iOS and on Android including a physical device
+- 🛒 **`logPurchase()` fired the trigger engine twice.** It delegates to `sendEvent`, which already notifies messaging under the reserved `purchase` name, and then notified it again — so a purchase-triggered message was emitted twice on `onInAppMessage` and the duplicate took the single pending slot, displacing whatever was legitimately waiting there
+- ✅ **Accepted events were reported to the host as failures.** The events endpoint answers `202`; success was narrowed to exactly `200`
+- 📞 **Failed requests never called back.** Neither `initializeCustomer` nor `sendEvent` attached a `catchError`, so a non-2xx or a transport failure escaped as an unhandled async error and the host's callback was never invoked — indistinguishable from a slow network
+- 🔤 **Unresolved `{tokens}` reached the screen.** Sync no longer substitutes, so the sync-time text is a template; on a timeout it was displayed verbatim. Any token still unresolved at display is now blanked. A message never renders its own placeholders
+- 🌙 **Quiet hours are enforced.** `quietHours` arrives at the response root as `{enabled, start, end}`, in **UTC**, and applies globally. A message caught by the window is suppressed rather than deferred, so the occurrence is lost and the campaign is not
+- 🗂️ **The display history could be skipped on a cold start.** It shared a 2-second budget with the campaign cache, sequentially; a slow platform channel meant proceeding with no history, which is how a once-ever campaign displays twice. The two reads now run concurrently, and the history gets its own, longer budget
+- 🖼️ **Fullscreen cropped campaign artwork** that a modal rendered whole. The stacked layout now uses `BoxFit.contain`; the image-only variant still bleeds
+- ⏳ **A slideup could have no way out.** It never draws a close glyph and has no scrim — by design — so a campaign setting neither an action nor `autoDismissSeconds` left a banner over the host's app bar until the user guessed at a swipe. One with no duration now gets an 8-second default; an explicit `0` still means "stay"
+- 🔁 **A deferred repeatable campaign was discarded.** The pending slot asked "has this ever shown" instead of "may it show now", so a repeat held back behind the Gameball widget was lost when the widget closed
+- 🎨 **Artwork that failed to load stayed failed for the session.** The verdict was computed once at sync and cached, so a brief network blip made a campaign undisplayable for every later trigger. The failed set is now re-attempted, at most once every 30 seconds
+- ⏰ **Warm session start never fired.** `AppLifecycleState.inactive` was treated as "app paused", and both platforms emit it again on the way *back* to the foreground — so the pause timestamp was overwritten an instant before it was read, every absence measured as zero, and `session_start` only ever fired on a cold launch. The first pause of a departure now wins. Reproduced on iOS and on Android including a physical device
+- 🛒 **`logPurchase()` fired the trigger engine twice.** It delegates to `sendEvent`, which already notifies messaging under the reserved `purchase` name, and then notified it again — so a purchase-triggered message was emitted twice on `onInAppMessage` and the duplicate took the single pending slot, displacing whatever was legitimately waiting there
+- ✅ **Accepted events were reported to the host as failures.** The events endpoint answers `202`; success was narrowed to exactly `200`
+- 📞 **Failed requests never called back.** Neither `initializeCustomer` nor `sendEvent` attached a `catchError`, so a non-2xx or a transport failure escaped as an unhandled async error and the host's callback was never invoked — indistinguishable from a slow network
+- 🔤 **Unresolved `{tokens}` reached the screen.** Sync no longer substitutes, so the sync-time text is a template; on a timeout it was displayed verbatim. Any token still unresolved at display is now blanked. A message never renders its own placeholders
+- 🌙 **Quiet hours are enforced.** `quietHours` arrives at the response root as `{enabled, start, end}`, in **UTC**, and applies globally. A message caught by the window is suppressed rather than deferred, so the occurrence is lost and the campaign is not
+- 🗂️ **The display history could be skipped on a cold start.** It shared a 2-second budget with the campaign cache, sequentially; a slow platform channel meant proceeding with no history, which is how a once-ever campaign displays twice. The two reads now run concurrently, and the history gets its own, longer budget
+- 🖼️ **Fullscreen cropped campaign artwork** that a modal rendered whole. The stacked layout now uses `BoxFit.contain`; the image-only variant still bleeds
+- ⏳ **A slideup could have no way out.** It never draws a close glyph and has no scrim — by design — so a campaign setting neither an action nor `autoDismissSeconds` left a banner over the host's app bar until the user guessed at a swipe. One with no duration now gets an 8-second default; an explicit `0` still means "stay"
+- 🔁 **A deferred repeatable campaign was discarded.** The pending slot asked "has this ever shown" instead of "may it show now", so a repeat held back behind the Gameball widget was lost when the widget closed
+- 🎨 **Artwork that failed to load stayed failed for the session.** The verdict was computed once at sync and cached, so a brief network blip made a campaign undisplayable for every later trigger. The failed set is now re-attempted, at most once every 30 seconds
+
+### 📝 Notes
+- 🔍 **Diagnostics**: a message suppressed by the cooldown now says so. It was the one path where a campaign matched, was in date, was repeat-eligible and renderable, and still produced nothing without explanation — which reads as a broken trigger
+- 📐 **Tie-breaks are the order the backend listed campaigns in**, which is the order chosen in the dashboard. Unchanged behaviour, now documented and pinned by a test, because the previous comment justified it only as "deterministic" and so invited replacing it with something tidier that would have silently re-ranked every tie
+- 🧭 `campaignOrdering` on the sync response is **not** that ranking despite the name, and is correctly ignored
+- 🔇 **Console diagnostics are off in release builds.** `iamLog` output is gated on `gameballInAppMessagingLogging`, which defaults to `kDebugMode`. Set it to `true` in a release build only to reproduce a reported problem
+- 📱 **Platform requirements corrected**: the documented floors were Android API 21 and iOS 12.0, which the SDK has not been able to build against for some time — `shared_preferences` and `url_launcher` require `minSdk 24` and an iOS 13.0 deployment target. The floors are now stated as **API 24+ / iOS 13.0+**. No behaviour changed; the previous numbers would simply have failed the build
+- In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK logs the 404 and stays silent — no errors surface to the host
+- `stopInAppMessaging()` on logout dismisses anything on screen, flushes pending telemetry and clears state
+- 🔍 **Diagnostics**: a message suppressed by the cooldown now says so. It was the one path where a campaign matched, was in date, was repeat-eligible and renderable, and still produced nothing without explanation — which reads as a broken trigger
+- 📐 **Tie-breaks are the order the backend listed campaigns in**, which is the order chosen in the dashboard. Unchanged behaviour, now documented and pinned by a test, because the previous comment justified it only as "deterministic" and so invited replacing it with something tidier that would have silently re-ranked every tie
+- 🧭 `campaignOrdering` on the sync response is **not** that ranking despite the name, and is correctly ignored
+---
+
 ## [3.3.0] - 2026-09-02 📱
 
 > **Minor Release**: Per-call and global language control, and push notification click tracking
