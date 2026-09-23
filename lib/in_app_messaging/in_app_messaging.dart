@@ -22,6 +22,7 @@ export 'models/in_app_message.dart'
         GameballMessageLayout,
         GameballMessageOrientation,
         GameballSlidePosition,
+        GameballWidgetContent,
         GameballNavigateAction,
         GameballOpenUrlAction,
         GameballRequestPushPermissionAction,

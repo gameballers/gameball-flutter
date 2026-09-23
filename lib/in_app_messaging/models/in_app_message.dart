@@ -95,20 +95,47 @@ final class GameballNavigateAction extends GameballClickAction {
 
 /// A reward campaign rendered as the message's own content.
 ///
-/// The campaign names only which part of the widget to open; the SDK composes
-/// the rest of the URL from state it already holds — api key, customer, locale,
-/// platform, session token. Deliberately *not* a URL on the wire: one would have
-/// to carry the api key and the player id, which would mean a campaign payload
-/// that is both customer-specific and credential-bearing, and which would go
-/// stale the moment either changed.
+/// The campaign **is** the content — there is no headline, body, image or
+/// button, because this is not a teaser that links to a game, it is the game.
+///
+/// Deliberately not a URL on the wire: one would have to carry the api key and
+/// the player id, making the payload both credential-bearing and
+/// customer-specific, and stale the moment either changed. The SDK composes the
+/// URL from state it already holds and the two fields here.
 ///
 /// This is what lets a marketer trigger spin-and-win from a session start or a
 /// custom event without the host app calling `showProfile` with an openDetail.
 final class GameballWidgetContent {
-  const GameballWidgetContent({required this.openDetail});
+  const GameballWidgetContent({
+    required this.gameCampaignId,
+    required this.gameCampaignType,
+    this.delay,
+    this.dismissLimit,
+  });
 
-  /// Which widget detail to open, e.g. `details_wheel`.
-  final String openDetail;
+  /// The challenge to open.
+  ///
+  /// All local bookkeeping keys off this, never off the entry's `campaignId`,
+  /// which is always 0 on a game.
+  final int gameCampaignId;
+
+  /// Which game it is, as the open-details text: `wheel`, `quiz`, `scratch`…
+  final String gameCampaignType;
+
+  /// How long to wait after the trigger fires. Null means open immediately.
+  ///
+  /// Not on the sync entry today. Read when it appears, so this needs no change
+  /// on the day it does.
+  final Duration? delay;
+
+  /// Stop offering after this many dismissals without a play. Null means no cap.
+  ///
+  /// Also awaiting the backend, and additionally dependent on the widget
+  /// reporting game completion.
+  final int? dismissLimit;
+
+  /// What the host widget is asked to open.
+  String get openDetail => 'details_${gameCampaignType}_$gameCampaignId';
 }
 
 /// Per-button colours. A null field means "use the host's theme".
