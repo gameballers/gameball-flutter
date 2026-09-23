@@ -377,7 +377,8 @@ class GameballApp extends StatelessWidget {
 
     final service = _inAppMessaging ??= InAppMessagingService(
       source: debugMessageSource ?? HttpMessageSource(_syncInAppMessages),
-      presenter: OverlayPresenter(navigatorKey),
+      presenter: OverlayPresenter(navigatorKey,
+          widgetUrlBuilder: _buildInAppWidgetUrl),
       // Persisted, both of them: the backend's contract requires that a
       // non-repeatable campaign never shows again "locally too", and that a
       // failed sync falls back to the previous cache. Neither survives a restart
@@ -898,6 +899,28 @@ class GameballApp extends StatelessWidget {
       }
     });
   }
+
+  /// Builds the widget URL for an in-app reward campaign.
+  ///
+  /// Reuses [_buildWidgetUrl] through a synthesised request rather than
+  /// composing a second URL by hand, so the two can never drift — and without
+  /// touching `showProfile`'s own path, which every shipped integration
+  /// depends on.
+  ///
+  /// The campaign supplies only [openDetail]. Everything identifying — api key,
+  /// customer, locale, platform, session token — comes from SDK state, which is
+  /// why the campaign payload never carries a URL.
+  ///
+  /// Navigation is hidden: the message is a card showing one reward campaign,
+  /// not the profile, so the widget's own chrome would offer a way out of the
+  /// thing the customer was just handed.
+  String _buildInAppWidgetUrl(String openDetail) => _buildWidgetUrl(
+        ShowProfileRequestBuilder()
+            .customerId(_inAppMessagingCustomerId)
+            .openDetail(openDetail)
+            .hideNavigation(true)
+            .build(),
+      );
 
   /// Builds the URL for the Gameball profile widget.
   ///

@@ -337,7 +337,24 @@ GameballInAppMessage? _parseMessage(
   final hasBody = body != null && body.isNotEmpty;
   final hasImage = imageUrl != null && imageUrl.isNotEmpty;
 
-  if (type == GameballMessageType.slideup) {
+  // A reward-campaign message renders a live widget, so its content arrives at
+  // display time rather than in the payload. Read before the render check
+  // below, which would otherwise drop it for having no header, body or image.
+  final widget = _parseWidgetContent(content['widget'], label);
+
+  if (widget != null && type != GameballMessageType.modal) {
+    // Only the modal composition exists. Fullscreen was tried and the widget
+    // overflows it: the wheel is sized off the viewport width and a full-width
+    // box clips its own copy. Kept out of the enum rather than rendered badly.
+    iamLog('campaign $label dropped: a widget message renders as a modal, and '
+        'this one is a ${type.name}');
+    return null;
+  }
+
+  if (widget != null) {
+    // Skips the checks below entirely: header, body and image are all optional
+    // decoration around a widget, and none of them is what gets rendered.
+  } else if (type == GameballMessageType.slideup) {
     // A slideup is one line of copy. An icon alone is not a message — unlike a
     // modal, where artwork can carry everything — because a 40-point square with
     // no words says nothing.
@@ -400,7 +417,29 @@ GameballInAppMessage? _parseMessage(
     buttons: buttons,
     extras: _parseExtras(content['extras']),
     style: _parseMessageStyle(content['colors'], content['textAlignment']),
+    widget: widget,
   );
+}
+
+/// Reads a reward-campaign widget from `content.widget`.
+///
+/// Null when absent, which is the ordinary case. A malformed one is also null
+/// rather than an error: a campaign that names no detail has nothing to open,
+/// and dropping the message is handled by the caller's render check.
+GameballWidgetContent? _parseWidgetContent(Object? json, String label) {
+  if (json == null) return null;
+  if (json is! Map<String, dynamic>) {
+    iamLog('campaign $label: "widget" is not an object, ignoring');
+    return null;
+  }
+
+  final openDetail = _asString(json['openDetail']);
+  if (openDetail == null || openDetail.isEmpty) {
+    iamLog('campaign $label: widget content has no "openDetail", ignoring');
+    return null;
+  }
+
+  return GameballWidgetContent(openDetail: openDetail);
 }
 
 /// Reads how the image and copy are arranged.

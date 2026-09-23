@@ -93,6 +93,24 @@ final class GameballNavigateAction extends GameballClickAction {
   final Map<String, Object>? arguments;
 }
 
+/// A reward campaign rendered as the message's own content.
+///
+/// The campaign names only which part of the widget to open; the SDK composes
+/// the rest of the URL from state it already holds — api key, customer, locale,
+/// platform, session token. Deliberately *not* a URL on the wire: one would have
+/// to carry the api key and the player id, which would mean a campaign payload
+/// that is both customer-specific and credential-bearing, and which would go
+/// stale the moment either changed.
+///
+/// This is what lets a marketer trigger spin-and-win from a session start or a
+/// custom event without the host app calling `showProfile` with an openDetail.
+final class GameballWidgetContent {
+  const GameballWidgetContent({required this.openDetail});
+
+  /// Which widget detail to open, e.g. `details_wheel`.
+  final String openDetail;
+}
+
 /// Per-button colours. A null field means "use the host's theme".
 class GameballButtonStyle {
   const GameballButtonStyle(
@@ -188,6 +206,7 @@ class GameballInAppMessage {
     this.buttons = const <GameballMessageButton>[],
     this.extras = const <String, String>{},
     this.style = const GameballMessageStyle(),
+    this.widget,
   });
 
   final String id;
@@ -255,6 +274,17 @@ class GameballInAppMessage {
 
   final GameballMessageStyle style;
 
+  /// A reward campaign to render inside the message, instead of artwork and
+  /// copy. Null for every ordinary message.
+  ///
+  /// A message carrying this renders a live widget, so it is exempt from the
+  /// parser's "needs something to render" rule — its content arrives over the
+  /// network at display time rather than in the payload.
+  final GameballWidgetContent? widget;
+
+  /// Whether this message's content is a reward campaign rather than artwork.
+  bool get isWidget => widget != null;
+
   /// The same message with different text.
   ///
   /// Deliberately narrow rather than a general `copyWith`: personalisation is the
@@ -283,5 +313,6 @@ class GameballInAppMessage {
         buttons: buttons ?? this.buttons,
         extras: extras,
         style: style,
+        widget: widget,
       );
 }

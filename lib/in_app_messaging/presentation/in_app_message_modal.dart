@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
+import 'gameball_widget_view.dart';
 import 'message_view_metrics.dart';
 import 'message_presenter.dart' show messageEntrance;
 
@@ -21,11 +22,28 @@ class GameballInAppMessageModal extends StatelessWidget {
     required this.onButtonPressed,
     required this.onClosePressed,
     required this.onMessagePressed,
+    this.widgetUrl,
+    this.onWidgetReady,
+    this.onWidgetFailed,
   });
 
   final GameballInAppMessage message;
   final void Function(GameballMessageButton button) onButtonPressed;
   final VoidCallback onClosePressed;
+
+  /// The composed reward-campaign URL, for a message whose content is a widget.
+  ///
+  /// Supplied by the presenter rather than carried on the message: composing it
+  /// needs the api key, the customer and the session token, none of which this
+  /// layer has any business knowing.
+  final String? widgetUrl;
+
+  /// Fires when the widget has finished drawing. The presenter holds the card
+  /// invisible until then, so this is also when the impression is counted.
+  final VoidCallback? onWidgetReady;
+
+  /// Fires when the widget never became ready.
+  final VoidCallback? onWidgetFailed;
 
   /// Invoked when the message surface itself is tapped. Only reachable when the
   /// campaign set a message-level action.
@@ -64,7 +82,9 @@ class GameballInAppMessageModal extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               child: Stack(
                 children: [
-                  if (_imageOnly)
+                  if (message.isWidget)
+                    _widget(context)
+                  else if (_imageOnly)
                     _fullBleed(context)
                   else
                     // Scrollable rather than clipped. A long promo on a small phone,
@@ -160,6 +180,46 @@ class GameballInAppMessageModal extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// The reward-campaign composition: the widget is the card.
+  ///
+  /// Shaped rather than stretched. The widget sizes its wheel off the viewport
+  /// *width*, so a box wider than roughly [ModalMetrics.widgetAspectRatio]
+  /// overflows and clips its own copy — a full-width box cut "Better Luck Next
+  /// Time" off the wheel entirely. Holding the aspect keeps it whole on every
+  /// screen, and bounding the height keeps the card off the status bar on a
+  /// small phone.
+  ///
+  /// No close-button interaction here and no tap target: the widget handles its
+  /// own taps, and wrapping it would swallow them.
+  Widget _widget(BuildContext context) {
+    final url = widgetUrl;
+    if (url == null) {
+      // The presenter refuses to mount a widget message without a url, so this
+      // is unreachable in practice; failing visibly beats a blank card.
+      onWidgetFailed?.call();
+      return const SizedBox.shrink();
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = MediaQuery.of(context).size.height *
+            ModalMetrics.widgetMaxHeightFraction;
+        final byShape =
+            constraints.maxWidth / ModalMetrics.widgetAspectRatio;
+        return SizedBox(
+          height: byShape < available ? byShape : available,
+          child: GameballWidgetView(
+            key: const Key('gb_iam_widget'),
+            url: url,
+            onReady: () => onWidgetReady?.call(),
+            onFailed: () => onWidgetFailed?.call(),
+            onCloseRequested: onClosePressed,
+          ),
+        );
+      },
     );
   }
 
