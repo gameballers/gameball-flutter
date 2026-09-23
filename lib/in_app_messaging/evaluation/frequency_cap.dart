@@ -167,9 +167,12 @@ class StoredFrequencyCap implements FrequencyCap {
         _key,
         jsonEncode(<String, dynamic>{
           'customerId': customerId,
+          // storageKey, not string interpolation. Interpolating would depend on
+          // CampaignKey.toString(), which exists for logs — changing it for
+          // readability would silently orphan every stored history.
           'campaigns': <String, String>{
             for (final entry in _history.entries)
-              '${entry.key}': entry.value.toIso8601String(),
+              entry.key.storageKey: entry.value.toIso8601String(),
           },
         }),
       );

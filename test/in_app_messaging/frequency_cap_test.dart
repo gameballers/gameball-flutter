@@ -206,4 +206,54 @@ void main() {
     expect(shown, isNot(contains(const CampaignKey.game(9645))),
         reason: 'showing a message must not mark the game of the same id shown');
   });
+
+  test('history written before this release is read as message campaigns',
+      () async {
+    // The on-disk shape does not change — JSON keys were always strings. Only
+    // the namespace moves, so a bare number has to keep meaning what it meant,
+    // or an update re-shows every once-ever campaign.
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      _key: jsonEncode(<String, dynamic>{
+        'customerId': 'c1',
+        'campaigns': <String, String>{'2041': t0.toIso8601String()},
+      }),
+    });
+
+    final cap = StoredFrequencyCap();
+    await cap.load('c1');
+
+    expect(cap.snapshot().lastDisplayByCampaign,
+        {const CampaignKey.message(2041): t0.toUtc()});
+  });
+
+  test('a game display round-trips through storage', () async {
+    SharedPreferences.setMockInitialValues(const <String, Object>{});
+    final cap = StoredFrequencyCap();
+    await cap.load('c1');
+    cap.recordDisplay(const CampaignKey.game(9645), t0);
+    // recordDisplay persists without awaiting, so let the write land.
+    await Future<void>.delayed(Duration.zero);
+
+    final reloaded = StoredFrequencyCap();
+    await reloaded.load('c1');
+
+    expect(reloaded.snapshot().lastDisplayByCampaign,
+        {const CampaignKey.game(9645): t0.toUtc()});
+  });
+
+  test('a game and a message of the same number survive a restart apart',
+      () async {
+    SharedPreferences.setMockInitialValues(const <String, Object>{});
+    final cap = StoredFrequencyCap();
+    await cap.load('c1');
+    cap.recordDisplay(const CampaignKey.message(9645), t0);
+    cap.recordDisplay(const CampaignKey.game(9645), t0);
+    await Future<void>.delayed(Duration.zero);
+
+    final reloaded = StoredFrequencyCap();
+    await reloaded.load('c1');
+
+    expect(reloaded.snapshot().shownCampaigns, hasLength(2),
+        reason: 'the two must not collapse into one stored key');
+  });
 }
