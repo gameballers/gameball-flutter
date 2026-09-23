@@ -861,7 +861,7 @@ class InAppMessagingService {
         shown = true;
         // Recorded at impression, never at selection, so a deferred or
         // suppressed message does not burn its slot.
-        _cap.recordDisplay(campaign.campaignId, _clock());
+        _cap.recordDisplay(campaign.key, _clock());
         _logEvent(campaign, GameballMessageEventType.impression);
       },
       onButtonPressed: (button) {

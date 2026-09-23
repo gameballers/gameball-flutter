@@ -4,11 +4,12 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../iam_log.dart';
+import '../models/campaign_key.dart';
 
 /// An immutable view of display history, for the pure evaluator to read.
 class CapState {
   const CapState({
-    this.lastDisplayByCampaign = const <int, DateTime>{},
+    this.lastDisplayByCampaign = const <CampaignKey, DateTime>{},
     this.lastDisplayAt,
   });
 
@@ -19,13 +20,13 @@ class CapState {
   /// again, a repeatable one may show after its own `minIntervalSeconds`, and the
   /// global cooldown applies between any two messages from any campaign. A set
   /// can only answer the first.
-  final Map<int, DateTime> lastDisplayByCampaign;
+  final Map<CampaignKey, DateTime> lastDisplayByCampaign;
 
   /// When the most recent message from any campaign was displayed.
   final DateTime? lastDisplayAt;
 
   /// Campaigns displayed at least once.
-  Iterable<int> get shownCampaignIds => lastDisplayByCampaign.keys;
+  Iterable<CampaignKey> get shownCampaigns => lastDisplayByCampaign.keys;
 }
 
 /// Tracks what has been shown, so the evaluator can enforce repeat rules.
@@ -40,11 +41,11 @@ abstract class FrequencyCap {
 
   CapState snapshot();
 
-  /// Records that [campaignId] was displayed at [at].
+  /// Records that [campaign] was displayed at [at].
   ///
   /// Called at impression, never at selection — a deferred or suppressed message
   /// must not burn its slot.
-  void recordDisplay(int campaignId, DateTime at);
+  void recordDisplay(CampaignKey campaign, DateTime at);
 }
 
 /// History that lives for one app run. Nothing survives a restart.
@@ -53,7 +54,7 @@ abstract class FrequencyCap {
 /// is what ships — with this one, a campaign the backend marked "once ever" comes
 /// back on every cold start.
 class InMemoryFrequencyCap implements FrequencyCap {
-  final Map<int, DateTime> _history = <int, DateTime>{};
+  final Map<CampaignKey, DateTime> _history = <CampaignKey, DateTime>{};
   DateTime? _lastDisplayAt;
 
   @override
@@ -63,13 +64,13 @@ class InMemoryFrequencyCap implements FrequencyCap {
 
   @override
   CapState snapshot() => CapState(
-        lastDisplayByCampaign: Map<int, DateTime>.unmodifiable(_history),
+        lastDisplayByCampaign: Map<CampaignKey, DateTime>.unmodifiable(_history),
         lastDisplayAt: _lastDisplayAt,
       );
 
   @override
-  void recordDisplay(int campaignId, DateTime at) {
-    _history[campaignId] = at;
+  void recordDisplay(CampaignKey campaign, DateTime at) {
+    _history[campaign] = at;
     _lastDisplayAt = at;
   }
 }
@@ -92,7 +93,7 @@ class StoredFrequencyCap implements FrequencyCap {
 
   static const String _key = 'gameball_iam_display_history';
 
-  final Map<int, DateTime> _history = <int, DateTime>{};
+  final Map<CampaignKey, DateTime> _history = <CampaignKey, DateTime>{};
   DateTime? _lastDisplayAt;
   String? _customerId;
 
@@ -122,11 +123,11 @@ class StoredFrequencyCap implements FrequencyCap {
       final campaigns = decoded['campaigns'];
       if (campaigns is! Map) return;
       campaigns.forEach((key, value) {
-        final id = int.tryParse('$key');
+        final campaign = CampaignKey.parse('$key');
         final at = value is String ? DateTime.tryParse(value) : null;
-        if (id == null || at == null) return;
+        if (campaign == null || at == null) return;
         final utc = at.toUtc();
-        _history[id] = utc;
+        _history[campaign] = utc;
         if (_lastDisplayAt == null || utc.isAfter(_lastDisplayAt!)) {
           _lastDisplayAt = utc;
         }
@@ -141,14 +142,14 @@ class StoredFrequencyCap implements FrequencyCap {
 
   @override
   CapState snapshot() => CapState(
-        lastDisplayByCampaign: Map<int, DateTime>.unmodifiable(_history),
+        lastDisplayByCampaign: Map<CampaignKey, DateTime>.unmodifiable(_history),
         lastDisplayAt: _lastDisplayAt,
       );
 
   @override
-  void recordDisplay(int campaignId, DateTime at) {
+  void recordDisplay(CampaignKey campaign, DateTime at) {
     final utc = at.toUtc();
-    _history[campaignId] = utc;
+    _history[campaign] = utc;
     _lastDisplayAt = utc;
     unawaited(_persist());
   }

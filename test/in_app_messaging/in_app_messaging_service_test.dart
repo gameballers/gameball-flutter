@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gameball_sdk/in_app_messaging/models/campaign_key.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_event.dart';
 import 'package:gameball_sdk/in_app_messaging/evaluation/frequency_cap.dart';
@@ -64,26 +65,26 @@ class SlowFrequencyCap implements FrequencyCap {
   SlowFrequencyCap({required this.delay, required this.stored});
 
   final Duration delay;
-  final Map<int, DateTime> stored;
+  final Map<CampaignKey, DateTime> stored;
 
-  Map<int, DateTime> _loaded = <int, DateTime>{};
+  Map<CampaignKey, DateTime> _loaded = <CampaignKey, DateTime>{};
 
   @override
   Future<void> load(String customerId) async {
     await Future<void>.delayed(delay);
-    _loaded = Map<int, DateTime>.of(stored);
+    _loaded = Map<CampaignKey, DateTime>.of(stored);
   }
 
   @override
   CapState snapshot() => CapState(
-        lastDisplayByCampaign: Map<int, DateTime>.unmodifiable(_loaded),
+        lastDisplayByCampaign: Map<CampaignKey, DateTime>.unmodifiable(_loaded),
         lastDisplayAt: _loaded.values.isEmpty
             ? null
             : _loaded.values.reduce((a, b) => a.isAfter(b) ? a : b),
       );
 
   @override
-  void recordDisplay(int campaignId, DateTime at) => _loaded[campaignId] = at;
+  void recordDisplay(CampaignKey campaign, DateTime at) => _loaded[campaign] = at;
 }
 
 class FakePresenter implements GameballMessagePresenter {
@@ -424,7 +425,7 @@ void main() {
       await h.service.start(customerId: 'c1');
 
       expect(h.analytics.impressions, ['a']);
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('a'))});
       expect(h.cap.snapshot().lastDisplayAt, t0);
     });
 
@@ -632,7 +633,7 @@ void main() {
       expect(h.service.pendingCampaign?.campaignId, idFor('cart'));
 
       // Another message lands while 'cart' waits, moving the floor forward.
-      h.cap.recordDisplay(idFor('other'), t0.add(const Duration(seconds: 40)));
+      h.cap.recordDisplay(CampaignKey.message(idFor('other')), t0.add(const Duration(seconds: 40)));
       h.setNow(t0.add(const Duration(seconds: 45)));
 
       h.setWidgetOpen(false);
@@ -1505,8 +1506,9 @@ void main() {
         campaigns: [campaign('a')],
         frequencyCap: SlowFrequencyCap(
           delay: const Duration(milliseconds: 150),
-          stored: <int, DateTime>{
-            idFor('a'): t0.subtract(const Duration(hours: 1)),
+          stored: <CampaignKey, DateTime>{
+            CampaignKey.message(idFor('a')):
+                t0.subtract(const Duration(hours: 1)),
           },
         ),
         storeTimeout: const Duration(milliseconds: 30),
@@ -1557,7 +1559,7 @@ void main() {
     test('a new customer refetches and resets caps', () async {
       final h = build();
       await h.service.start(customerId: 'c1');
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('a'))});
 
       h.service.onCustomerChanged('c2');
       await Future<void>.delayed(Duration.zero);
@@ -1604,7 +1606,7 @@ void main() {
 
       h.service.stop();
 
-      expect(h.cap.snapshot().shownCampaignIds, isNotEmpty,
+      expect(h.cap.snapshot().shownCampaigns, isNotEmpty,
           reason: 'history belongs to the customer, not the session. Wiping it '
               'on logout would let a once-ever campaign show again the moment '
               'they log back in — and load() already discards it when a '
@@ -2002,7 +2004,7 @@ void main() {
       await h.service.start(customerId: 'c1');
       await pumpEventQueue();
 
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('promo')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('promo'))});
     });
 
     test('a new customer never inherits the previous one\'s values', () async {

@@ -84,8 +84,10 @@ InAppMessageCampaign? selectCampaign({
   // stable, so comparing on priority alone would scramble equal-priority
   // campaigns once the list is long enough to trip the unstable path.
   //
-  // `campaignOrdering` on the sync response is **not** this ranking, despite the
-  // name — see the note on it in the port specification.
+  // `campaignOrdering` on the sync response is an *input* to this order, not a
+  // separate ranking: the backend applies priority, then campaignOrdering, then
+  // newest-first before sending, so the array position sorted on here already
+  // carries it. Confirmed by the in-app sync client integration guide, §8.
   final indexed = <(int, InAppMessageCampaign)>[
     for (var i = 0; i < eligible.length; i++) (i, eligible[i]),
   ];
@@ -112,7 +114,7 @@ bool isRepeatEligible({
   required CapState capState,
   required DateTime now,
 }) {
-  final lastShown = capState.lastDisplayByCampaign[campaign.campaignId];
+  final lastShown = capState.lastDisplayByCampaign[campaign.key];
   if (lastShown == null) return true;
 
   if (!campaign.repeatable) return false;
