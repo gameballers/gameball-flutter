@@ -226,6 +226,77 @@ const String stubSyncJson = '''
 }
 ''';
 
+/// The event the game fixture's second campaign triggers on.
+const String stubGameEventName = 'open_rewards';
+
+/// A sync response carrying both kinds of entry, as the contract's worked
+/// example shapes them.
+///
+/// Held as raw JSON rather than constructed objects so the real parsing rules
+/// are exercised — the campaignType fork, the null content on a game, and the
+/// campaignId of 0 that identifies nothing.
+///
+/// Deliberately excludes the contract's fullscreen and screen-triggered
+/// entries: this SDK version skips both, so including them would leave the
+/// fixture asserting nothing about them beyond their absence.
+const String stubGameSyncJson = '''
+{
+  "cooldownSeconds": 30,
+  "quietHours": { "enabled": true, "start": "22:00", "end": "08:00" },
+  "campaignOrdering": [2215],
+  "messages": [
+      {
+        "campaignType": 1,
+        "campaignId": 2215,
+        "variationId": 206,
+        "dispatchId": "stub-2215-welcome",
+        "name": "Welcome popup",
+        "priority": 100,
+        "messageType": 2,
+        "trigger": { "type": "session_start", "repeatable": false },
+        "content": {
+          "colors": { "background": "#FFFFFF", "header": "#111111" },
+          "closeBehaviour": "both",
+          "buttons": [
+            { "id": "primary", "action": { "type": "dismiss" },
+              "colors": { "background": "#6C4DF6", "text": "#FFFFFF" } }
+          ]
+        },
+        "locale": {
+          "header": "Welcome back!",
+          "message": "Your points are still waiting.",
+          "buttons": [ { "id": "primary", "text": "Thanks" } ]
+        },
+        "localeCode": "en",
+        "expiresAt": null,
+        "isTest": false
+      },
+      {
+        "campaignType": 2,
+        "campaignId": 0,
+        "variationId": 0,
+        "dispatchId": null,
+        "name": "Spin the Wheel",
+        "priority": 0,
+        "messageType": 2,
+        "trigger": {
+          "type": "event",
+          "name": "$stubGameEventName",
+          "repeatable": true,
+          "minIntervalSeconds": 5
+        },
+        "content": null,
+        "locale": null,
+        "localeCode": null,
+        "expiresAt": null,
+        "isTest": false,
+        "gameCampaignId": 9645,
+        "gameCampaignType": "wheel"
+      }
+  ]
+}
+''';
+
 /// Serves campaigns from a fixture instead of the network.
 ///
 /// Used until the backend endpoint exists. Tests inject [json] to control the
