@@ -916,13 +916,35 @@ class GameballApp extends StatelessWidget {
   /// Navigation is hidden: the message is a card showing one reward campaign,
   /// not the profile, so the widget's own chrome would offer a way out of the
   /// thing the customer was just handed.
-  String _buildInAppWidgetUrl(String openDetail) => _buildWidgetUrl(
-        ShowProfileRequestBuilder()
-            .customerId(_inAppMessagingCustomerId)
-            .openDetail(openDetail)
-            .hideNavigation(true)
-            .build(),
-      );
+  /// Points game campaigns at a non-production widget host.
+  ///
+  /// Temporary. `showProfile` takes a `widgetUrlPrefix` per call, but in-app
+  /// messaging has no caller to take one from, so without this a host aimed at
+  /// alpha gets alpha for its profile widget and production for its game
+  /// campaigns — which looks exactly like a campaign that does not exist.
+  ///
+  /// The real fix is a prefix on the SDK's own configuration, applied to both
+  /// paths. This exists so the fullscreen layout can be verified against a live
+  /// campaign before that lands.
+  @visibleForTesting
+  static String? debugWidgetUrlPrefix;
+
+  String _buildInAppWidgetUrl(String openDetail) {
+    final url = _buildWidgetUrl(
+      ShowProfileRequestBuilder()
+          .customerId(_inAppMessagingCustomerId)
+          .openDetail(openDetail)
+          .hideNavigation(true)
+          .widgetUrlPrefix(debugWidgetUrlPrefix)
+          .build(),
+    );
+    // Logged because it is otherwise invisible: a campaign that opens on "this
+    // campaign is not available" looks identical whether the id is wrong, the
+    // customer cannot play it, or the host is pointed at a different widget
+    // environment than its api key belongs to.
+    iamLog('opening widget $url');
+    return url;
+  }
 
   /// Builds the URL for the Gameball profile widget.
   ///
