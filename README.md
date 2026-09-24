@@ -318,6 +318,31 @@ A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `pric
 
 Whether a matching campaign actually appears also depends on its frequency cap, the minimum interval between any two displays, its expiry and its priority — all set in the dashboard.
 
+### Game campaigns
+
+A campaign the merchant set to open itself over your app — a spin the wheel, a quiz, a scratch and win. It arrives in the same sync as in-app messages and displays through the same overlay, so **there is nothing extra to integrate**: if you already call `startInAppMessaging`, game campaigns work.
+
+The campaign *is* the content. There is no headline or button to style — the SDK opens the game itself in a card over your app, and shows the card only once the game has finished drawing, so your customer never sees a loading state.
+
+Two limits in this release:
+
+- **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger instead.
+- **Fullscreen game campaigns are not drawn.** Author them as a modal.
+
+Both are skipped with a `[GameballIAM]` log naming the campaign, so one that does not appear can be diagnosed from the console.
+
+Game campaigns report no in-app messaging telemetry — engagement is recorded through the normal challenge flow when the customer plays. To be told when that happens:
+
+```dart
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+  onGameEvent: (gameCampaignId, event) {
+    debugPrint("campaign $gameCampaignId reported $event");
+  },
+);
+```
+
 ### Controlling display
 
 ```dart

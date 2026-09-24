@@ -4,6 +4,26 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [Unreleased] 🎡
+
+> **Minor Release**: Game campaigns — a reward campaign opens itself over your app from an in-app trigger
+
+### ✨ Added
+- 🎡 **Game campaigns**: a spin the wheel, quiz or scratch and win the merchant set to open over your app arrives in the same sync as in-app messages and displays through the same overlay. **Nothing to integrate** — a host already calling `startInAppMessaging` gets them
+- 🧩 **The campaign is the content**: there is no headline or button to style. The SDK opens the game itself in a card, and shows the card only once the game has finished drawing, so the customer never sees a loading state
+- 🎮 **Game events**: `onGameEvent` on `startInAppMessaging` reports what a campaign posts — most usefully that the customer played it
+- 🛡️ **Unknown kinds are skipped, never guessed at.** An entry whose `campaignType` or game type this version does not recognise is dropped with a log naming it, so a future kind degrades to silence rather than to a wrong display
+
+### 🔒 Changed
+- 🔑 **Display history is keyed by campaign kind and id.** Challenge ids and message campaign ids are separate sequences that overlap numerically, and every game entry arrives with `campaignId: 0` — so a bare number can no longer identify a campaign. Histories written by earlier releases are migrated on read; nothing is lost and no campaign re-shows
+- 📊 **Game campaigns report no in-app messaging telemetry.** Engagement is recorded through the normal challenge flow when the customer plays. Their display history is still kept, so a once-ever game stays once-ever
+
+### ⚠️ Not yet supported
+- 🖥️ **Fullscreen game campaigns are not drawn.** The widget sizes its content off the viewport width, and a full-width box clips it. Author them as a modal
+- 📱 **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger. Both limits are logged by campaign name, so a campaign that does not appear can be diagnosed from the console
+
+---
+
 ## [4.0.0] - 2026-10-22 🎉
 
 > **Major Release**: Raised minimum platform versions to iOS 15.0 and Android API 24, and added in-app messaging — an opt-in module that displays campaigns authored in the Gameball dashboard inside your app
