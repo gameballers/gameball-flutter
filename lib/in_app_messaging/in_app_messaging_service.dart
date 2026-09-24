@@ -934,6 +934,13 @@ class InAppMessagingService {
     // marketer's testing never reaches campaign statistics.
     if (campaign.isTest) return;
 
+    // A game campaign is not a message campaign. Engagement is recorded through
+    // the challenge flow when the customer plays it, and an event sent here
+    // would attribute against a campaign id that is not a message — campaignId
+    // is 0 on every game entry. The display history is still recorded; only the
+    // reporting stops.
+    if (campaign.message.isWidget) return;
+
     _analytics.log(GameballMessageEvent(
       type: type,
       campaignId: campaign.campaignId,

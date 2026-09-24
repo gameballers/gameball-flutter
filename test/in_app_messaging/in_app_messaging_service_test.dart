@@ -264,6 +264,26 @@ String labelOf(int campaignId) => _idsByLabel.entries
         orElse: () => MapEntry('#$campaignId', campaignId))
     .key;
 
+/// A session-start game campaign, for the telemetry guard.
+///
+/// campaignId is 0 exactly as a real game entry arrives; its identity comes
+/// from gameCampaignId.
+InAppMessageCampaign gameCampaign({int gameCampaignId = 9645}) =>
+    InAppMessageCampaign(
+      campaignId: 0,
+      trigger: const GameballSessionStartTrigger(),
+      priority: 0,
+      repeatable: true,
+      message: GameballInAppMessage(
+        id: 'game_$gameCampaignId',
+        type: GameballMessageType.modal,
+        widget: GameballWidgetContent(
+          gameCampaignId: gameCampaignId,
+          gameCampaignType: 'wheel',
+        ),
+      ),
+    );
+
 InAppMessageCampaign campaign(
   String label, {
   GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
@@ -417,6 +437,26 @@ void main() {
       expect(h.source.lastAudience, isA<CustomerAudience>());
       expect(h.presenter.shownMessageIds, ['msg_a']);
       expect(h.service.isStarted, isTrue);
+    });
+
+    test('a displayed game campaign reports nothing', () async {
+      // Contract: engagement is recorded through the challenge flow when the
+      // customer plays. An event here would attribute against campaignId 0.
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.analytics.events, isEmpty, reason: 'no telemetry for a game');
+    });
+
+    test('a displayed game campaign still records the cap', () async {
+      // Suppressing telemetry must not suppress the display history, or a
+      // once-ever game would reappear on every session.
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.cap.snapshot().shownCampaigns, {const CampaignKey.game(9645)});
     });
 
     test('logs an impression and records the cap at display', () async {
