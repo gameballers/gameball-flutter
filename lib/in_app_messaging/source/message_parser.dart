@@ -212,6 +212,14 @@ GameballMessageTrigger? _parseTrigger(Object? json, String label) {
       }
 
       return GameballCustomEventTrigger(eventName, filters: filters);
+    case 'screen':
+      // Deliberate, not unimplemented. On the web a URL is ambient and free; on
+      // mobile nothing is, so a screen trigger needs the host to instrument it —
+      // at which point it costs the same as a custom event. Named here so a
+      // marketer who targets a screen gets a diagnosable silence.
+      iamLog('campaign $label dropped: screen triggers are not supported by '
+          'this SDK version (screen "${_asString(json['name'])}")');
+      return null;
     default:
       // Expected steady state, not an edge case: the backend supports more
       // trigger types than this SDK version. Name both so "why didn't my
@@ -465,6 +473,16 @@ GameballWidgetContent? _parseGameContent(
   if (gameCampaignId == null || gameCampaignId == 0) {
     iamLog('campaign $label dropped: a game entry needs a "gameCampaignId" '
         '(its "campaignId" is always 0 and identifies nothing)');
+    return null;
+  }
+
+  // Fullscreen is measured as broken for this content: the widget sizes its
+  // wheel off the viewport width, so a full-width box clips its own copy.
+  // Skipped rather than drawn badly. Applies to games only — fullscreen
+  // messages have shipped and are unaffected.
+  if (_asInt(json['messageType']) == _fullscreenMessageType) {
+    iamLog('campaign $label skipped: fullscreen game campaigns are not drawn '
+        'by this SDK version — author it as a modal');
     return null;
   }
 

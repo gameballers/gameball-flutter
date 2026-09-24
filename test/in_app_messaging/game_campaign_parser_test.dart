@@ -87,4 +87,35 @@ void main() {
     expect(campaigns, hasLength(1));
     expect(campaigns.single.message.isWidget, isFalse);
   });
+
+  test('a screen-triggered game is skipped until screens are supported', () {
+    final entry = wheelEntry.replaceFirst(
+      '"trigger": { "type": "session_start", "repeatable": true }',
+      '"trigger": { "type": "screen", "name": "cart", "repeatable": true }',
+    );
+    expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
+  });
+
+  test('a fullscreen game is skipped until the surface is designed', () {
+    // Measured: the widget sizes its wheel off viewport width, and a full-width
+    // box clips its own copy. Skipped rather than drawn badly.
+    final entry = wheelEntry.replaceFirst('"messageType": 2', '"messageType": 3');
+    expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
+  });
+
+  test('a fullscreen *message* is unaffected', () {
+    // The guard is for games only. Fullscreen messages have shipped and work.
+    const message = '''
+{
+  "campaignType": 1, "campaignId": 2215, "messageType": 3,
+  "trigger": { "type": "session_start", "repeatable": false },
+  "content": { "colors": { "background": "#FFFFFF" } },
+  "locale": { "header": "Poster" }, "localeCode": "en"
+}''';
+    expect(parseSyncResponse(sync(message)).campaigns, hasLength(1));
+  });
+
+  test('a modal game is kept', () {
+    expect(parseSyncResponse(sync(wheelEntry)).campaigns, hasLength(1));
+  });
 }
