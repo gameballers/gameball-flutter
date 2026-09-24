@@ -1,0 +1,56 @@
+name: Slack release notification
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: github.repository_owner == 'gameballers'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Post release to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SDK_RELEASES_WEBHOOK_URL }}
+          REPO: ${{ github.event.repository.name }}
+          VERSION: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+        run: |
+          case "$REPO" in
+            gameball-ios) SDK="iOS SDK" ;;
+            gameball-flutter) SDK="Flutter SDK" ;;
+            gameball-react-native) SDK="React Native SDK" ;;
+            gb-mobile-android) SDK="Android SDK" ;;
+            *) SDK="$REPO" ;;
+          esac
+
+          # This version's CHANGELOG.md section: lines under "## [<version>]" up to the next "## [" heading,
+          # with its "### " sub-headings turned into bold lines (Slack mrkdwn has no headings)
+          NOTES=$(awk -v h="## [${VERSION#v}]" '
+            index($0, h) == 1 { on = 1; next }
+            /^## \[/ { on = 0 }
+            on && sub(/^### /, "") { $0 = "**" $0 "**" }
+            on && $0 != "---"
+          ' CHANGELOG.md)
+
+          WHATS_NEW="**What's new**
+
+          ${NOTES:-See the release notes for details.}"
+
+          # Only mrkdwn section blocks (no markdown block), so phone notifications show just `text` — verbatim, so it carries a
+          # plain "@channel" (a raw <!channel> shows as-is there); the <!channel> in the headline section does the pinging.
+          # CHANGELOG markdown -> mrkdwn: escape & < >, keep "> " quotes, **bold** -> *bold*, "- " -> "• ";
+          # one section per paragraph keeps each under Slack's 3000-character section limit.
+          jq -n --arg text "🚀 New $SDK release ($VERSION)
+          @channel" \
+            --arg headline "🚀 *New $SDK release ($VERSION)* — <$URL|Release notes>
+          <!channel>" --arg notes "$WHATS_NEW" '
+            [$notes | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("(?<s>^|\n)&gt; "; "\(.s)> ")
+                    | gsub("[*][*]"; "*") | gsub("(?<s>^|\n)- "; "\(.s)• ") | splits("\n([ \t]*\n)+") | select(test("[^[:space:]]"))]
+            | {text: $text, blocks: (([$headline] + .) | map({type: "section", text: {type: "mrkdwn", text: .}}))}
+          ' | curl -fsS -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
