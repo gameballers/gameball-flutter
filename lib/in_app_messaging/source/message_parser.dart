@@ -41,6 +41,31 @@ const Map<int, String> _messageTypeNames = <int, String>{
 /// banner nobody interacts with clears itself well inside a session.
 const Duration defaultSlideupAutoDismiss = Duration(seconds: 8);
 
+/// The kinds of entry the sync response carries.
+///
+/// An unrecognised kind is skipped, never coerced. More are expected, and an
+/// older client must degrade to silence rather than to a wrong display.
+const int _outboundCampaignType = 1;
+const int _gameCampaignType = 2;
+
+/// Games this SDK can open, as the open-details text the widget expects.
+///
+/// A value absent from this set is skipped: composing `details_<unknown>_<id>`
+/// would ask the widget to open something it has no renderer for.
+const Set<String> _knownGameTypes = <String>{
+  'wheel',
+  'slot',
+  'quiz',
+  'scratch',
+  'match',
+  'catcher',
+  'tictactoe',
+  'shooter',
+  'puzzle',
+  'tap_target',
+  'highway_drive',
+};
+
 const int _slideupMessageType = 1;
 const int _modalMessageType = 2;
 const int _fullscreenMessageType = 3;
@@ -333,11 +358,34 @@ GameballInAppMessage? _parseMessage(
   final body = _asString(locale['message']) ?? _asString(locale['body']);
   final imageUrl = _artworkUrl(content, type, label);
   final iconUrl = _asUrl(content['iconUrl']);
+  // Which kind of entry this is. Read before anything else about the content,
+  // because a game's content arrives at display time and the checks below would
+  // otherwise drop it for having no header, body or image.
+  final campaignType = _asInt(json['campaignType']) ?? _outboundCampaignType;
+  if (campaignType != _outboundCampaignType &&
+      campaignType != _gameCampaignType) {
+    iamLog('campaign $label skipped: unrecognised campaignType $campaignType — '
+        'this SDK version renders outbound messages and opens game campaigns');
+    return null;
+  }
+
+  final widget = campaignType == _gameCampaignType
+      ? _parseGameContent(json, label)
+      : null;
+  if (campaignType == _gameCampaignType && widget == null) {
+    return null; // already logged
+  }
+
   final hasHeader = header != null && header.isNotEmpty;
   final hasBody = body != null && body.isNotEmpty;
   final hasImage = imageUrl != null && imageUrl.isNotEmpty;
 
-  if (type == GameballMessageType.slideup) {
+  if (widget != null) {
+    // Exempt by kind, not by which fields happen to be absent. A game renders
+    // itself, so header, body and image are all optional decoration around it —
+    // while a *message* missing all three is still a campaign with nothing to
+    // show, and must keep failing for that reason.
+  } else if (type == GameballMessageType.slideup) {
     // A slideup is one line of copy. An icon alone is not a message — unlike a
     // modal, where artwork can carry everything — because a 40-point square with
     // no words says nothing.
@@ -400,7 +448,48 @@ GameballInAppMessage? _parseMessage(
     buttons: buttons,
     extras: _parseExtras(content['extras']),
     style: _parseMessageStyle(content['colors'], content['textAlignment']),
+    widget: widget,
   );
+}
+
+/// Reads the game fields from a `campaignType: 2` entry.
+///
+/// Null when the entry cannot be opened, which drops it. Both fields are
+/// required: without the id there is nothing to open, and without a recognised
+/// type there is no renderer to ask for.
+GameballWidgetContent? _parseGameContent(
+  Map<String, dynamic> json,
+  String label,
+) {
+  final gameCampaignId = _asInt(json['gameCampaignId']);
+  if (gameCampaignId == null || gameCampaignId == 0) {
+    iamLog('campaign $label dropped: a game entry needs a "gameCampaignId" '
+        '(its "campaignId" is always 0 and identifies nothing)');
+    return null;
+  }
+
+  final gameCampaignType = _asString(json['gameCampaignType']);
+  if (gameCampaignType == null || !_knownGameTypes.contains(gameCampaignType)) {
+    iamLog('campaign $label dropped: unrecognised gameCampaignType '
+        '"$gameCampaignType" — this SDK version has no renderer for it');
+    return null;
+  }
+
+  return GameballWidgetContent(
+    gameCampaignId: gameCampaignId,
+    gameCampaignType: gameCampaignType,
+    // Not on the entry today; the backend still carries these on the challenge.
+    // Read leniently so the day they move here costs no parser change.
+    delay: _parseDelay(json['delay']),
+    dismissLimit: _asInt(json['dismissLimit']),
+  );
+}
+
+/// Seconds to wait after the trigger, bounded to the 0-60 the dashboard accepts.
+Duration? _parseDelay(Object? value) {
+  final seconds = _asInt(value);
+  if (seconds == null || seconds <= 0) return null;
+  return Duration(seconds: seconds > 60 ? 60 : seconds);
 }
 
 /// Reads how the image and copy are arranged.
