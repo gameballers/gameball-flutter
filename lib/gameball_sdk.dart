@@ -348,6 +348,7 @@ class GameballApp extends StatelessWidget {
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
     GameballOnNavigate? onNavigate,
+    GameballOnGameEvent? onGameEvent,
     Duration sessionTimeout = defaultSessionTimeout,
   }) {
     if (isNullOrEmpty(_apiKey)) {
@@ -418,6 +419,7 @@ class GameballApp extends StatelessWidget {
       customerId: customerId,
       beforeDisplay: beforeDisplay,
       onAction: onAction,
+      onGameEvent: onGameEvent,
     );
   }
 

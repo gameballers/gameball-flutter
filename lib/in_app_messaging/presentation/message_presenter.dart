@@ -39,6 +39,10 @@ abstract class GameballMessagePresenter {
     required void Function(GameballMessageButton button) onButtonPressed,
     required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
+
+    /// What a reward campaign posted on its event bridge. Never called for an
+    /// ordinary message, which has no bridge.
+    void Function(Map<String, dynamic> event)? onWidgetEvent,
   });
 
   /// Removes the current message, if any. Safe to call repeatedly.

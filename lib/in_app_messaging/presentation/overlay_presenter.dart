@@ -44,6 +44,7 @@ class OverlayPresenter implements GameballMessagePresenter {
     required void Function(GameballMessageButton button) onButtonPressed,
     required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
+    void Function(Map<String, dynamic> event)? onWidgetEvent,
   }) {
     if (_entry != null) {
       iamLog('presenter busy: a message is already showing');
@@ -129,6 +130,7 @@ class OverlayPresenter implements GameballMessagePresenter {
             // untouched — the campaign gets another go at its next trigger
             // rather than being burned by a slow network.
             onWidgetFailed: dismiss,
+            onWidgetEvent: onWidgetEvent,
           ),
       },
     );
@@ -264,6 +266,7 @@ class _MessageLayer extends StatefulWidget {
     this.widgetUrl,
     this.onWidgetReady,
     this.onWidgetFailed,
+    this.onWidgetEvent,
   });
 
   final GameballInAppMessage message;
@@ -273,6 +276,7 @@ class _MessageLayer extends StatefulWidget {
   final String? widgetUrl;
   final VoidCallback? onWidgetReady;
   final VoidCallback? onWidgetFailed;
+  final void Function(Map<String, dynamic> event)? onWidgetEvent;
 
   @override
   State<_MessageLayer> createState() => _MessageLayerState();
@@ -318,6 +322,7 @@ class _MessageLayerState extends State<_MessageLayer> {
           widgetUrl: widget.widgetUrl,
           onWidgetReady: _onReady,
           onWidgetFailed: widget.onWidgetFailed,
+          onWidgetEvent: widget.onWidgetEvent,
         ),
       ],
     );

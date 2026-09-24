@@ -59,6 +59,16 @@ typedef PushPermissionRequester = Future<bool> Function();
 ///
 /// Return false to take over the action entirely — useful when the host needs
 /// to route a click through its own analytics or navigation stack.
+/// A game campaign reported something — most usefully that it was played.
+///
+/// [gameCampaignId] is the challenge the event came from. [event] is whatever
+/// the widget posted, decoded; the SDK does not interpret its shape, because
+/// the payload is the widget's contract with the merchant, not with this SDK.
+typedef GameballOnGameEvent = void Function(
+  int gameCampaignId,
+  Map<String, dynamic> event,
+);
+
 typedef GameballOnAction = bool Function(
   GameballInAppMessage message,
   GameballMessageButton? button,
@@ -211,6 +221,7 @@ class InAppMessagingService {
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
+  GameballOnGameEvent? _onGameEvent;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
 
   /// When artwork was last attempted, so a failure is not cached for the whole
@@ -290,6 +301,7 @@ class InAppMessagingService {
     required String customerId,
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
+    GameballOnGameEvent? onGameEvent,
   }) async {
     final current = _audience;
     if (current is CustomerAudience && current.customerId == customerId) {
@@ -299,6 +311,7 @@ class InAppMessagingService {
 
     _beforeDisplay = beforeDisplay;
     _onAction = onAction;
+    _onGameEvent = onGameEvent;
     _resetFor(CustomerAudience(customerId));
     await _syncAndEvaluateSessionStart(loadPersisted: true);
   }
@@ -884,6 +897,19 @@ class InAppMessagingService {
         _logEvent(campaign, GameballMessageEventType.click,
             url: _urlOf(action));
         _act(campaign.message, null, action);
+      },
+      onWidgetEvent: (event) {
+        final widget = campaign.message.widget;
+        if (widget == null) return;
+        // Logged either way. This is the only visibility into whether the widget
+        // talks to us at all, which the dismissal counter turns on.
+        iamLog('game ${widget.gameCampaignId} reported $event');
+        try {
+          _onGameEvent?.call(widget.gameCampaignId, event);
+        } catch (error) {
+          // A throwing host callback must not escape into presentation.
+          iamLog('onGameEvent threw ($error)');
+        }
       },
       onDismissed: () {
         // Without this event "shown and ignored" would be invisible in

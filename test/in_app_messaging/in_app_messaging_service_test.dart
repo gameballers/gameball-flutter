@@ -99,6 +99,10 @@ class FakePresenter implements GameballMessagePresenter {
   VoidCallback? _onDismissed;
   void Function(GameballMessageButton)? _onButtonPressed;
   VoidCallback? _onMessagePressed;
+  void Function(Map<String, dynamic>)? _onWidgetEvent;
+
+  /// Fires what a reward campaign's widget would have posted.
+  void emitWidgetEvent(Map<String, dynamic> event) => _onWidgetEvent?.call(event);
 
   @override
   bool get isShowing => _showing;
@@ -110,10 +114,12 @@ class FakePresenter implements GameballMessagePresenter {
     required void Function(GameballMessageButton button) onButtonPressed,
     required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
+    void Function(Map<String, dynamic> event)? onWidgetEvent,
   }) {
     if (!available || _showing) return false;
     _showing = true;
     _onDismissed = onDismissed;
+    _onWidgetEvent = onWidgetEvent;
     _onButtonPressed = onButtonPressed;
     _onMessagePressed = onMessagePressed;
     shownMessageIds.add(message.id);
@@ -437,6 +443,38 @@ void main() {
       expect(h.source.lastAudience, isA<CustomerAudience>());
       expect(h.presenter.shownMessageIds, ['msg_a']);
       expect(h.service.isStarted, isTrue);
+    });
+
+    test('a game event reaches the host with the game id', () async {
+      final received = <(int, Map<String, dynamic>)>[];
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onGameEvent: (id, event) => received.add((id, event)),
+      );
+      h.presenter.emitWidgetEvent(<String, dynamic>{'type': 'game_completed'});
+
+      // Asserted part by part: Dart compares maps by identity, so a record
+      // carrying one never equals an identical-looking literal.
+      expect(received, hasLength(1));
+      expect(received.single.$1, 9645);
+      expect(received.single.$2, <String, dynamic>{'type': 'game_completed'});
+    });
+
+    test('a throwing host callback does not escape', () async {
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onGameEvent: (_, __) => throw StateError('host blew up'),
+      );
+
+      expect(
+        () => h.presenter
+            .emitWidgetEvent(<String, dynamic>{'type': 'game_completed'}),
+        returnsNormally,
+      );
     });
 
     test('a displayed game campaign reports nothing', () async {

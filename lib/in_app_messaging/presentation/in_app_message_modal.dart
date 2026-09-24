@@ -25,6 +25,7 @@ class GameballInAppMessageModal extends StatelessWidget {
     this.widgetUrl,
     this.onWidgetReady,
     this.onWidgetFailed,
+    this.onWidgetEvent,
   });
 
   final GameballInAppMessage message;
@@ -44,6 +45,10 @@ class GameballInAppMessageModal extends StatelessWidget {
 
   /// Fires when the widget never became ready.
   final VoidCallback? onWidgetFailed;
+
+  /// What the widget posted on its event bridge, decoded. Game completion is
+  /// the one that matters.
+  final void Function(Map<String, dynamic> event)? onWidgetEvent;
 
   /// Invoked when the message surface itself is tapped. Only reachable when the
   /// campaign set a message-level action.
@@ -217,6 +222,10 @@ class GameballInAppMessageModal extends StatelessWidget {
             onReady: () => onWidgetReady?.call(),
             onFailed: () => onWidgetFailed?.call(),
             onCloseRequested: onClosePressed,
+            onEvent: (raw) {
+              final event = decodeWidgetEvent(raw);
+              if (event != null) onWidgetEvent?.call(event);
+            },
           ),
         );
       },

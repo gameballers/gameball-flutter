@@ -1,9 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../iam_log.dart';
+
+/// Decodes what the widget posted, or null when it is not an object.
+///
+/// Null rather than a throw: the bridge carries whatever the page chooses to
+/// send, and this runs inside a JavaScript channel callback — a throw there
+/// escapes into the host's error handling for a payload the host never wrote.
+Map<String, dynamic>? decodeWidgetEvent(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// How long the widget has to become ready before the message is abandoned.
 ///
