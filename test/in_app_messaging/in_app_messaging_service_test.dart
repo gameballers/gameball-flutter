@@ -1528,6 +1528,52 @@ void main() {
           reason: 'nothing was recorded, so the campaign is still owed');
     });
 
+    test('a game campaign is not opened from a cached set', () async {
+      // A message carries its own content, so a cached one is still correct. A
+      // game carries only a pointer and fetches its content live, so a cached
+      // entry is a promise the SDK cannot keep — the campaign may have ended,
+      // and the customer would be shown a card announcing that something they
+      // never heard of is unavailable.
+      const cachedGame = '''
+{
+  "cooldownSeconds": 30,
+  "messages": [
+    {
+      "campaignType": 2, "campaignId": 0, "variationId": 0, "dispatchId": null,
+      "name": "Spin the Wheel", "priority": 0, "messageType": 2,
+      "trigger": { "type": "session_start", "repeatable": true },
+      "content": null, "locale": null, "localeCode": null,
+      "expiresAt": null, "isTest": false,
+      "gameCampaignId": 9645, "gameCampaignType": "wheel"
+    }
+  ]
+}''';
+      final cache = InMemoryCampaignCache();
+      await cache.write('c1', cachedGame);
+      final h = build(campaigns: [campaign('a')], cache: cache);
+      h.source.throwOnFetch = StateError('offline');
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('a message still shows from a cached set', () async {
+      // The guard must be narrow. "Do not open games from cache" must not
+      // become "show nothing from cache", which would undo the offline
+      // behaviour the fallback exists for.
+      final cache = InMemoryCampaignCache();
+      await cache.write('c1', rawSync(campaignId: 4242));
+      final h = build(campaigns: [campaign('a')], cache: cache);
+      h.source.throwOnFetch = StateError('offline');
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isNotEmpty);
+    });
+
     test('a window from the cache applies when the sync failed', () async {
       final cache = InMemoryCampaignCache();
       await cache.write(

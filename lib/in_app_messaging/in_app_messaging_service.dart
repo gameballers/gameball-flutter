@@ -10,6 +10,7 @@ import 'evaluation/frequency_cap.dart';
 import 'evaluation/trigger_evaluator.dart';
 import 'iam_log.dart';
 import 'models/gameball_audience.dart';
+import 'models/campaign_key.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
@@ -236,7 +237,16 @@ class InAppMessagingService {
   /// Held beside [_campaigns] rather than filtering them, so the list stays a
   /// faithful record of what the backend sent and the diagnostics can say which
   /// campaign was passed over and why.
-  Set<int> _artworkReady = const <int>{};
+  Set<CampaignKey> _artworkReady = const <CampaignKey>{};
+
+  /// Whether the held campaigns came from the cache rather than a live sync.
+  ///
+  /// Only games care. A message carries its own content, so a cached one is
+  /// still correct; a game carries a pointer and fetches its content live, so a
+  /// cached entry is a promise this SDK cannot keep — the campaign may have
+  /// ended, and the widget would answer "this campaign is not available" to a
+  /// customer who never asked for it.
+  bool _campaignsFromCache = false;
 
   /// Minimum gap between any two displays, as the last sync reported it.
   Duration _cooldown = defaultDisplayCooldown;
@@ -324,7 +334,7 @@ class InAppMessagingService {
     _floorRetry?.cancel();
     _floorRetry = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _artworkReady = const <int>{};
+    _artworkReady = const <CampaignKey>{};
     _presentationInFlight = false;
     _variables.clear();
     _audience = null;
@@ -458,7 +468,7 @@ class InAppMessagingService {
     _floorRetry?.cancel();
     _floorRetry = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _artworkReady = const <int>{};
+    _artworkReady = const <CampaignKey>{};
     _artworkCheckedAt = null;
     _quietHours = null;
     _presentationInFlight = false;
@@ -547,6 +557,7 @@ class InAppMessagingService {
       _cooldown = result.cooldown;
       _quietHours = result.quietHours;
       synced = true;
+      _campaignsFromCache = false;
       iamLog('synced ${_campaigns.length} campaign(s), '
           'cooldown ${_cooldown.inSeconds}s');
 
@@ -565,6 +576,7 @@ class InAppMessagingService {
       // Taken from the cache too. The window is on the payload, so a failed
       // sync must not become a way to message somebody at 3am.
       _quietHours = cached.quietHours;
+      _campaignsFromCache = true;
       iamLog('falling back to ${_campaigns.length} cached campaign(s)');
     }
 
@@ -608,7 +620,7 @@ class InAppMessagingService {
     final campaigns = _campaigns;
     _artworkCheckedAt = _clock();
     if (campaigns.isEmpty) {
-      _artworkReady = const <int>{};
+      _artworkReady = const <CampaignKey>{};
       return;
     }
 
@@ -617,9 +629,9 @@ class InAppMessagingService {
     // honest cost of the set.
     final ready = await Future.wait(campaigns.map(_isArtworkReady));
 
-    _artworkReady = <int>{
+    _artworkReady = <CampaignKey>{
       for (var i = 0; i < campaigns.length; i++)
-        if (ready[i]) campaigns[i].campaignId,
+        if (ready[i]) campaigns[i].key,
     };
 
     // Logged only when it actually cost something. This sits on the path to the
@@ -669,13 +681,13 @@ class InAppMessagingService {
   Future<void> _refreshArtwork(List<InAppMessageCampaign> notReady) async {
     try {
       final ready = await Future.wait(notReady.map(_isArtworkReady));
-      final recovered = <int>{
+      final recovered = <CampaignKey>{
         for (var i = 0; i < notReady.length; i++)
-          if (ready[i]) notReady[i].campaignId,
+          if (ready[i]) notReady[i].key,
       };
       if (recovered.isEmpty) return;
 
-      _artworkReady = <int>{..._artworkReady, ...recovered};
+      _artworkReady = <CampaignKey>{..._artworkReady, ...recovered};
       iamLog('artwork for ${recovered.length} campaign(s) loaded on retry; '
           'they can display again for the rest of this session');
     } finally {
@@ -695,12 +707,18 @@ class InAppMessagingService {
     final displayable = <InAppMessageCampaign>[];
     final notReady = <InAppMessageCampaign>[];
     for (final candidate in _campaigns) {
-      if (_artworkReady.contains(candidate.campaignId)) {
-        displayable.add(candidate);
-      } else {
+      if (!_artworkReady.contains(candidate.key)) {
         notReady.add(candidate);
         iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
             'ready');
+      } else if (_campaignsFromCache && candidate.message.isWidget) {
+        // Not "not ready" — it will never be ready from here. Dropped rather
+        // than deferred: the next live sync is what makes it openable again.
+        iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
+            'skipped: the campaign set came from the cache, and a game must be '
+            'confirmed live before it is opened');
+      } else {
+        displayable.add(candidate);
       }
     }
 
