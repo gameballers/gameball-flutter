@@ -58,6 +58,10 @@ class GameballApp extends StatelessWidget {
   static String? _customerPreferredLanguage;
   static String? _apiPrefix;
   static String? _sessionToken;
+
+  /// The widget host to load, when the host configured a non-production one.
+  /// Applies to the profile widget and to any campaign a message opens.
+  static String? _widgetUrlPrefix;
   static VoidCallback? _dismissActiveWidget;
   static const String _customerIdKey = 'gameball_customer_id';
 
@@ -106,6 +110,7 @@ class GameballApp extends StatelessWidget {
     _apiKey = config.apiKey;
     _apiPrefix = config.apiPrefix;
     _sessionToken = config.sessionToken;
+    _widgetUrlPrefix = config.widgetUrlPrefix;
 
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
   }
@@ -708,7 +713,9 @@ class GameballApp extends StatelessWidget {
     final Uri? target = Uri.tryParse(url);
     if (target == null || target.host.isEmpty) return false;
 
-    final String widgetHost = Uri.parse(request.widgetUrlPrefix ?? widgetBaseUrl).host;
+    final String widgetHost =
+        Uri.parse(request.widgetUrlPrefix ?? _widgetUrlPrefix ?? widgetBaseUrl)
+            .host;
     return target.host != widgetHost;
   }
 
@@ -916,27 +923,14 @@ class GameballApp extends StatelessWidget {
   /// Navigation is hidden: the message is a card showing one reward campaign,
   /// not the profile, so the widget's own chrome would offer a way out of the
   /// thing the customer was just handed.
-  /// Points game campaigns at a non-production widget host.
-  ///
-  /// Temporary. `showProfile` takes a `widgetUrlPrefix` per call, but in-app
-  /// messaging has no caller to take one from, so without this a host aimed at
-  /// alpha gets alpha for its profile widget and production for its game
-  /// campaigns — which looks exactly like a campaign that does not exist.
-  ///
-  /// The real fix is a prefix on the SDK's own configuration, applied to both
-  /// paths. This exists so the fullscreen layout can be verified against a live
-  /// campaign before that lands.
-  @visibleForTesting
-  static String? debugWidgetUrlPrefix;
-
   String _buildInAppWidgetUrl(String openDetail) {
     final url = _buildWidgetUrl(
       ShowProfileRequestBuilder()
           .customerId(_inAppMessagingCustomerId)
           .openDetail(openDetail)
           .hideNavigation(true)
-          .widgetUrlPrefix(debugWidgetUrlPrefix)
           .build(),
+      handleLanguage(_lang, _customerPreferredLanguage),
     );
     // Logged because it is otherwise invisible: a campaign that opens on "this
     // campaign is not available" looks identical whether the id is wrong, the
@@ -954,7 +948,12 @@ class GameballApp extends StatelessWidget {
   ///   - `request`: The ShowProfileRequest containing widget configuration parameters.
   ///   - `language`: The resolved widget language (see handleLanguage).
   String _buildWidgetUrl(ShowProfileRequest request, String language) {
-    String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
+    // Per call, then the SDK's configuration, then production. The per-call
+    // value stays an override rather than the only way to set this, so a host
+    // aimed at a non-production environment cannot end up aimed there for its
+    // profile widget and at production for a campaign a message opens.
+    final prefix = request.widgetUrlPrefix ?? _widgetUrlPrefix ?? widgetBaseUrl;
+    String widgetUrl = '$prefix?lang=$language';
 
     widgetUrl += '&apiKey=${Uri.encodeComponent(_apiKey)}';
 

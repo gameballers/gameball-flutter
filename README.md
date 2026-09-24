@@ -64,6 +64,23 @@ final config = GameballConfigBuilder()
 gameballApp.init(config);
 ```
 
+### Pointing at a non-production environment
+
+`widgetUrlPrefix` sets the widget host for everything the SDK opens in a webview — the profile widget and any campaign an in-app message opens. Set it once at `init`, so the two cannot disagree:
+
+```dart
+GameballApp.getInstance().init(
+  GameballConfigBuilder()
+      .apiKey("YOUR_API_KEY")
+      .lang("en")
+      .apiPrefix("https://api.alpha.gameball.app")
+      .widgetUrlPrefix("https://m.gameball.app/alpha")
+      .build(),
+);
+```
+
+Omit it for production. `ShowProfileRequest.widgetUrlPrefix` still overrides it for a single presentation.
+
 ### 2. Initialize Customer
 ```dart
 import 'package:gameball_sdk/models/requests/initialize_customer_request.dart';

@@ -20,6 +20,9 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 - 🖥️ **Modal and fullscreen**: a game opens in a centred card or fills the screen. The fullscreen composition insets its content into the safe area, so the campaign's own controls and footer stay clear of the notch and the home indicator, while the surface behind still runs edge to edge
 
+### 🐛 Fixed
+- 🌐 **In-app messaging always loaded the production widget.** `showProfile` accepts a `widgetUrlPrefix` per call, but a campaign opened by a message has no caller to take one from — so a host pointed at a non-production environment got it for the profile widget and production for its campaigns. That renders as "this campaign is not available", which is indistinguishable from a campaign that does not exist. `GameballConfig.widgetUrlPrefix` now sets the host once, for both
+
 ### ⚠️ Not yet supported
 - 📱 **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger. A screen-triggered campaign is logged by name, so one that does not appear can be diagnosed from the console
 
