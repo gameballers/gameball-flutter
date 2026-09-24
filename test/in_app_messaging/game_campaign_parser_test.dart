@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
 String sync(String entries) => '{"cooldownSeconds":30,"messages":[$entries]}';
@@ -96,11 +97,17 @@ void main() {
     expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
   });
 
-  test('a fullscreen game is skipped until the surface is designed', () {
-    // Measured: the widget sizes its wheel off viewport width, and a full-width
-    // box clips its own copy. Skipped rather than drawn badly.
+  test('a fullscreen game is kept and marked fullscreen', () {
+    // The earlier reading that fullscreen clips was an artefact of measuring a
+    // 1.12-aspect box. A portrait screen is about 0.46, comfortably inside the
+    // ratio at which the widget starts clipping; landscape is the case that is
+    // not, and the presenter's orientation gate holds a campaign back there.
     final entry = wheelEntry.replaceFirst('"messageType": 2', '"messageType": 3');
-    expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
+    final campaigns = parseSyncResponse(sync(entry)).campaigns;
+
+    expect(campaigns, hasLength(1));
+    expect(campaigns.single.message.type, GameballMessageType.fullscreen);
+    expect(campaigns.single.message.isWidget, isTrue);
   });
 
   test('a fullscreen *message* is unaffected', () {

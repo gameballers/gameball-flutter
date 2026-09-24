@@ -104,35 +104,46 @@ class OverlayPresenter implements GameballMessagePresenter {
     }
 
     entry = OverlayEntry(
-      // `opaque: false` either way, but the layer itself decides whether it
-      // covers the screen: a modal blocks, a slideup does not.
-      builder: (context) => switch (message.type) {
-        GameballMessageType.slideup => _SlideupLayer(
-            message: message,
-            onMessagePressed: onMessagePressed,
-            onDismiss: dismiss,
-          ),
-        GameballMessageType.fullscreen => _FullscreenLayer(
-            message: message,
-            onButtonPressed: onButtonPressed,
-            onMessagePressed: onMessagePressed,
-            onDismiss: dismiss,
-          ),
-        _ => _MessageLayer(
-            message: message,
-            onButtonPressed: onButtonPressed,
-            onMessagePressed: onMessagePressed,
-            onDismiss: dismiss,
-            widgetUrl: widgetUrl,
-            onWidgetReady: markShown,
-            // Takes the message away having never shown it. onShown was never
-            // called, so no impression is logged and the frequency cap is
-            // untouched — the campaign gets another go at its next trigger
-            // rather than being burned by a slow network.
-            onWidgetFailed: dismiss,
-            onWidgetEvent: onWidgetEvent,
-          ),
-      },
+      builder: (context) => _ReadinessGate(
+        // Only a reward campaign waits. Everything else is visible from its
+        // first frame and counts its impression from the post-frame callback
+        // below.
+        gated: message.isWidget,
+        onShown: markShown,
+        // `opaque: false` either way, but the layer itself decides whether it
+        // covers the screen: a modal blocks, a slideup does not.
+        build: (onContentReady) => switch (message.type) {
+          GameballMessageType.slideup => _SlideupLayer(
+              message: message,
+              onMessagePressed: onMessagePressed,
+              onDismiss: dismiss,
+            ),
+          GameballMessageType.fullscreen => _FullscreenLayer(
+              message: message,
+              onButtonPressed: onButtonPressed,
+              onMessagePressed: onMessagePressed,
+              onDismiss: dismiss,
+              widgetUrl: widgetUrl,
+              onWidgetReady: onContentReady,
+              onWidgetFailed: dismiss,
+              onWidgetEvent: onWidgetEvent,
+            ),
+          _ => _MessageLayer(
+              message: message,
+              onButtonPressed: onButtonPressed,
+              onMessagePressed: onMessagePressed,
+              onDismiss: dismiss,
+              widgetUrl: widgetUrl,
+              onWidgetReady: onContentReady,
+              // Takes the message away having never shown it. onShown was never
+              // called, so no impression is logged and the frequency cap is
+              // untouched — the campaign gets another go at its next trigger
+              // rather than being burned by a slow network.
+              onWidgetFailed: dismiss,
+              onWidgetEvent: onWidgetEvent,
+            ),
+        },
+      ),
     );
     _entry = entry;
     overlay.insert(entry);
@@ -200,31 +211,36 @@ class _FullscreenLayer extends StatelessWidget {
     required this.onButtonPressed,
     required this.onMessagePressed,
     required this.onDismiss,
+    this.widgetUrl,
+    this.onWidgetReady,
+    this.onWidgetFailed,
+    this.onWidgetEvent,
   });
 
   final GameballInAppMessage message;
   final void Function(GameballMessageButton button) onButtonPressed;
   final VoidCallback onMessagePressed;
   final VoidCallback onDismiss;
+  final String? widgetUrl;
+  final VoidCallback? onWidgetReady;
+  final VoidCallback? onWidgetFailed;
+  final void Function(Map<String, dynamic> event)? onWidgetEvent;
 
   @override
-  Widget build(BuildContext context) {
-    final layer = GameballInAppMessageFullscreen(
-      message: message,
-      onButtonPressed: onButtonPressed,
-      onMessagePressed: onMessagePressed,
-      onClosePressed: onDismiss,
-    );
-
-    if (Router.maybeOf(context) == null) return layer;
-    return BackButtonListener(
-      onBackButtonPressed: () async {
-        onDismiss();
-        return true;
-      },
-      child: layer,
-    );
-  }
+  Widget build(BuildContext context) => withBackButton(
+        context,
+        GameballInAppMessageFullscreen(
+          message: message,
+          onButtonPressed: onButtonPressed,
+          onMessagePressed: onMessagePressed,
+          onClosePressed: onDismiss,
+          widgetUrl: widgetUrl,
+          onWidgetReady: onWidgetReady,
+          onWidgetFailed: onWidgetFailed,
+          onWidgetEvent: onWidgetEvent,
+        ),
+        onDismiss,
+      );
 }
 
 /// A slideup, drawn without a scrim so the app underneath stays usable.
@@ -256,8 +272,51 @@ class _SlideupLayer extends StatelessWidget {
   }
 }
 
+/// Holds a layer invisible until whatever it contains reports itself drawn.
+///
+/// Shared by the modal and the fullscreen layers rather than implemented in
+/// each. Only a reward campaign needs gating — every other message is visible
+/// from its first frame — but the two surfaces need identical behaviour, and two
+/// copies of a timing-sensitive gate is how they stop being identical.
+class _ReadinessGate extends StatefulWidget {
+  const _ReadinessGate({
+    required this.gated,
+    required this.onShown,
+    required this.build,
+  });
+
+  /// Whether to wait. False for an ordinary message.
+  final bool gated;
+
+  /// Called once the content is drawn and the layer has become visible, which
+  /// is the moment the impression is counted.
+  final VoidCallback onShown;
+
+  /// Builds the layer, handed the callback its content invokes when drawn.
+  final Widget Function(VoidCallback onContentReady) build;
+
+  @override
+  State<_ReadinessGate> createState() => _ReadinessGateState();
+}
+
+class _ReadinessGateState extends State<_ReadinessGate> {
+  late bool _visible = !widget.gated;
+
+  void _onContentReady() {
+    if (!mounted) return;
+    setState(() => _visible = true);
+    widget.onShown();
+  }
+
+  @override
+  Widget build(BuildContext context) => VisibilityGate(
+        visible: _visible,
+        child: widget.build(_onContentReady),
+      );
+}
+
 /// The scrim plus the modal, with back-button handling where it is available.
-class _MessageLayer extends StatefulWidget {
+class _MessageLayer extends StatelessWidget {
   const _MessageLayer({
     required this.message,
     required this.onButtonPressed,
@@ -279,26 +338,7 @@ class _MessageLayer extends StatefulWidget {
   final void Function(Map<String, dynamic> event)? onWidgetEvent;
 
   @override
-  State<_MessageLayer> createState() => _MessageLayerState();
-}
-
-class _MessageLayerState extends State<_MessageLayer> {
-  /// Whether the layer may be seen and touched yet.
-  ///
-  /// False only while a reward campaign loads. Every other message is visible
-  /// from its first frame.
-  late bool _visible = !widget.message.isWidget;
-
-  void _onReady() {
-    if (!mounted) return;
-    setState(() => _visible = true);
-    widget.onWidgetReady?.call();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final message = widget.message;
-
     final layer = Stack(
       children: [
         Positioned.fill(
@@ -308,7 +348,7 @@ class _MessageLayerState extends State<_MessageLayer> {
             // beneath — but only dismisses when the campaign allows it. A
             // `closeBehaviour` of `button` means the close glyph is the only way
             // out, so a tap outside must do nothing rather than nothing visible.
-            onTap: message.dismissOnScrimTap ? widget.onDismiss : null,
+            onTap: message.dismissOnScrimTap ? onDismiss : null,
             child: ColoredBox(
               color: message.style.scrimColor ?? MessageMetrics.defaultScrim,
             ),
@@ -316,49 +356,37 @@ class _MessageLayerState extends State<_MessageLayer> {
         ),
         GameballInAppMessageModal(
           message: message,
-          onButtonPressed: widget.onButtonPressed,
-          onMessagePressed: widget.onMessagePressed,
-          onClosePressed: widget.onDismiss,
-          widgetUrl: widget.widgetUrl,
-          onWidgetReady: _onReady,
-          onWidgetFailed: widget.onWidgetFailed,
-          onWidgetEvent: widget.onWidgetEvent,
+          onButtonPressed: onButtonPressed,
+          onMessagePressed: onMessagePressed,
+          onClosePressed: onDismiss,
+          widgetUrl: widgetUrl,
+          onWidgetReady: onWidgetReady,
+          onWidgetFailed: onWidgetFailed,
+          onWidgetEvent: onWidgetEvent,
         ),
       ],
     );
 
-    return _gate(_withBackButton(context, layer));
+    return withBackButton(context, layer, onDismiss);
   }
+}
 
-  /// Hides the layer while a reward campaign loads, without unmounting it.
-  ///
-  /// [Opacity] rather than [Offstage] or an invisible [Visibility]: both of
-  /// those collapse the subtree to zero size, and a WebView laid out at 0x0
-  /// computes its page against a zero viewport — which is exactly the layout the
-  /// widget needs in order to draw. It has to be measured correctly *while*
-  /// invisible, so the first thing the customer sees is the finished wheel.
-  ///
-  /// [IgnorePointer] as well, so the scrim does not silently swallow taps for
-  /// the seconds before anything is on screen. Without it the app would appear
-  /// to freeze for no visible reason.
-  Widget _gate(Widget layer) =>
-      VisibilityGate(visible: _visible, child: layer);
-
-  /// Lets the system back gesture dismiss the message where that is possible.
-  ///
-  /// BackButtonListener asserts when there is no Router ancestor, which a plain
-  /// MaterialApp does not provide. Only attach it where it works; the scrim and
-  /// close button are always available, so the message is never undismissable.
-  Widget _withBackButton(BuildContext context, Widget layer) {
-    if (Router.maybeOf(context) == null) {
-      return layer;
-    }
-    return BackButtonListener(
-      onBackButtonPressed: () async {
-        widget.onDismiss();
-        return true; // handled; do not pop the host's route
-      },
-      child: layer,
-    );
-  }
+/// Lets the system back gesture dismiss the message where that is possible.
+///
+/// BackButtonListener asserts when there is no Router ancestor, which a plain
+/// MaterialApp does not provide. Only attach it where it works; the scrim and
+/// close button are always available, so the message is never undismissable.
+Widget withBackButton(
+  BuildContext context,
+  Widget layer,
+  VoidCallback onDismiss,
+) {
+  if (Router.maybeOf(context) == null) return layer;
+  return BackButtonListener(
+    onBackButtonPressed: () async {
+      onDismiss();
+      return true; // handled; do not pop the host's route
+    },
+    child: layer,
+  );
 }

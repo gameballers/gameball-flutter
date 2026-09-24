@@ -476,16 +476,6 @@ GameballWidgetContent? _parseGameContent(
     return null;
   }
 
-  // Fullscreen is measured as broken for this content: the widget sizes its
-  // wheel off the viewport width, so a full-width box clips its own copy.
-  // Skipped rather than drawn badly. Applies to games only — fullscreen
-  // messages have shipped and are unaffected.
-  if (_asInt(json['messageType']) == _fullscreenMessageType) {
-    iamLog('campaign $label skipped: fullscreen game campaigns are not drawn '
-        'by this SDK version — author it as a modal');
-    return null;
-  }
-
   final gameCampaignType = _asString(json['gameCampaignType']);
   if (gameCampaignType == null || !_knownGameTypes.contains(gameCampaignType)) {
     iamLog('campaign $label dropped: unrecognised gameCampaignType '

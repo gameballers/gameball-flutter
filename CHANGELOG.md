@@ -18,9 +18,10 @@ All notable changes to the Gameball Flutter SDK are documented here.
 - 🔑 **Display history is keyed by campaign kind and id.** Challenge ids and message campaign ids are separate sequences that overlap numerically, and every game entry arrives with `campaignId: 0` — so a bare number can no longer identify a campaign. Histories written by earlier releases are migrated on read; nothing is lost and no campaign re-shows
 - 📊 **Game campaigns report no in-app messaging telemetry.** Engagement is recorded through the normal challenge flow when the customer plays. Their display history is still kept, so a once-ever game stays once-ever
 
+- 🖥️ **Modal and fullscreen**: a game opens in a centred card or fills the screen. The fullscreen composition insets its content into the safe area, so the campaign's own controls and footer stay clear of the notch and the home indicator, while the surface behind still runs edge to edge
+
 ### ⚠️ Not yet supported
-- 🖥️ **Fullscreen game campaigns are not drawn.** The widget sizes its content off the viewport width, and a full-width box clips it. Author them as a modal
-- 📱 **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger. Both limits are logged by campaign name, so a campaign that does not appear can be diagnosed from the console
+- 📱 **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger. A screen-triggered campaign is logged by name, so one that does not appear can be diagnosed from the console
 
 ---
 

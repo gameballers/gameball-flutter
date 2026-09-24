@@ -324,12 +324,9 @@ A campaign the merchant set to open itself over your app — a spin the wheel, a
 
 The campaign *is* the content. There is no headline or button to style — the SDK opens the game itself in a card over your app, and shows the card only once the game has finished drawing, so your customer never sees a loading state.
 
-Two limits in this release:
+A game campaign can be authored as a modal — a centred card over the screen the customer was on — or fullscreen, where it fills the screen inside the safe area so nothing sits under the notch or the home indicator.
 
-- **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger instead.
-- **Fullscreen game campaigns are not drawn.** Author them as a modal.
-
-Both are skipped with a `[GameballIAM]` log naming the campaign, so one that does not appear can be diagnosed from the console.
+One limit in this release: **screen triggers do not fire on mobile.** Use a session-start or custom-event trigger instead. A screen-triggered campaign is skipped with a `[GameballIAM]` log naming it, so one that does not appear can be diagnosed from the console.
 
 Game campaigns report no in-app messaging telemetry — engagement is recorded through the normal challenge flow when the customer plays. To be told when that happens:
 
