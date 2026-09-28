@@ -1,25 +1,8 @@
-// This file defines constants for left-to-right (LTR) and right-to-left (RTL) languages,
-// and provides functions to handle language selection and directionality.
+// This file defines the right-to-left (RTL) language list and provides functions to handle
+// language selection and directionality. Any code not in the RTL list is treated as
+// left-to-right.
 
 import 'gameball_utils.dart';
-
-/// List of left-to-right (LTR) languages.
-const List<String> ltrLanguageCodes = [
-  "en",
-  "fr",
-  "es",
-  "de",
-  "pt",
-  "pl",
-  "it",
-  "hu",
-  "zh-tw",
-  "nl",
-  "sv",
-  "no",
-  "dk",
-  "ja"
-];
 
 /// List of right-to-left (RTL) languages.
 const List<String> rtlLanguageCodes = ["ar"];
@@ -49,12 +32,7 @@ String handleLanguage(String globalLang, String? preferredLang, [String? overrid
   return lang.toString();
 }
 
-/// Checks if a language is right-to-left (RTL).
+/// Checks if a language is right-to-left (RTL). Every other code is treated as left-to-right.
 bool isRtl(String lang) {
   return rtlLanguageCodes.contains(lang);
-}
-
-/// Checks if a language is left-to-right (LTR).
-bool isLtr(String lang) {
-  return ltrLanguageCodes.contains(lang);
 }
