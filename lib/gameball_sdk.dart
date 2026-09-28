@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'models/requests/customer_attributes.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
@@ -33,6 +34,12 @@ class GameballApp extends StatelessWidget {
   static String? _customerPreferredLanguage;
   static String? _apiPrefix;
   static String? _sessionToken;
+  /// The customer from the last [initializeCustomer], kept in memory so [setLanguage] knows
+  /// whose profile to mirror a language change onto.
+  static String? _customerId;
+  /// Carried over from the last [initializeCustomer] so [setLanguage] can re-send it rather than
+  /// defaulting to `false` and flipping a guest customer to registered.
+  static bool _customerIsGuest = false;
   static VoidCallback? _dismissActiveWidget;
 
   /// Retrieves the singleton instance of the GameballApp class.
@@ -75,14 +82,50 @@ class GameballApp extends StatelessWidget {
   /// A `showProfile` call with an explicit `lang` still takes precedence over this for that one
   /// presentation — this only changes the fallback used when no per-call override is given.
   ///
+  /// It also becomes the customer's preferred language, taking precedence over one passed earlier
+  /// to [initializeCustomer], and once a customer has been initialized it is mirrored onto that
+  /// customer's Gameball profile so server-driven communications follow it too.
+  ///
   /// Arguments:
   ///   - `lang`: A 2-letter language code (e.g. "en", "ar"). Ignored if invalid.
   void setLanguage(String lang) {
     if (isNullOrEmpty(lang) || lang.length != 2) return;
 
     _lang = lang;
+    // Also claim the customer-level preference, which handleLanguage() reads *before* the global
+    // one. Without this an explicit setLanguage would be silently outranked by the
+    // preferredLanguage of an earlier initializeCustomer. Deliberately done here and not in
+    // init(), whose lang is the app-wide default: claiming it there would override the
+    // customer's real preference with that default.
+    _customerPreferredLanguage = lang;
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
     GameballLogger.instance.log('sdk.setLanguage', params: {'lang': lang});
+
+    // The assignments above only steer this device. Mirror the preference onto the customer's
+    // Gameball profile so server-driven communications follow it too, sending just
+    // preferredLanguage and letting the server merge it into the existing attributes — both
+    // request models' toJson() drop null fields, so no other attribute goes out to be cleared.
+    // Skipped until there's a customer to update: initializeCustomer stores the language itself,
+    // so nothing is lost by waiting.
+    final customerId = _customerId;
+    if (isNullOrEmpty(_apiKey) || customerId == null || customerId.isEmpty) return;
+
+    final request = InitializeCustomerRequestBuilder()
+        .customerId(customerId)
+        .customerAttributes(CustomerAttributesBuilder().preferredLanguage(lang).build())
+        .isGuest(_customerIsGuest)
+        .build();
+
+    // Routed through the public initializeCustomer rather than the network layer so the API-key
+    // guard and the customerId/guest bookkeeping stay in one place. The session token has to be
+    // passed explicitly: initializeCustomer replaces the stored one with its argument, so
+    // omitting it would null it.
+    initializeCustomer(request, (_, error) {
+      GameballLogger.instance.log('sdk.setLanguage.profileSync', params: {
+        'lang': lang,
+        if (error != null) 'error': error.toString(),
+      });
+    }, sessionToken: _sessionToken);
   }
 
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
@@ -110,6 +153,10 @@ class GameballApp extends StatelessWidget {
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
 
+    // Remember the customer so setLanguage can mirror a later language change onto its profile
+    _customerId = request.customerId;
+    _customerIsGuest = request.isGuest ?? false;
+
     // Store customer preferred language for widget display
     if (request.customerAttributes?.preferredLanguage != null &&
         request.customerAttributes?.preferredLanguage?.length == 2) {
@@ -119,9 +166,15 @@ class GameballApp extends StatelessWidget {
     // Send request to Gameball API
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
+      // Failures go to the callback through then's onError. Without it a failed request never
+      // reached the callback and surfaced as an unhandled async error instead. Not a trailing
+      // catchError: that would also catch an exception thrown by the host's own success callback
+      // and invoke the callback a second time.
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
         responseCallback!(response, null);
+      }, onError: (e) {
+        responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
