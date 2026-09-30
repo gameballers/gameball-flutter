@@ -28,6 +28,7 @@ jobs:
             gb-mobile-android) SDK="Android SDK" ;;
             *) SDK="$REPO" ;;
           esac
+          echo "SDK=$SDK" >> "$GITHUB_ENV" # the Google Calendar step names its event with it
 
           # This version's CHANGELOG.md section: lines under "## [<version>]" up to the next "## [" heading,
           # with its "### " sub-headings turned into bold lines (Slack mrkdwn has no headings)
@@ -54,3 +55,35 @@ jobs:
                     | gsub("[*][*]"; "*") | gsub("(?<s>^|\n)- "; "\(.s)• ") | splits("\n([ \t]*\n)+") | select(test("[^[:space:]]"))]
             | {text: $text, blocks: (([$headline] + .) | map({type: "section", text: {type: "mrkdwn", text: .}}))}
           ' | curl -fsS -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
+
+      - name: Add release to Google Calendar
+        env:
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_CALENDAR_CLIENT_EMAIL: ${{ secrets.GOOGLE_CALENDAR_CLIENT_EMAIL }}
+          GOOGLE_CALENDAR_PRIVATE_KEY_ID: ${{ secrets.GOOGLE_CALENDAR_PRIVATE_KEY_ID }}
+          GOOGLE_CALENDAR_PRIVATE_KEY: ${{ secrets.GOOGLE_CALENDAR_PRIVATE_KEY }}
+          VERSION: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+          AUTHOR: ${{ github.event.release.author.login }}
+        run: |
+          set -o pipefail
+          # Same service account, calendar and event shape as the deployment bot's release events.
+          # Service-account OAuth without a client library: an RS256-signed JWT is exchanged for an access token.
+          b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+          JWT=$(jq -cn '{alg: "RS256", typ: "JWT", kid: env.GOOGLE_CALENDAR_PRIVATE_KEY_ID}' | b64url).$(jq -cn 'now | floor | {
+            iss: env.GOOGLE_CALENDAR_CLIENT_EMAIL, scope: "https://www.googleapis.com/auth/calendar.events",
+            aud: "https://oauth2.googleapis.com/token", iat: ., exp: (. + 3600)}' | b64url)
+          # printf %b also takes the key with literal \n escapes, as the deployment bot stores it
+          JWT=$JWT.$(printf %s "$JWT" | openssl dgst -sha256 -sign <(printf %b "$GOOGLE_CALENDAR_PRIVATE_KEY") | b64url)
+          TOKEN=$(curl -fsS https://oauth2.googleapis.com/token --data-urlencode grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer \
+            --data-urlencode assertion="$JWT" | jq -r .access_token)
+
+          # 20-minute event starting a minute from now; Google's response (event link, calendar and account addresses)
+          # is discarded so nothing reaches the public log
+          jq -n 'now | floor | {
+            summary: "[SDK Release] \(env.SDK) \(env.VERSION)", colorId: "8",
+            description: "<a href=\"\(env.URL)\">Release notes</a>\n\nCreated by: \(env.AUTHOR)",
+            start: {dateTime: (. + 60 | todate), timeZone: "Africa/Cairo"},
+            end: {dateTime: (. + 1260 | todate), timeZone: "Africa/Cairo"}}' |
+            curl -fsS -o /dev/null -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data @- \
+              "https://www.googleapis.com/calendar/v3/calendars/$(jq -rn 'env.GOOGLE_CALENDAR_ID | @uri')/events"
