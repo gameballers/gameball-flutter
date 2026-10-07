@@ -347,6 +347,8 @@ class GameballApp extends StatelessWidget {
   ///   - `context`: The build context for creating the customer profile widget.
   ///   - `request`: The ShowProfileRequest containing all profile display parameters.
   void _openCustomerProfileWidget(BuildContext context, ShowProfileRequest request) {
+    // Resolved once so the page and close button can't disagree if the language changes while open
+    final String language = handleLanguage(_lang, _customerPreferredLanguage, request.lang);
     var widgetWebviewController = WebViewController();
     widgetWebviewController
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -462,7 +464,7 @@ class GameballApp extends StatelessWidget {
           },
         ),
       )
-      ..loadRequest(Uri.parse(_buildWidgetUrl(request)));
+      ..loadRequest(Uri.parse(_buildWidgetUrl(request, language)));
 
     showDialog(
       context: context,
@@ -474,8 +476,6 @@ class GameballApp extends StatelessWidget {
             Navigator.of(context).pop();
           }
         };
-        String language = handleLanguage(_lang, _customerPreferredLanguage, request.lang);
-
         return Dialog(
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(20.0)),
@@ -495,10 +495,11 @@ class GameballApp extends StatelessWidget {
                   ),
                 ),
                 if (request.showCloseButton ?? true)
+                  // Exactly one side is always set; with neither, the host app's text direction decides
                   Positioned(
                     top: 10.0,
                     left: isRtl(language) ? 10.0 : null,
-                    right: isLtr(language) ? 10.0 : null,
+                    right: isRtl(language) ? null : 10.0,
                     child: IconButton(
                       icon: Icon(
                           Icons.close,
@@ -527,9 +528,8 @@ class GameballApp extends StatelessWidget {
   ///
   /// Arguments:
   ///   - `request`: The ShowProfileRequest containing widget configuration parameters.
-  String _buildWidgetUrl(ShowProfileRequest request) {
-    String language = handleLanguage(_lang, _customerPreferredLanguage, request.lang);
-
+  ///   - `language`: The resolved widget language (see handleLanguage).
+  String _buildWidgetUrl(ShowProfileRequest request, String language) {
     String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
 
     widgetUrl += '&apiKey=$_apiKey';
