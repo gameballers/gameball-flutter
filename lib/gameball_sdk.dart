@@ -61,14 +61,6 @@ class GameballApp extends StatelessWidget {
     _sessionToken = config.sessionToken;
 
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
-    GameballLogger.instance.log('sdk.init', params: {
-      'apiKey': config.apiKey,
-      'lang': config.lang,
-      'platform': config.platform,
-      'shop': config.shop,
-      'apiPrefix': config.apiPrefix,
-      'sessionToken': config.sessionToken,
-    });
   }
 
   /// Changes the SDK's global language on demand, without re-calling [init]. Affects everything
@@ -88,7 +80,6 @@ class GameballApp extends StatelessWidget {
     // Customer language is read before the global one, so set it too
     _customerPreferredLanguage = lang;
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
-    GameballLogger.instance.log('sdk.setLanguage', params: {'lang': lang});
 
     SharedPreferences.getInstance().then((prefs) {
       final customerId = prefs.getString(_customerIdKey);
@@ -156,8 +147,6 @@ class GameballApp extends StatelessWidget {
       }, onError: (e) {
         responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
-      // Fire telemetry immediately after dispatching the request.
-      GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
     } catch (e) {
       responseCallback!(null, e as Exception);
     }
@@ -193,8 +182,6 @@ class GameballApp extends StatelessWidget {
           callback!(false, null);
         }
       });
-      // Fire telemetry immediately after dispatching the request.
-      GameballLogger.instance.log('sdk.sendEvent', params: event.toJson());
     } catch (e) {
       callback!(null, e as Exception);
     }
@@ -220,8 +207,6 @@ class GameballApp extends StatelessWidget {
     }
 
     final token = payload['gbClickToken'] as String?;
-    // Fire telemetry immediately, regardless of what happens below.
-    GameballLogger.instance.log('sdk.handlePushClick', params: {'hasToken': !isNullOrEmpty(token)});
 
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
