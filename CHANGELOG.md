@@ -4,6 +4,25 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.3.1] - 2026-09-30 🔧
+
+> **Patch Release**: Widget close button direction and runtime language switching
+
+### 🐛 Fixed
+- 🔧 **Widget Close Button Direction**: the close button is now positioned from the widget's own language alone — left for Arabic, right for every other language. Codes missing from the SDK's old left-to-right list (e.g. `"tr"`) previously got no explicit side, so the button followed the host app's text direction and could land on the wrong side
+- 🌐 **Runtime Language Switching**: `setLanguage(lang)` is no longer outranked by a preferred language passed to an earlier `initializeCustomer` — it now takes effect for `showProfile` presentations that don't pass their own `lang` and for subsequent `initializeCustomer`/`sendEvent` requests
+- ⚠️ **Customer Initialization Errors**: `initializeCustomer` now reports a failed request to its callback as `(null, error)`; previously the failure never reached the callback and surfaced as an unhandled async error
+
+### 🔄 Changed
+- 🌐 **Preferred Language Sync**: `setLanguage(lang)` now also mirrors the new language onto the customer's Gameball profile, so server-driven communications follow it too; the update goes to the most recently initialized customer (remembered across app launches) and is skipped until one has been initialized
+- 👤 **Registered Customers Only**: the SDK now always initializes customers as registered — `initializeCustomer` sends `guest` as `false`, and `InitializeCustomerRequestBuilder().isGuest(...)` is ignored
+- 📊 **Diagnostic Logging**: internal diagnostic logging now only records widget usage
+
+### 🗑️ Removed
+- 🧹 **Internal Direction Helpers**: removed the undocumented `isLtr` helper and `ltrLanguageCodes` list from `utils/language_utils.dart`, which only served the old close-button placement
+
+---
+
 ## [3.3.0] - 2026-09-02 📱
 
 > **Minor Release**: Per-call and global language control, and push notification click tracking

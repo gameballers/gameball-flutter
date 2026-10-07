@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.3.0
+  gameball_sdk: ^3.3.1
 ```
 
 ### Flutter CLI
@@ -231,6 +231,8 @@ GameballApp.getInstance().setLanguage("ar");
 
 This changes the fallback used by future `showProfile` presentations (a per-call `lang` still wins) and `initializeCustomer`/`sendEvent` requests. Invalid codes are ignored.
 
+As of v3.3.1 it also becomes the customer's preferred language, taking precedence over one set earlier through `initializeCustomer`, and is mirrored onto the customer's Gameball profile so server-driven communications follow it too. The profile update goes to the most recently initialized customer (remembered across app launches) and is skipped until one has been initialized — to set the language before that, pass it as `preferredLanguage` to `initializeCustomer`.
+
 ### Push Click Tracking (v3.3.0+)
 
 Report taps on Gameball push notifications so campaign clicks are counted. Call `handlePushClick` from your notification-tap handler with the notification's data payload (e.g. `RemoteMessage.data` from `onMessageOpenedApp` / `getInitialMessage`):
@@ -364,7 +366,7 @@ Request object for initializing/registering customers with the Gameball platform
 | `referralCode` | String | ❌ | Referral code for attribution |
 | `email` | String | ❌ | Customer email address |
 | `mobile` | String | ❌ | Customer mobile number |
-| `isGuest` | bool | ❌ | Guest status (defaults to false) |
+| `isGuest` | bool | ❌ | Ignored as of v3.3.1 — customers are always initialized as registered |
 | `pushProvider` | PushProvider | ❌ | Push notification provider (Firebase/Huawei) |
 
 **Validation Rules:**
@@ -381,7 +383,7 @@ Request object for initializing/registering customers with the Gameball platform
 - `referralCode(String referralCode)` - Sets referral code
 - `email(String email)` - Sets customer email
 - `mobile(String mobile)` - Sets customer mobile number
-- `isGuest(bool isGuest)` - Sets guest status
+- `isGuest(bool isGuest)` - Ignored as of v3.3.1 — customers are always initialized as registered
 - `pushProvider(PushProvider provider)` - Sets push provider (Firebase/Huawei)
 
 **Example:**
