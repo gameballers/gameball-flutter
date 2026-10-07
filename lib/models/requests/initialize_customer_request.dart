@@ -128,6 +128,7 @@ class InitializeCustomerRequestBuilder {
   String? _referralCode;
   String? _email;
   String? _mobile;
+  // ignore: unused_field
   bool? _isGuest;
   PushProvider? _pushProvider;
 
@@ -204,7 +205,8 @@ class InitializeCustomerRequestBuilder {
       referralCode: _referralCode,
       email: _email,
       mobile: _mobile,
-      isGuest: _isGuest ?? false,
+      // Hardcoded: the SDK never initializes a customer as a guest
+      isGuest: false,
       pushProvider: _pushProvider?.value,
     );
   }
