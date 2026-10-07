@@ -28,25 +28,27 @@ const List<String> rtlLanguageCodes = ["ar"];
 /// 1. Explicit per-call [override] (e.g. passed to showProfile)
 /// 2. Customer preferred language ([preferredLang], set via CustomerAttributes)
 /// 3. Global preferred language ([globalLang], set during SDK init)
-/// 4. "en" if none of the above are valid
+/// 4. "en" if none of the above is set
+/// The first one set wins; an unsupported code resolves to "en".
 ///
 /// Returns the selected language.
 String handleLanguage(String globalLang, String? preferredLang, [String? override]) {
   // Highest priority: explicit per-call override
-  if (!isNullOrEmpty(override) && override?.length == 2) {
-    return override!;
+  if (!isNullOrEmpty(override)) {
+    return normalizeLanguage(override!);
   }
 
-  String? lang = preferredLang;
-  // If the preferred language is valid (not null, empty, or not 2 characters), use it.
-  if (isNullOrEmpty(lang) || lang?.length != 2) {
-    // If the global language is valid, use it, Otherwise, use 'en'.
-    lang = globalLang;
-    if (isNullOrEmpty(lang) || lang.length != 2) {
-      lang = "en";
-    }
+  if (!isNullOrEmpty(preferredLang)) {
+    return normalizeLanguage(preferredLang!);
   }
-  return lang.toString();
+
+  return normalizeLanguage(globalLang);
+}
+
+/// Returns [lang] trimmed and lowercased if it's supported, otherwise "en".
+String normalizeLanguage(String lang) {
+  final code = lang.trim().toLowerCase();
+  return ltrLanguageCodes.contains(code) || rtlLanguageCodes.contains(code) ? code : "en";
 }
 
 /// Checks if a language is right-to-left (RTL).
