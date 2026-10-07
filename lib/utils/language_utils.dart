@@ -51,12 +51,7 @@ String normalizeLanguage(String lang) {
   return ltrLanguageCodes.contains(code) || rtlLanguageCodes.contains(code) ? code : "en";
 }
 
-/// Checks if a language is right-to-left (RTL).
+/// Checks if a language is right-to-left (RTL). Every other code is treated as left-to-right.
 bool isRtl(String lang) {
   return rtlLanguageCodes.contains(lang);
-}
-
-/// Checks if a language is left-to-right (LTR).
-bool isLtr(String lang) {
-  return ltrLanguageCodes.contains(lang);
 }
