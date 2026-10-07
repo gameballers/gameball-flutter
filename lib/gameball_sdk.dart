@@ -8,10 +8,12 @@ import 'package:gameball_sdk/utils/gameball_logger.dart';
 import 'package:gameball_sdk/utils/language_utils.dart';
 import 'package:gameball_sdk/utils/platform_utils.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
 
+import 'models/requests/customer_attributes.dart';
 import 'models/requests/event.dart';
 import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
@@ -34,6 +36,7 @@ class GameballApp extends StatelessWidget {
   static String? _apiPrefix;
   static String? _sessionToken;
   static VoidCallback? _dismissActiveWidget;
+  static const String _customerIdKey = 'gameball_customer_id';
 
   /// Retrieves the singleton instance of the GameballApp class.
   ///
@@ -50,7 +53,7 @@ class GameballApp extends StatelessWidget {
   /// Arguments:
   ///   - `config`: The GameballConfig containing all initialization parameters.
   void init(GameballConfig config) {
-    _lang = config.lang;
+    _applyGlobalLanguage(config.lang);
     _platform = config.platform;
     _shop = config.shop;
     _apiKey = config.apiKey;
@@ -75,14 +78,37 @@ class GameballApp extends StatelessWidget {
   /// A `showProfile` call with an explicit `lang` still takes precedence over this for that one
   /// presentation — this only changes the fallback used when no per-call override is given.
   ///
+  /// Also becomes the customer's preferred language and is synced to the last initialized customer's profile.
+  ///
   /// Arguments:
   ///   - `lang`: A 2-letter language code (e.g. "en", "ar"). Ignored if invalid.
   void setLanguage(String lang) {
-    if (isNullOrEmpty(lang) || lang.length != 2) return;
+    if (!_applyGlobalLanguage(lang)) return;
 
-    _lang = lang;
+    // Customer language is read before the global one, so set it too
+    _customerPreferredLanguage = lang;
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
     GameballLogger.instance.log('sdk.setLanguage', params: {'lang': lang});
+
+    SharedPreferences.getInstance().then((prefs) {
+      final customerId = prefs.getString(_customerIdKey);
+      if (isNullOrEmpty(_apiKey) || isNullOrEmpty(customerId)) return;
+
+      final request = InitializeCustomerRequestBuilder()
+          .customerId(customerId!)
+          .customerAttributes(CustomerAttributesBuilder().preferredLanguage(lang).build())
+          .build();
+
+      // Pass the current session token: initializeCustomer replaces the stored one
+      initializeCustomer(request, (_, __) {}, sessionToken: _sessionToken);
+    }).catchError((_) {});
+  }
+
+  bool _applyGlobalLanguage(String lang) {
+    if (isNullOrEmpty(lang) || lang.length != 2) return false;
+
+    _lang = lang;
+    return true;
   }
 
   /// Initializes a customer using a pre-built [InitializeCustomerRequest].
@@ -110,6 +136,10 @@ class GameballApp extends StatelessWidget {
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
 
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_customerIdKey, request.customerId))
+        .catchError((_) => false);
+
     // Store customer preferred language for widget display
     if (request.customerAttributes?.preferredLanguage != null &&
         request.customerAttributes?.preferredLanguage?.length == 2) {
@@ -119,9 +149,12 @@ class GameballApp extends StatelessWidget {
     // Send request to Gameball API
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
+      // onError, not catchError, so an exception thrown by the success callback isn't reported twice
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
         responseCallback!(response, null);
+      }, onError: (e) {
+        responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
