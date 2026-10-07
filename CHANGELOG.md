@@ -4,6 +4,30 @@ All notable changes to the Gameball Flutter SDK are documented here.
 
 ---
 
+## [3.3.1] - 2026-10-19 🔧
+
+> **Patch Release**: Widget close button direction, runtime language switching, supported language fallback, widget URL encoding and callback fixes
+
+### 🐛 Fixed
+- 🔧 **Widget Close Button Direction**: the close button is now positioned from the widget's own language alone — left for Arabic, right for every other language. Codes missing from the SDK's old left-to-right list (e.g. `"tr"`) previously got no explicit side, so the button followed the host app's text direction and could land on the wrong side
+- 🌐 **Runtime Language Switching**: `setLanguage(lang)` is no longer outranked by a preferred language passed to an earlier `initializeCustomer` — it now takes effect for `showProfile` presentations that don't pass their own `lang` and for subsequent `initializeCustomer`/`sendEvent` requests
+- ⚠️ **Customer Initialization Errors**: `initializeCustomer` now reports a failed request to its callback as `(null, error)`; previously the failure never reached the callback and surfaced as an unhandled async error
+- 🌐 **Unsupported Language Codes**: any two-character code used to be accepted, so one that isn't a real language code (e.g. `"عر"`) could make SDK requests fail until the language was changed again or the app restarted
+- 🔗 **Widget URL Encoding**: the customer ID, session token, `openDetail`, platform, shop and API key are now encoded in the widget URL — they were added as-is, so a `+` arrived as a space, an `&` split the value into an extra parameter, and a `#` cut off every parameter after it
+- 📨 **Event Callback**: `sendEvent` now reports any accepted (2xx) response as `true` — it reported `false` unless the status was exactly 200, so events accepted with `202` looked failed — and passes failed requests to its callback as `(null, error)` instead of surfacing them as unhandled async errors
+- 🧩 **Calls Without a Callback**: `initializeCustomer` and `sendEvent` no longer throw `Null check operator used on a null value` when called without a callback; the call goes through and its result simply isn't reported
+
+### 🔄 Changed
+- 🌐 **Preferred Language Sync**: `setLanguage(lang)` now also mirrors the new language onto the customer's Gameball profile, so server-driven communications follow it too; the update goes to the most recently initialized customer (remembered across app launches) and is skipped until one has been initialized
+- 🌐 **Supported Languages**: language codes from `init`, `setLanguage`, `initializeCustomer` and a per-call `lang` are now matched case-insensitively against the supported languages (`en`, `ar`, `fr`, `es`, `de`, `pt`, `pl`, `it`, `hu`, `zh-tw`, `nl`, `sv`, `no`, `dk`, `ja`); any other code falls back to `en`; regional variants (e.g. `ar-EG`) and three-letter codes (e.g. `ara`) aren't mapped, and `initializeCustomer` still sends `preferredLanguage` to Gameball as passed
+- 👤 **Registered Customers Only**: the SDK now always initializes customers as registered — `initializeCustomer` sends `guest` as `false`, and `InitializeCustomerRequestBuilder().isGuest(...)` is ignored
+- 📊 **Diagnostic Logging**: internal diagnostic logging now only records widget usage
+
+### 🗑️ Removed
+- 🧹 **Internal Direction Helper**: removed the undocumented `isLtr` helper from `utils/language_utils.dart`, which only served the old close-button placement
+
+---
+
 ## [3.3.0] - 2026-09-02 📱
 
 > **Minor Release**: Per-call and global language control, and push notification click tracking

@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -30,7 +30,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.3.0
+  gameball_sdk: ^3.3.1
 ```
 
 ### Flutter CLI
@@ -210,7 +210,7 @@ The SDK also records internal diagnostic logs automatically to aid troubleshooti
 
 ### Language Control (v3.3.0+)
 
-Present a single widget in a specific language with `ShowProfileRequestBuilder().lang(...)` (2-letter code, e.g. `"en"`, `"ar"`):
+Present a single widget in a specific language with `ShowProfileRequestBuilder().lang(...)` (a supported language code, e.g. `"en"`, `"ar"`):
 
 ```dart
 final request = ShowProfileRequestBuilder()
@@ -229,7 +229,11 @@ Or switch the SDK's global language on demand — no re-`init` needed:
 GameballApp.getInstance().setLanguage("ar");
 ```
 
-This changes the fallback used by future `showProfile` presentations (a per-call `lang` still wins) and `initializeCustomer`/`sendEvent` requests. Invalid codes are ignored.
+This changes the fallback used by future `showProfile` presentations (a per-call `lang` still wins) and `initializeCustomer`/`sendEvent` requests.
+
+As of v3.3.1 it also becomes the customer's preferred language, taking precedence over one set earlier through `initializeCustomer`, and is mirrored onto the customer's Gameball profile so server-driven communications follow it too. The profile update goes to the most recently initialized customer (remembered across app launches) and is skipped until one has been initialized — to set the language before that, pass it as `preferredLanguage` to `initializeCustomer`.
+
+**Supported languages:** `en`, `ar`, `fr`, `es`, `de`, `pt`, `pl`, `it`, `hu`, `zh-tw`, `nl`, `sv`, `no`, `dk`, `ja`, matched case-insensitively. As of v3.3.1, any other code passed to `init`, `setLanguage`, `initializeCustomer` or `ShowProfileRequestBuilder().lang(...)` falls back to `en` (earlier versions ignored codes that weren't 2 characters long). Codes must match one of these exactly (letter case doesn't matter): regional variants such as `ar-EG` and three-letter codes such as `ara` aren't mapped and fall back to `en`. `initializeCustomer` still sends `preferredLanguage` to Gameball exactly as passed; only the language the SDK itself uses falls back to `en`.
 
 ### Push Click Tracking (v3.3.0+)
 
@@ -364,7 +368,7 @@ Request object for initializing/registering customers with the Gameball platform
 | `referralCode` | String | ❌ | Referral code for attribution |
 | `email` | String | ❌ | Customer email address |
 | `mobile` | String | ❌ | Customer mobile number |
-| `isGuest` | bool | ❌ | Guest status (defaults to false) |
+| `isGuest` | bool | ❌ | Ignored as of v3.3.1 — customers are always initialized as registered |
 | `pushProvider` | PushProvider | ❌ | Push notification provider (Firebase/Huawei) |
 
 **Validation Rules:**
@@ -381,7 +385,7 @@ Request object for initializing/registering customers with the Gameball platform
 - `referralCode(String referralCode)` - Sets referral code
 - `email(String email)` - Sets customer email
 - `mobile(String mobile)` - Sets customer mobile number
-- `isGuest(bool isGuest)` - Sets guest status
+- `isGuest(bool isGuest)` - Ignored as of v3.3.1 — customers are always initialized as registered
 - `pushProvider(PushProvider provider)` - Sets push provider (Firebase/Huawei)
 
 **Example:**
@@ -396,7 +400,6 @@ final request = InitializeCustomerRequestBuilder()
     .deviceToken("firebase_token")
     .pushProvider(PushProvider.Firebase)
     .referralCode("REF123")
-    .isGuest(false)
     .customerAttributes(attributes)
     .build();
 ```
@@ -414,13 +417,13 @@ Additional customer information for enriching customer profiles and personalizat
 | `mobile` | String | ❌ | Customer mobile number |
 | `dateOfBirth` | String | ❌ | Date of birth (YYYY-MM-DD format) |
 | `joinDate` | String | ❌ | Join date (YYYY-MM-DD format) |
-| `preferredLanguage` | String | ❌ | Preferred language (2-letter ISO code) |
+| `preferredLanguage` | String | ❌ | Preferred language (supported language code) |
 | `customAttributes` | Map<String, String> | ❌ | Custom key-value pairs |
 | `additionalAttributes` | Map<String, String> | ❌ | Additional flexible attributes |
 | `channel` | String | 🔒 | Channel identifier (automatically set to "mobile") |
 
 **Validation Rules:**
-- `preferredLanguage` must be 2-letter ISO language code if provided
+- `preferredLanguage` should be a supported language code; the SDK uses `en` for any other code
 - `email` must be valid email format if provided
 - `dateOfBirth` and `joinDate` should be in YYYY-MM-DD format
 - `channel` is automatically set to "mobile" and cannot be modified
@@ -523,7 +526,7 @@ Request object for displaying the Gameball customer profile widget with customiz
 | `widgetUrlPrefix` | String | ❌ | Custom widget URL prefix |
 | `mobile` | String | ❌ | Customer mobile number (for channel merging) |
 | `email` | String | ❌ | Customer email address (for channel merging) |
-| `lang` | String | ❌ | 2-letter language code for this presentation only (v3.3.0+) |
+| `lang` | String | ❌ | Supported language code for this presentation only (v3.3.0+) |
 | `externalLinkCallback` | void Function(String) | ❌ | Handler for links tagged `gbExternalBrowser=true`. When provided, the link is delegated to it; otherwise the SDK opens it in the system browser |
 | `widgetEventCallback` | void Function(Map<String, dynamic>?, Exception?) | ❌ | Receives events the widget posts (e.g. game completion) as a `{type, metadata}` map; called with `(null, exception)` on a parse failure |
 
@@ -540,7 +543,7 @@ Request object for displaying the Gameball customer profile widget with customiz
 - `widgetUrlPrefix(String widgetUrlPrefix)` - Sets custom widget URL prefix
 - `mobile(String mobile)` - Sets customer mobile number (channel merging)
 - `email(String email)` - Sets customer email address (channel merging)
-- `lang(String? lang)` - Sets the 2-letter language code for this presentation only (v3.3.0+)
+- `lang(String? lang)` - Sets a supported language code for this presentation only (v3.3.0+)
 - `externalLinkCallback(void Function(String) callback)` - Sets handler for links tagged `gbExternalBrowser=true`
 - `widgetEventCallback(void Function(Map<String, dynamic>?, Exception?) callback)` - Registers a listener for widget events
 

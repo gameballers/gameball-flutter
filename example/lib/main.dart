@@ -149,7 +149,6 @@ class _MyHomePageState extends State<MyHomePage> {
           .email("john.doe@example.com")
           .mobile("1234567890")
           .referralCode("DEMO123") // Optional referral code
-          .isGuest(false)
           .customerAttributes(customerAttributes)
           // Uncomment below for push notifications
           // .deviceToken("{your_device_token}")
@@ -219,7 +218,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.3.0',
+              'Gameball Flutter SDK v3.3.1',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),
