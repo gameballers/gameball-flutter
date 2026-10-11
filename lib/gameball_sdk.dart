@@ -515,16 +515,16 @@ class GameballApp extends StatelessWidget {
   String _buildWidgetUrl(ShowProfileRequest request, String language) {
     String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
 
-    widgetUrl += '&apiKey=$_apiKey';
+    widgetUrl += '&apiKey=${Uri.encodeComponent(_apiKey)}';
 
-    widgetUrl += '&customerId=${request.customerId ?? ""}';
+    widgetUrl += '&customerId=${Uri.encodeComponent(request.customerId ?? "")}';
 
     if (!isNullOrEmpty(_platform)) {
-      widgetUrl += '&platform=$_platform';
+      widgetUrl += '&platform=${Uri.encodeComponent(_platform!)}';
     }
 
     if (!isNullOrEmpty(_shop)) {
-      widgetUrl += '&shop=$_shop';
+      widgetUrl += '&shop=${Uri.encodeComponent(_shop!)}';
     }
 
     widgetUrl += '&os=${getDevicePlatform()}';
@@ -532,7 +532,7 @@ class GameballApp extends StatelessWidget {
     widgetUrl += '&sdk=Flutter-${getSdkVersion()}';
 
     if (!isNullOrEmpty(request.openDetail)) {
-      widgetUrl += '&openDetail=${request.openDetail}';
+      widgetUrl += '&openDetail=${Uri.encodeComponent(request.openDetail!)}';
     }
 
     if (request.hideNavigation != null) {
@@ -548,7 +548,7 @@ class GameballApp extends StatelessWidget {
     }
 
     if (!isNullOrEmpty(_sessionToken)) {
-      widgetUrl += '&sessionToken=$_sessionToken';
+      widgetUrl += '&sessionToken=${Uri.encodeComponent(_sessionToken!)}';
     }
 
     return widgetUrl;
