@@ -173,12 +173,11 @@ class GameballApp extends StatelessWidget {
 
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
-      sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
-        if (response.statusCode == 200) {
-          callback!(true, null);
-        } else {
-          callback!(false, null);
-        }
+      // onError, not catchError, so an exception thrown by the success callback isn't reported twice
+      sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((_) {
+        callback!(true, null);
+      }, onError: (e) {
+        callback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
     } catch (e) {
       callback!(null, e as Exception);
