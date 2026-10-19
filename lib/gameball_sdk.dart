@@ -118,7 +118,7 @@ class GameballApp extends StatelessWidget {
   }) async {
     // Validate API key
     if (isNullOrEmpty(_apiKey)) {
-      responseCallback!(null, Exception('API key is not initialized. Call init() first'));
+      responseCallback?.call(null, Exception('API key is not initialized. Call init() first'));
       return;
     }
 
@@ -141,12 +141,12 @@ class GameballApp extends StatelessWidget {
       // onError, not catchError, so an exception thrown by the success callback isn't reported twice
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
-        responseCallback!(response, null);
+        responseCallback?.call(response, null);
       }, onError: (e) {
         responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
     } catch (e) {
-      responseCallback!(null, e as Exception);
+      responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
     }
   }
 
@@ -164,7 +164,7 @@ class GameballApp extends StatelessWidget {
   void sendEvent(Event event, SendEventCallback? callback, {String? sessionToken}) {
     // Validate API key
     if (isNullOrEmpty(_apiKey)) {
-      callback!(null, Exception('API key is not initialized. Call init() first'));
+      callback?.call(null, Exception('API key is not initialized. Call init() first'));
       return;
     }
 
@@ -175,12 +175,12 @@ class GameballApp extends StatelessWidget {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
       // onError, not catchError, so an exception thrown by the success callback isn't reported twice
       sendEventRequest(event, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((_) {
-        callback!(true, null);
+        callback?.call(true, null);
       }, onError: (e) {
         callback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
     } catch (e) {
-      callback!(null, e as Exception);
+      callback?.call(null, e is Exception ? e : Exception(e.toString()));
     }
   }
 
