@@ -119,9 +119,12 @@ class GameballApp extends StatelessWidget {
     // Send request to Gameball API
     try {
       String language = handleLanguage(_lang, _customerPreferredLanguage);
+      // onError, not catchError, so an exception thrown by the success callback isn't reported twice
       initializeCustomerRequest(request, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken)
           .then((response) {
         responseCallback!(response, null);
+      }, onError: (e) {
+        responseCallback?.call(null, e is Exception ? e : Exception(e.toString()));
       });
       // Fire telemetry immediately after dispatching the request.
       GameballLogger.instance.log('sdk.initializeCustomer', params: request.toJson());
