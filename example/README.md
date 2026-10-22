@@ -1,6 +1,6 @@
 # Gameball Flutter SDK Example
 
-This is a demo application showcasing the Gameball Flutter SDK v3.3.1 with builder pattern architecture.
+This is a demo application showcasing the Gameball Flutter SDK v4.0.0 with builder pattern architecture.
 
 ## Features Demonstrated
 
@@ -12,6 +12,8 @@ This is a demo application showcasing the Gameball Flutter SDK v3.3.1 with build
 - **Widget Events & Dismissal** - react to events the widget posts, e.g. game completion (v3.2.0+)
 - **Language Control** - per-call widget language and global language switch (v3.3.0+)
 - **Push Click Tracking** - report taps on Gameball push notifications (v3.3.0+)
+- **In-App Messaging** - display dashboard campaigns with `startInAppMessaging`, observe them on `onInAppMessage` and stop on logout (v4.0.0+)
+- **Purchase Logging** - send purchase events with `logPurchase` for purchase-triggered campaigns (v4.0.0+)
 - **Session Token Authentication** (optional, v3.1.0+)
 - **Push Notifications** setup (Firebase & Huawei)
 
@@ -55,21 +57,40 @@ Click the play button (▶) in the app to test:
 - Customer initialization
 - Event tracking
 - Profile widget display
+- In-app messaging (a session-start campaign appears if one is live for your account)
+- Purchase logging
+
+### 5. In-App Messaging (v4.0.0+)
+
+The SDK draws messages through your app's navigator, so the example passes the same key to `MaterialApp` and to `startInAppMessaging`:
+
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
+
+MaterialApp(navigatorKey: navigatorKey, home: ...);
+
+gameballApp.startInAppMessaging(
+  customerId: "demo_customer_123",
+  navigatorKey: navigatorKey,
+);
+```
+
+Campaigns are created in the Gameball dashboard, and in-app messaging must be enabled for your account. The example turns on `gameballInAppMessagingLogging`, so the console shows why each campaign was shown or skipped.
 
 ## Firebase Setup (Optional)
 
 To test push notifications:
 
-1. Add your Firebase configuration to the project
-2. Uncomment the Firebase initialization code in `main.dart`
+1. Generate `lib/firebase_options.dart` for your Firebase project with `flutterfire configure`
+2. Uncomment the `firebase_core` and `firebase_options.dart` imports and the `Firebase.initializeApp` call in `main.dart`
 3. Add your device token and push provider to the customer request
 
 ## Requirements
 
 - Flutter 1.17.0+ (Recommended: 3.0+)
 - Dart 3.4.4+
-- Android API level 24+
-- iOS 13.0+
+- Android API level 24+ (Android 7.0)
+- iOS 15.0+
 
 ## Documentation
 

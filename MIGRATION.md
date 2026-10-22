@@ -6,11 +6,162 @@ This guide provides migration instructions for upgrading between major versions 
 
 ## Table of Contents
 
+- [v3.x → v4.0.0](#migration-guide-v3x--v400)
 - [v3.2.x → v3.3.0](#migration-guide-v32x--v330)
 - [v3.1.1 → v3.2.0](#migration-guide-v311--v320)
 - [v3.1.0 → v3.1.1](#migration-guide-v310--v311)
 - [v3.0.0 → v3.1.0](#migration-guide-v300--v310)
 - [v2.x → v3.0.0](#migration-guide-v2x--v300)
+
+---
+
+## Migration Guide: v3.x → v4.0.0
+
+Version 4.0.0 adds in-app messaging: campaigns authored in the Gameball dashboard, displayed inside your app. It is a **major release** because it raises the minimum supported platform versions to **iOS 15.0** and **Android API 24 (Android 7.0)**. Every v3.x call keeps its signature and behaviour, so no Dart code changes are required.
+
+### Overview of Changes
+
+#### ✨ What's New
+- **In-app messaging** - `startInAppMessaging(customerId:, navigatorKey:)` displays dashboard campaigns; `stopInAppMessaging()` stops it and clears state on logout
+- **Three message types** - modal, slideup and fullscreen, chosen per campaign in the dashboard rather than in code
+- **Triggers** - session start, and custom events matched by name and optionally filtered on their metadata
+- **Purchase logging** - `logPurchase(...)` sends a `purchase` event that campaigns can target and filter on
+- **Host hooks** - `beforeDisplay`, `onAction`, `onNavigate`, and the `onInAppMessage` stream
+- **Automatic message analytics** - impressions, clicks and dismissals, batched and kept on the device until sent
+
+#### ⚠️ Breaking Changes
+- **Minimum iOS version raised to 15.0** (was 12.0)
+- **Minimum Android version raised to API 24 / Android 7.0** (was API 21 / Android 5.0)
+- No changes to the public API. In-app messaging is opt-in: until you call `startInAppMessaging`, the module makes no requests, starts no timers, draws nothing and stores nothing.
+
+### 1. Update Dependencies
+
+**Before (v3.x):**
+```yaml
+dependencies:
+  gameball_sdk: ^3.3.1
+```
+
+**After (v4.0.0):**
+```yaml
+dependencies:
+  gameball_sdk: ^4.0.0
+```
+
+Run `flutter pub get` to update.
+
+### 2. Raise Platform Minimums
+
+**Before (v3.x):**
+```groovy
+// android/app/build.gradle
+minSdk = 21
+```
+```ruby
+# ios/Podfile
+platform :ios, '12.0'
+```
+
+**After (v4.0.0):**
+```groovy
+// android/app/build.gradle
+minSdk = 24
+```
+```ruby
+# ios/Podfile
+platform :ios, '15.0'
+```
+
+Also set `IPHONEOS_DEPLOYMENT_TARGET = 15.0` for the Runner target in Xcode, then run `pod install` in `ios/`.
+
+### 3. Adopt In-App Messaging (Optional)
+
+**Before (v3.x):** not available.
+
+**After (v4.0.0):**
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
+
+MaterialApp(
+  navigatorKey: navigatorKey,
+  home: const HomeScreen(),
+);
+
+// After init() and once the customer is known
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+);
+
+// On logout
+GameballApp.getInstance().stopInAppMessaging();
+```
+
+Three things are worth knowing before you wire it up:
+
+- **The navigator key must be your app's.** The SDK draws above your routes through it, so pass the same `GlobalKey<NavigatorState>` your `MaterialApp` or `CupertinoApp` uses. A key that isn't attached to your app's navigator means messages are selected but never appear.
+- **Call `stopInAppMessaging()` on logout.** It dismisses anything on screen, sends pending analytics for the customer who produced them and clears state.
+- **If you use go_router or another Navigator 2.0 router, pass `onNavigate`.** Without it the SDK falls back to `Navigator.pushNamed`, which can't see those routes.
+
+### 4. Log Purchases (Optional)
+
+**Before (v3.x):**
+```dart
+GameballApp.getInstance().sendEvent(
+  EventBuilder()
+      .customerId("customer_123")
+      .eventName("purchase")
+      .eventMetaData("productId", "sku-001")
+      .build(),
+  (success, error) {},
+);
+```
+
+**After (v4.0.0):**
+```dart
+GameballApp.getInstance().logPurchase(
+  customerId: "customer_123",
+  productId: "sku-001",
+  price: 49.99,
+  currency: "USD",
+);
+```
+
+`logPurchase` sends the same kind of event through `sendEvent`, with `productId`, `price`, `currency` and `quantity` as metadata, so purchase-triggered campaigns can filter on them.
+
+### Availability
+
+In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they aren't, the SDK records the 404 in its debug log and stays silent — nothing surfaces to your app.
+
+### Migration Checklist
+
+#### Pre-Migration
+- [ ] Confirm your app can drop support for iOS versions below 15.0 and Android versions below 7.0 (API 24)
+
+#### During Migration
+- [ ] Update `gameball_sdk` to `^4.0.0` and run `flutter pub get`
+- [ ] Set `minSdk` to 24 in `android/app/build.gradle`
+- [ ] Set the iOS deployment target to 15.0 in the Podfile and Xcode, then run `pod install`
+- [ ] (Optional) Pass your `MaterialApp`'s navigator key to `startInAppMessaging`
+- [ ] (Optional) Call `stopInAppMessaging()` on logout
+- [ ] (Optional) Pass `onNavigate` if you use go_router or another Navigator 2.0 router
+- [ ] (Optional) Replace hand-built purchase events with `logPurchase`
+
+#### Post-Migration
+- [ ] Verify `initializeCustomer`, `sendEvent` and `showProfile` behave as before
+- [ ] If adopted, confirm a session-start campaign appears on launch
+
+### Troubleshooting
+
+1. **Build fails after the update**
+   ```
+   uses-sdk:minSdkVersion 21 cannot be smaller than version 24 declared in library
+   ```
+   **Solution**: Raise `minSdk` to 24 in `android/app/build.gradle`, and the iOS deployment target to 15.0.
+
+2. **Campaigns never appear**
+
+   **Solution**: Check that the `navigatorKey` passed to `startInAppMessaging` is the one assigned to your `MaterialApp`, that `startInAppMessaging` runs after `init`, and that in-app messaging is enabled for your account. Set `gameballInAppMessagingLogging = true` to see why a campaign was skipped.
 
 ---
 
