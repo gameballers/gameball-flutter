@@ -1,4 +1,6 @@
-import 'package:firebase_core/firebase_core.dart';
+// Firebase (optional) - see "Firebase Setup" in the README:
+// import 'package:firebase_core/firebase_core.dart';
+// import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:gameball_sdk/gameball_sdk.dart';
 import 'package:gameball_sdk/models/requests/event.dart';
@@ -7,6 +9,10 @@ import 'package:gameball_sdk/models/requests/initialize_customer_request.dart';
 import 'package:gameball_sdk/models/requests/show_profile_request.dart';
 import 'package:gameball_sdk/models/requests/gameball_config.dart';
 import 'package:gameball_sdk/models/enums/push_provider.dart';
+
+// In-app messaging (v4.0.0+) draws messages through your app's navigator, so the
+// same key is passed to MaterialApp and to startInAppMessaging.
+final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   runApp(const MyApp());
@@ -19,6 +25,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Flutter Demo',
       theme: ThemeData(
         // This is the theme of your application.
@@ -56,14 +63,24 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   GameballApp gameballApp = GameballApp.getInstance();
 
+  @override
+  void initState() {
+    super.initState();
+    // In-app messaging (v4.0.0+): observe every message the SDK selects.
+    // Safe to subscribe before startInAppMessaging is called.
+    gameballApp.onInAppMessage.listen((message) {
+      print('In-app message selected: ${message.id} (${message.type.name})');
+    });
+  }
+
   void _testGameball() {
     // Initialize Firebase (optional, only if using Firebase features)
-    // Note: For production apps, add firebase_options.dart with your project configuration
-    Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform).then((response) {
-      print('Firebase initialized successfully');
-    }).catchError((error) {
-      print('Firebase initialization error: $error');
-    });
+    // Note: Generate firebase_options.dart with `flutterfire configure` and uncomment the imports above
+    // Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform).then((response) {
+    //   print('Firebase initialized successfully');
+    // }).catchError((error) {
+    //   print('Firebase initialization error: $error');
+    // });
 
     // TODO Replace the values between the braces with your actual values
 
@@ -104,6 +121,34 @@ class _MyHomePageState extends State<MyHomePage> {
               .build();
 
           gameballApp.showProfile(context, profileRequest);
+
+          // 5. In-app messaging (v4.0.0+) - display campaigns authored in the Gameball dashboard.
+          // Messages wait while the profile widget is open and appear once it closes.
+          gameballInAppMessagingLogging = true; // Console logs explaining why each campaign was shown or skipped
+          gameballApp.startInAppMessaging(
+            customerId: "demo_customer_123",
+            navigatorKey: navigatorKey,
+            // Optional: show, postpone (later) or drop (discard) each message
+            beforeDisplay: (message) => GameballDisplayDecision.show,
+            // Optional: return true to handle a tap yourself, false to let the SDK act
+            onAction: (message, button, action) => false,
+            // Optional: route through go_router or another Navigator 2.0 router
+            // onNavigate: (route, arguments) => router.push(route),
+          );
+          // On logout - dismisses any message, sends pending analytics and clears state:
+          // gameballApp.stopInAppMessaging();
+
+          // 6. Purchase logging (v4.0.0+) - purchase-triggered campaigns can filter on these fields
+          gameballApp.logPurchase(
+            customerId: "demo_customer_123",
+            productId: "sku-001",
+            price: 49.99,
+            currency: "USD",
+            quantity: 1,
+            callback: (success, error) {
+              print(error == null ? 'Purchase logged' : 'Purchase logging error: $error');
+            },
+          );
 
           // Host-initiated dismiss (v3.2.0+) - close the widget programmatically, e.g. on logout:
           // gameballApp.hideProfile();
@@ -218,7 +263,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              'Gameball Flutter SDK v3.3.1',
+              'Gameball Flutter SDK v4.0.0',
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 16),
@@ -233,7 +278,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             const SizedBox(height: 4),
             Text(
-              '• SDK Initialization\n• Customer Registration\n• Event Tracking\n• Profile Widget\n• Widget Events',
+              '• SDK Initialization\n• Customer Registration\n• Event Tracking\n• Profile Widget\n• Widget Events\n• In-App Messaging\n• Purchase Logging',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),

@@ -1,0 +1,10 @@
+# Not part of the published package. `.pubignore` replaces `.gitignore` for
+# `dart pub publish`, so anything that must stay out of the archive is listed here.
+docs/
+test/
+example/
+.github/
+.dart_tool/
+build/
+coverage/
+*.iml

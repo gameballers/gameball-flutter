@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -12,6 +12,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 - 🎯 **Customer Management** - Initialize and manage customer profiles with builder pattern
 - 📊 **Event Tracking** - Track user actions and behaviors with flexible metadata
 - 🎁 **Profile Widget** - Display customer loyalty information in customizable UI
+- 💬 **In-App Messaging** - Show dashboard-authored campaigns in your app, opt-in and additive
 - 🔧 **Modern Architecture** - Built with Flutter best practices and null safety
 - 🛡️ **Type Safety** - Compile-time validation with Dart's type system
 - ⚡ **Async/Await Ready** - Modern async architecture with proper error handling
@@ -20,17 +21,23 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 
 - **Minimum Flutter Version**: 1.17.0
 - **Dart**: 3.4.4+
-- **Android**: API level 21+
-- **iOS**: 12.0+
+- **Android**: API level 24+ (Android 7.0)
+- **iOS**: 15.0+
 
-> **Note**: While the SDK supports Flutter 1.17.0+, we recommend using Flutter 3.0+ for the best development experience with modern features like null safety and enhanced tooling.
+> **Note**: Set your app's `minSdkVersion` to 24 or higher and its iOS deployment target
+> (`IPHONEOS_DEPLOYMENT_TARGET` and the Podfile `platform :ios`) to 15.0 or higher. As of v4.0.0,
+> earlier versions aren't supported.
+
+> **Note**: The `environment` constraint in `pubspec.yaml` permits older Flutter and Dart versions,
+> and `pub` will resolve older dependency versions to satisfy them. A current resolution needs
+> Flutter 3.44+ / Dart 3.12+, so that is what to expect on a fresh `pub get`.
 
 ## Installation
 
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^3.3.1
+  gameball_sdk: ^4.0.0
 ```
 
 ### Flutter CLI
@@ -262,6 +269,97 @@ FirebaseMessaging.onMessageOpenedApp.listen((message) {
 
 It returns `true` when the notification is a Gameball one; the tap is reported to Gameball when the payload carries a click token. An optional `sessionToken` parameter overrides the global session token for this request.
 
+## In-App Messaging (v4.0.0+)
+
+Displays campaigns you author in the Gameball dashboard — modals, slideup banners and fullscreen posters — inside your app.
+
+It is **opt-in and additive**. Until you call `startInAppMessaging`, the module makes no requests, starts no timers, draws nothing and stores nothing, so upgrading without calling it changes nothing about how your app behaves.
+
+> In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they are not, the SDK records the 404 in its diagnostic log and stays silent.
+
+### Opting in
+
+The SDK draws above your routes, so it needs the same navigator key your app uses:
+
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
+
+MaterialApp(
+  navigatorKey: navigatorKey,
+  home: const HomeScreen(),
+);
+
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+);
+```
+
+Call `stopInAppMessaging()` on logout. It dismisses anything on screen, sends pending telemetry and clears state.
+
+### What triggers a message
+
+**Session start** — on launch, and again when the app returns to the foreground after more than `sessionTimeout` (30 seconds by default).
+
+**Custom events** — a campaign can target an event by name and filter on its metadata:
+
+```dart
+GameballApp.getInstance().sendEvent(
+  EventBuilder()
+      .customerId("customer_123")
+      .eventName("add_to_cart")
+      .eventMetaData("productId", "sku-001")
+      .build(),
+  (success, error) {},
+);
+```
+
+A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
+
+Whether a matching campaign actually appears also depends on its frequency cap, the minimum interval between any two displays, its expiry and its priority — all set in the dashboard.
+
+### Controlling display
+
+```dart
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+
+  // Show it, hold it for the next opportunity, or drop it.
+  beforeDisplay: (message) => isCheckingOut
+      ? GameballDisplayDecision.later
+      : GameballDisplayDecision.show,
+
+  // Return true if you handled the tap; false lets the SDK act.
+  // `button` is null when the message surface itself was tapped.
+  onAction: (message, button, action) => false,
+
+  // Needed for go_router and other Navigator 2.0 routers; without it the
+  // SDK falls back to named routes.
+  onNavigate: (String route, Map<String, Object>? arguments) {
+    // route your own way
+  },
+);
+```
+
+`onInAppMessage` is a stream of every message the SDK selects, whatever happens to it afterwards:
+
+```dart
+GameballApp.getInstance().onInAppMessage.listen((message) {
+  debugPrint("selected ${message.id}");
+});
+```
+
+### Personalisation
+
+Campaign text can contain `{token}` placeholders. Just before a message with placeholders is shown, the SDK fetches the customer's current values and fills them in, so a points balance is current at the moment it appears. The fetch waits at most two seconds and its result is cached for a minute. If the values don't arrive in time, the placeholders are removed rather than shown as raw `{braces}`, and the message still appears. Messages with no placeholders skip the fetch entirely.
+
+> Requires `integrations/inapp-messages/variables` to be enabled for your account. Until then, placeholders are removed from the text.
+
+### Analytics
+
+Impressions, clicks and dismissals are reported automatically — no integration required. A button tap is reported as a click carrying that button's id. Events are batched and persisted to device storage, so telemetry logged just before the app is killed still arrives on the next launch.
+
 ## API Methods
 
 The SDK provides the following public methods:
@@ -272,6 +370,11 @@ The SDK provides the following public methods:
 - `hideProfile()` - Dismiss the currently shown profile widget (no-op when nothing is shown)
 - `setLanguage(lang)` - Change the SDK's global language on demand without re-calling `init`
 - `handlePushClick(payload, {callback, sessionToken})` - Report a tap on a Gameball push notification for click tracking
+- `logPurchase(...)` - Report a purchase, which in-app messaging campaigns can target and filter on
+- `startInAppMessaging(customerId:, navigatorKey:, ...)` - Opt in to in-app messaging
+- `stopInAppMessaging()` - Stop it and clear state; call on logout
+- `isInAppMessagingStarted` - Whether in-app messaging is currently running
+- `onInAppMessage` - Stream of every in-app message the SDK selects
 
 ### Session Token Per-Request Override
 
@@ -308,6 +411,10 @@ await gameballApp.sendEvent(event, callback); // Uses "specific-token" from prev
 **Important Notes:**
 - Each method call updates the global `_sessionToken` value. Subsequent calls will use the most recently set value unless explicitly overridden again.
 - The `sessionToken` parameter must be explicitly passed to **every method call** where you want to use a specific token. If you want to use the same custom token across multiple calls, you must pass it to each call individually or set it globally via `init()`.
+
+## ⚠️ Migration from v3.x
+
+**Version 4.0.0 is a major release** that adds in-app messaging. Every v3.x call keeps its signature and behaviour; the breaking change is the raised platform minimums — **iOS 15.0+** (was 12.0) and **Android API 24+** (was API 21). See the [Migration Guide](MIGRATION.md#migration-guide-v3x--v400) for details.
 
 ## ⚠️ Migration from v2.x
 
@@ -563,6 +670,48 @@ final profileRequest = ShowProfileRequestBuilder()
 gameballApp.showProfile(context, profileRequest);
 ```
 
+### startInAppMessaging
+Opts in to in-app messaging for a customer (v4.0.0+).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `customerId` | String | ✅ | Customer identifier the campaigns are fetched for |
+| `navigatorKey` | GlobalKey<NavigatorState> | ✅ | The key assigned to your `MaterialApp.navigatorKey`; messages are drawn through it |
+| `beforeDisplay` | GameballBeforeDisplay | ❌ | Called before each message; return `GameballDisplayDecision.show`, `.later` or `.discard`. Shows every message when omitted |
+| `onAction` | GameballOnAction | ❌ | Called on a tap with `(message, button, action)`; return `true` if you handled it, `false` to let the SDK act. `button` is null when the message itself was tapped |
+| `onNavigate` | GameballOnNavigate | ❌ | Called with `(route, arguments)` when a campaign navigates; needed for go_router and other Navigator 2.0 routers. Falls back to `Navigator.pushNamed` when omitted |
+| `sessionTimeout` | Duration | ❌ | Time in the background after which returning starts a new session (defaults to 30 seconds). Applies when messaging first starts |
+
+**Validation Rules:**
+- Ignored, with a debug log, when `init()` hasn't been called
+- Calling it again for the same `customerId` does nothing; a different `customerId` fetches that customer's campaigns
+
+### logPurchase
+Sends a `purchase` event that in-app messaging campaigns can target (v4.0.0+).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `customerId` | String | ✅ | Customer who made the purchase |
+| `productId` | String | ✅ | Identifier of the purchased item |
+| `price` | double | ✅ | Unit price |
+| `currency` | String | ✅ | ISO currency code, e.g. `"USD"` |
+| `quantity` | int | ❌ | Number of units (defaults to 1) |
+| `properties` | Map<String, Object> | ❌ | Extra metadata, also available to campaign filters |
+| `callback` | SendEventCallback | ❌ | Receives the result, as with `sendEvent` |
+| `sessionToken` | String | ❌ | Overrides the global session token for this request |
+
+**Example:**
+```dart
+GameballApp.getInstance().logPurchase(
+  customerId: "customer_123",
+  productId: "sku-001",
+  price: 49.99,
+  currency: "USD",
+  quantity: 2,
+  callback: (success, error) {},
+);
+```
+
 ## Advanced Usage
 
 ### Customer Attributes with Builder
@@ -646,10 +795,15 @@ Enable Flutter's debug logging to see detailed SDK operation logs:
 flutter run --verbose
 ```
 
+In-app messaging logs why a campaign was shown or skipped. These logs are on in debug builds and off in release builds; to turn them on in a release build while reproducing an issue:
+```dart
+gameballInAppMessagingLogging = true;
+```
+
 ## Documentation
 
 - 📋 **[Changelog](CHANGELOG.md)** - Version history and changes
-- 🔄 **[Migration Guide](MIGRATION.md)** - v2.x to v3.0.0 upgrade instructions
+- 🔄 **[Migration Guide](MIGRATION.md)** - Upgrade instructions, including v3.x to v4.0.0
 - 📝 **[Release Notes](RELEASE_NOTES.md)** - Latest release details
 
 ## Support
