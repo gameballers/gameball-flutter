@@ -10,13 +10,6 @@ void main() {
     expect(content.openDetail, 'details_wheel_9645');
   });
 
-  test('delay and dismissLimit are absent until the backend sends them', () {
-    const content =
-        GameballWidgetContent(gameCampaignId: 9645, gameCampaignType: 'wheel');
-    expect(content.delay, isNull);
-    expect(content.dismissLimit, isNull);
-  });
-
   testWidgets('a fullscreen game with no url fails rather than drawing blank',
       (tester) async {
     // The presenter refuses to mount a widget message without a url, so this is

@@ -486,18 +486,7 @@ GameballWidgetContent? _parseGameContent(
   return GameballWidgetContent(
     gameCampaignId: gameCampaignId,
     gameCampaignType: gameCampaignType,
-    // Not on the entry today; the backend still carries these on the challenge.
-    // Read leniently so the day they move here costs no parser change.
-    delay: _parseDelay(json['delay']),
-    dismissLimit: _asInt(json['dismissLimit']),
   );
-}
-
-/// Seconds to wait after the trigger, bounded to the 0-60 the dashboard accepts.
-Duration? _parseDelay(Object? value) {
-  final seconds = _asInt(value);
-  if (seconds == null || seconds <= 0) return null;
-  return Duration(seconds: seconds > 60 ? 60 : seconds);
 }
 
 /// Reads how the image and copy are arranged.

@@ -109,8 +109,6 @@ final class GameballWidgetContent {
   const GameballWidgetContent({
     required this.gameCampaignId,
     required this.gameCampaignType,
-    this.delay,
-    this.dismissLimit,
   });
 
   /// The challenge to open.
@@ -121,18 +119,6 @@ final class GameballWidgetContent {
 
   /// Which game it is, as the open-details text: `wheel`, `quiz`, `scratch`…
   final String gameCampaignType;
-
-  /// How long to wait after the trigger fires. Null means open immediately.
-  ///
-  /// Not on the sync entry today. Read when it appears, so this needs no change
-  /// on the day it does.
-  final Duration? delay;
-
-  /// Stop offering after this many dismissals without a play. Null means no cap.
-  ///
-  /// Also awaiting the backend, and additionally dependent on the widget
-  /// reporting game completion.
-  final int? dismissLimit;
 
   /// What the host widget is asked to open.
   String get openDetail => 'details_${gameCampaignType}_$gameCampaignId';
