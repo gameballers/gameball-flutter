@@ -204,14 +204,17 @@ GameballMessageTrigger? _parseTrigger(Object? json, String label) {
         return null; // a named filter was unusable; already logged
       }
 
-      final logical = _asString(json['metadataLogicalOperator'])?.toLowerCase();
-      if (logical != null && logical != 'and') {
-        iamLog('campaign $label dropped: metadataLogicalOperator "$logical" is '
-            'not supported (this SDK evaluates filters with AND)');
-        return null;
+      final matchAny =
+          _parseMatchAny(json['metadataLogicalOperator'], label);
+      if (matchAny == null) {
+        return null; // already logged
       }
 
-      return GameballCustomEventTrigger(eventName, filters: filters);
+      return GameballCustomEventTrigger(
+        eventName,
+        filters: filters,
+        matchAny: matchAny,
+      );
     case 'screen':
       // Deliberate, not unimplemented. On the web a URL is ambient and free; on
       // mobile nothing is, so a screen trigger needs the host to instrument it —
@@ -230,6 +233,36 @@ GameballMessageTrigger? _parseTrigger(Object? json, String label) {
   }
 }
 
+/// Whether a trigger's filters are joined by OR — the dashboard's "Any" — or
+/// null when the operator is one this SDK cannot evaluate, which drops the
+/// campaign.
+///
+/// Read in any letter case, and as the numeric enum the backend can also send:
+/// 1 is AND, 2 is OR. Absent means AND, which is what every filtered campaign
+/// meant before the operator was read.
+///
+/// An unknown operator still drops the campaign. Evaluating it as either one
+/// changes who sees the campaign, and in a direction nobody chose.
+bool? _parseMatchAny(Object? value, String label) {
+  final operator = value is num
+      ? '${value.toInt()}'
+      : _asString(value)?.trim().toLowerCase();
+  switch (operator) {
+    case null:
+    case '':
+    case 'and':
+    case '1':
+      return false;
+    case 'or':
+    case '2':
+      return true;
+    default:
+      iamLog('campaign $label dropped: metadataLogicalOperator "$value" is '
+          'not supported (this SDK evaluates AND and OR)');
+      return null;
+  }
+}
+
 /// Parses trigger property filters, or null when the campaign must be skipped.
 ///
 /// A filter whose **property name is missing** skips the whole campaign: the
@@ -238,9 +271,10 @@ GameballMessageTrigger? _parseTrigger(Object? json, String label) {
 /// filter would silently *widen* the campaign — showing a "spent over $100"
 /// message to everyone — which is worse than not showing it.
 ///
-/// A filter with an unusable **operator or value** is dropped individually, which
-/// widens rather than narrows, because that is a content mistake in one field
-/// rather than a contract mismatch.
+/// A filter with an unusable **operator or value** is dropped individually,
+/// because that is a content mistake in one field rather than a contract
+/// mismatch. Under All that widens the campaign; under Any it narrows it to the
+/// conditions that remain.
 List<GameballPropertyFilter>? _parseFilters(Object? json, String label) {
   if (json == null) return const <GameballPropertyFilter>[];
   if (json is! List) {

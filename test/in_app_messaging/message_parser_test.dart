@@ -482,26 +482,42 @@ void main() {
       expect(eventTrigger('[{"name":"a","operator":"is"}]')!.filters, isEmpty);
     });
 
-    test('drops the campaign when the logical operator is not AND', () {
-      final campaign = one(minimal(
-        trigger: '{"type":"event","name":"e",'
-            '"metadataLogicalOperator":"Or",'
-            '"metadataFilters":[{"name":"a","operator":"is","value":1}]}',
-      ));
-
-      expect(campaign, isNull,
-          reason: 'evaluating OR as AND would silently narrow the audience');
-    });
-
-    test('accepts an explicit And', () {
-      expect(
-        one(minimal(
+    group('the logical operator', () {
+      GameballCustomEventTrigger? joinedBy(String operator) {
+        final campaign = one(minimal(
           trigger: '{"type":"event","name":"e",'
-              '"metadataLogicalOperator":"And",'
-              '"metadataFilters":[{"name":"a","operator":"is","value":1}]}',
-        )),
-        isNotNull,
-      );
+              '"metadataLogicalOperator":$operator,'
+              '"metadataFilters":[{"name":"a","operator":"is","value":1},'
+              '{"name":"b","operator":"is","value":2}]}',
+        ));
+        return campaign?.trigger as GameballCustomEventTrigger?;
+      }
+
+      test('OR, in any letter case, is the dashboard\'s Any', () {
+        for (final operator in ['"OR"', '"Or"', '"or"']) {
+          expect(joinedBy(operator)?.matchAny, isTrue,
+              reason: '$operator used to drop the campaign outright');
+        }
+      });
+
+      test('AND, or no operator at all, is All', () {
+        for (final operator in ['"AND"', '"And"', 'null']) {
+          expect(joinedBy(operator)?.matchAny, isFalse, reason: operator);
+        }
+      });
+
+      test('the numeric form reads 2 as OR and 1 as AND', () {
+        expect(joinedBy('2')?.matchAny, isTrue,
+            reason: 'read as AND, an Any campaign narrows silently to the '
+                'customers who meet every condition');
+        expect(joinedBy('1')?.matchAny, isFalse);
+      });
+
+      test('an operator it does not know still drops the campaign', () {
+        expect(joinedBy('"Xor"'), isNull,
+            reason: 'either guess changes who sees the campaign');
+        expect(joinedBy('3'), isNull);
+      });
     });
   });
 
@@ -820,6 +836,36 @@ void main() {
             trigger,
             const GameballCustomEventOccurrence('cart',
                 properties: {'value': 50})),
+        isFalse,
+      );
+    });
+
+    test('an Any trigger matches when one of its filters passes', () {
+      const trigger = GameballCustomEventTrigger('cart', matchAny: true, filters: [
+        GameballPropertyFilter(
+          property: 'tier',
+          operator: GameballFilterOperator.equals,
+          value: 'gold',
+        ),
+        GameballPropertyFilter(
+          property: 'value',
+          operator: GameballFilterOperator.greaterThan,
+          value: 100,
+        ),
+      ]);
+
+      expect(
+        triggerMatches(
+            trigger,
+            const GameballCustomEventOccurrence('cart',
+                properties: {'tier': 'silver', 'value': 200})),
+        isTrue,
+      );
+      expect(
+        triggerMatches(
+            trigger,
+            const GameballCustomEventOccurrence('cart',
+                properties: {'tier': 'silver', 'value': 50})),
         isFalse,
       );
     });

@@ -29,7 +29,8 @@ final class GameballSessionStartTrigger extends GameballMessageTrigger {
   const GameballSessionStartTrigger();
 }
 
-/// Fires when an event with this exact name is logged and every filter passes.
+/// Fires when an event with this exact name is logged and its filters pass —
+/// every one of them, or with [matchAny] at least one.
 ///
 /// The only event-shaped trigger. Purchases match this too, under
 /// [gameballPurchaseEventName], with their built-in fields exposed as filterable
@@ -39,12 +40,19 @@ final class GameballCustomEventTrigger extends GameballMessageTrigger {
   const GameballCustomEventTrigger(
     this.eventName, {
     this.filters = const <GameballPropertyFilter>[],
+    this.matchAny = false,
   });
 
   final String eventName;
 
   /// Conditions on the event's properties. Empty matches any properties.
   final List<GameballPropertyFilter> filters;
+
+  /// Whether one passing filter is enough, rather than all of them.
+  ///
+  /// The dashboard's "Any" (`metadataLogicalOperator` OR). False is its "All",
+  /// and what a campaign that names no operator means.
+  final bool matchAny;
 }
 
 // ---------------------------------------------------------------- occurrences
@@ -114,10 +122,17 @@ bool triggerMatches(
   return switch ((declared, occurred)) {
     (GameballSessionStartTrigger(), GameballSessionStartOccurrence()) => true,
     (
-      GameballCustomEventTrigger(eventName: final name, filters: final filters),
+      GameballCustomEventTrigger(
+        eventName: final name,
+        filters: final filters,
+        matchAny: final matchAny,
+      ),
       GameballCustomEventOccurrence(eventName: final fired),
     ) =>
-      name == fired && allFiltersMatch(filters, occurred.filterableProperties),
+      name == fired &&
+          (matchAny
+              ? anyFilterMatches(filters, occurred.filterableProperties)
+              : allFiltersMatch(filters, occurred.filterableProperties)),
     _ => false,
   };
 }
