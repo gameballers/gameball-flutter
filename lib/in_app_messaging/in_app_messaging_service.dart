@@ -738,20 +738,16 @@ class InAppMessagingService {
     final displayable = <InAppMessageCampaign>[];
     final notReady = <InAppMessageCampaign>[];
     for (final candidate in _campaigns) {
+      final held = _gameHeldBack(candidate);
       if (!_artworkReady.contains(candidate.key)) {
         notReady.add(candidate);
         iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
             'ready');
-      } else if (_campaignsUnconfirmed && candidate.message.isWidget) {
+      } else if (held != null) {
         // Not "not ready" — it will never be ready from here. Dropped rather
         // than deferred: the next live sync is what makes it openable again.
         iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
-            'skipped: this session\'s sync did not confirm it, and a game must '
-            'be confirmed live before it is opened');
-      } else if (_playedSinceSync.contains(candidate.key)) {
-        iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
-            'skipped: it was played this session, and the next sync decides '
-            'whether it may be played again');
+            'skipped: $held');
       } else {
         displayable.add(candidate);
       }
@@ -1042,16 +1038,32 @@ class InAppMessagingService {
       action is GameballOpenUrlAction ? action.url : null;
 
   void _retryPending() {
-    final campaign = _pending;
-    if (campaign == null) return;
+    final waiting = _pending;
+    if (waiting == null) return;
     _pending = null;
 
-    // A game can wait behind itself — its trigger fired again while it was
-    // open — and be played before it gets its turn.
-    if (_playedSinceSync.contains(campaign.key)) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it was played '
-          'while it waited, and the next sync decides whether it may be played '
-          'again');
+    // Judged as the latest sync describes it, not as it was when parked. Each
+    // sync replaces what may be shown, so one that no longer carries the
+    // campaign has ended it or ruled this customer out of it.
+    final campaign = _latestVersionOf(waiting);
+    if (campaign == null) {
+      iamLog('pending campaign "${waiting.campaignId}" dropped: the latest '
+          'sync no longer carries it');
+      return;
+    }
+    // Checked at selection, which for a campaign that waited was a while ago.
+    if (campaign.hasExpiredAt(_clock())) {
+      iamLog('pending campaign "${campaign.campaignId}" dropped: it expired '
+          'while it waited');
+      return;
+    }
+    // The same holds that keep a game from being selected. A game can also
+    // wait behind itself — its trigger fired again while it was open — and be
+    // played before its turn comes.
+    final held = _gameHeldBack(campaign);
+    if (held != null) {
+      iamLog('pending game campaign ${campaign.message.widget!.gameCampaignId} '
+          'dropped: $held');
       return;
     }
 
@@ -1089,6 +1101,39 @@ class InAppMessagingService {
     }
 
     _tryPresent(campaign);
+  }
+
+  /// [campaign] as the latest sync describes it, or null when that sync no
+  /// longer carries it.
+  InAppMessageCampaign? _latestVersionOf(InAppMessageCampaign campaign) {
+    for (final candidate in _campaigns) {
+      if (candidate.key == campaign.key) return candidate;
+    }
+    return null;
+  }
+
+  /// Why [campaign] must not open now although its display rules allow it, or
+  /// null when it may. Always null for a message.
+  ///
+  /// A message carries its own content; a game is a pointer to something live,
+  /// and whether the customer may still play it is the server's call, made at
+  /// each sync. So a game opens only from a set this session's sync confirmed,
+  /// and not again once played until the next sync has rechecked it.
+  ///
+  /// One answer for both ways a game reaches the screen — selected for a
+  /// trigger, or retried after waiting — so a parked game cannot slip past a
+  /// hold that would have stopped it being selected.
+  String? _gameHeldBack(InAppMessageCampaign campaign) {
+    if (!campaign.message.isWidget) return null;
+    if (_campaignsUnconfirmed) {
+      return 'this session\'s sync did not confirm it, and a game must be '
+          'confirmed live before it is opened';
+    }
+    if (_playedSinceSync.contains(campaign.key)) {
+      return 'it was played this session, and the next sync decides whether '
+          'it may be played again';
+    }
+    return null;
   }
 
   /// Retries [_pending] the moment the display floor lapses.

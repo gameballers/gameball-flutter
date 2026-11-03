@@ -348,8 +348,8 @@ String rawSync({
 }
 ''';
 
-/// Assembles a service with controllable collaborators.
-({
+/// A service and its controllable collaborators, as [build] assembles them.
+typedef Harness = ({
   InAppMessagingService service,
   FakeSource source,
   FakePresenter presenter,
@@ -363,7 +363,10 @@ String rawSync({
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
   List<(Duration, void Function())> scheduled,
-}) build({
+});
+
+/// Assembles a service with controllable collaborators.
+Harness build({
   List<InAppMessageCampaign>? campaigns,
   InMemoryCampaignCache? cache,
   Duration? prefetchTimeout,
@@ -2534,6 +2537,128 @@ void main() {
       await pumpEventQueue();
 
       expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+  });
+
+  group('a waiting campaign is rechecked before it opens', () {
+    const spin = GameballCustomEventTrigger('spin');
+
+    /// Parks [waiting] behind the open Gameball widget.
+    Future<Harness> parked(InAppMessageCampaign waiting, String event) async {
+      final h = build(campaigns: [waiting]);
+      await h.service.start(customerId: 'c1');
+      h.setWidgetOpen(true);
+      h.service.onCustomEvent(event);
+      expect(h.service.pendingCampaign?.key, waiting.key);
+      return h;
+    }
+
+    /// A new session, whose sync answers with whatever the source now holds.
+    Future<void> newSession(Harness h, Duration at) async {
+      h.service.onAppPaused();
+      h.setNow(t0.add(at));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+    }
+
+    void closeWidget(Harness h) {
+      h.setWidgetOpen(false);
+      h.service.onHostWidgetClosed();
+    }
+
+    test('a game the latest sync no longer carries does not open', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      // The campaign ended, or the server ruled this customer out of it.
+      h.source.campaigns = <InAppMessageCampaign>[];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('a game past its end date does not open', () async {
+      final h = await parked(
+        gameCampaign(
+            trigger: spin, expiresAt: t0.add(const Duration(minutes: 1))),
+        'spin',
+      );
+
+      h.setNow(t0.add(const Duration(minutes: 2)));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'expiry was checked when it was selected, a while ago');
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('the latest sync\'s version of it is the one judged', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      // Still in the set, but the campaign's end date has since moved up.
+      h.source.campaigns = [
+        gameCampaign(
+            trigger: spin, expiresAt: t0.add(const Duration(minutes: 3))),
+      ];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('a game does not open once this session\'s sync has failed',
+        () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      h.source.throwOnFetch = StateError('offline');
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'it waited through a session boundary, and the sync that '
+              'should have confirmed it did not answer');
+    });
+
+    test('a game the latest sync still carries opens', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+    });
+
+    test('a message past its expiry does not show either', () async {
+      final h = await parked(
+        campaign('promo',
+            trigger: const GameballCustomEventTrigger('promo'),
+            expiresAt: t0.add(const Duration(minutes: 1))),
+        'promo',
+      );
+
+      h.setNow(t0.add(const Duration(minutes: 2)));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'never display at or after expiresAt holds for a message '
+              'that waited, too');
+    });
+
+    test('a message the latest sync no longer carries does not show',
+        () async {
+      final h = await parked(
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+        'promo',
+      );
+
+      h.source.campaigns = <InAppMessageCampaign>[];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'each sync replaces what may be shown; a campaign it left '
+              'out was paused or archived');
     });
   });
 }
