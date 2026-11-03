@@ -2368,4 +2368,116 @@ void main() {
       expect(h.presenter.shownMessageIds, isEmpty);
     });
   });
+
+  group('a played game waits for the next sync', () {
+    // What the widget posts once a game is finished. Its campaignType is the
+    // widget's own name for the game, which is not the sync's ("wheel"), so
+    // nothing may match on it.
+    final played = <String, dynamic>{
+      'type': 'gameCompleted',
+      'metadata': <String, dynamic>{
+        'campaignId': '9645',
+        'campaignType': 'spinTheWheel',
+      },
+    };
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('is not offered again in the same session', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'repeatable, with no interval and past the cooldown — held '
+              'only because the customer played it, and whether they may play '
+              'again is for the server to say at the next sync');
+    });
+
+    test('is offered again once a sync has rechecked it', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('a failed sync does not release it', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'only a sync that answered has rechecked it');
+    });
+
+    test('a copy waiting behind it does not open when it closes', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      // Still playing past the cooldown, when the trigger fires again.
+      h.setNow(t0.add(const Duration(seconds: 40)));
+      h.service.onCustomEvent('spin');
+      expect(h.service.pendingCampaign?.key, const CampaignKey.game(9645));
+
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('only a completion holds it back', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(<String, dynamic>{'type': 'rewardViewed'});
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('another game is unaffected', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: spin),
+        gameCampaign(
+          gameCampaignId: 9702,
+          trigger: const GameballCustomEventTrigger('scratch'),
+        ),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('scratch');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
+    });
+  });
 }

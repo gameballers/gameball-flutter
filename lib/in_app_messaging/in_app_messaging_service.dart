@@ -137,6 +137,13 @@ const Duration defaultArtworkRetryInterval = Duration(seconds: 30);
 /// exactly when the first session-start message is being decided.
 const Duration defaultHistoryTimeout = Duration(seconds: 5);
 
+/// The `type` a game's widget posts once the customer has played it.
+///
+/// Matched on the type alone. The payload's `campaignType` is the widget's own
+/// name for the game (`spinTheWheel`), not the sync's (`wheel`), so it cannot
+/// identify the entry — the game that posted it is the one on screen.
+const String _gameCompletedEvent = 'gameCompleted';
+
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
 /// Owns no display policy of its own — [selectCampaign] decides what shows —
@@ -248,6 +255,15 @@ class InAppMessagingService {
   /// customer who never asked for it.
   bool _campaignsFromCache = false;
 
+  /// Games the customer finished playing since the last successful sync.
+  ///
+  /// Not offered again until the next one. Whether the customer may play again
+  /// is the server's call — it rechecks eligibility at every sync, and a game in
+  /// the list is one it has said is playable now — so before that answer the
+  /// SDK would be guessing, and a wrong guess opens a game that says it cannot
+  /// be played.
+  final Set<CampaignKey> _playedSinceSync = <CampaignKey>{};
+
   /// Minimum gap between any two displays, as the last sync reported it.
   Duration _cooldown = defaultDisplayCooldown;
 
@@ -335,6 +351,7 @@ class InAppMessagingService {
     _floorRetry = null;
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <CampaignKey>{};
+    _playedSinceSync.clear();
     _presentationInFlight = false;
     _variables.clear();
     _audience = null;
@@ -470,6 +487,7 @@ class InAppMessagingService {
     _campaigns = const <InAppMessageCampaign>[];
     _artworkReady = const <CampaignKey>{};
     _artworkCheckedAt = null;
+    _playedSinceSync.clear();
     _quietHours = null;
     _presentationInFlight = false;
     _variables.clear();
@@ -558,6 +576,9 @@ class InAppMessagingService {
       _quietHours = result.quietHours;
       synced = true;
       _campaignsFromCache = false;
+      // The server has rechecked every game it sent, played or not, so the
+      // ones held back since the last sync are its call again.
+      _playedSinceSync.clear();
       iamLog('synced ${_campaigns.length} campaign(s), '
           'cooldown ${_cooldown.inSeconds}s');
 
@@ -717,6 +738,10 @@ class InAppMessagingService {
         iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
             'skipped: the campaign set came from the cache, and a game must be '
             'confirmed live before it is opened');
+      } else if (_playedSinceSync.contains(candidate.key)) {
+        iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
+            'skipped: it was played this session, and the next sync decides '
+            'whether it may be played again');
       } else {
         displayable.add(candidate);
       }
@@ -922,6 +947,11 @@ class InAppMessagingService {
         // Logged either way. This is the only visibility into whether the widget
         // talks to us at all, which the dismissal counter turns on.
         iamLog('game ${widget.gameCampaignId} reported $event');
+        if (event['type'] == _gameCompletedEvent) {
+          _playedSinceSync.add(campaign.key);
+          iamLog('game ${widget.gameCampaignId} was played; it is not offered '
+              'again until the next sync rechecks it');
+        }
         try {
           _onGameEvent?.call(widget.gameCampaignId, event);
         } catch (error) {
@@ -1005,6 +1035,15 @@ class InAppMessagingService {
     final campaign = _pending;
     if (campaign == null) return;
     _pending = null;
+
+    // A game can wait behind itself — its trigger fired again while it was
+    // open — and be played before it gets its turn.
+    if (_playedSinceSync.contains(campaign.key)) {
+      iamLog('pending campaign "${campaign.campaignId}" dropped: it was played '
+          'while it waited, and the next sync decides whether it may be played '
+          'again');
+      return;
+    }
 
     final capState = _cap.snapshot();
     // Asked as "may it display now", not "has it ever displayed". A repeatable
