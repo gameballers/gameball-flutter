@@ -51,6 +51,18 @@ class OverlayPresenter implements GameballMessagePresenter {
       return false;
     }
 
+    // Only the modal and fullscreen layers host a game and report it drawn.
+    // Any other would hold the overlay up, invisible, with every later message
+    // waiting behind it. The parser already skips such an entry; this keeps the
+    // presenter from being the thing left blocked if one ever gets through.
+    if (message.isWidget &&
+        message.type != GameballMessageType.modal &&
+        message.type != GameballMessageType.fullscreen) {
+      iamLog('message "${message.id}" is a game, which opens as a modal or '
+          'fullscreen only, not as a ${message.type.name}; skipping it');
+      return false;
+    }
+
     final overlay = navigatorKey.currentState?.overlay;
     if (overlay == null) {
       iamLog(

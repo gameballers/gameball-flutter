@@ -153,6 +153,22 @@ void main() {
     expect(parseSyncResponse(sync(wheelEntry)).campaigns, hasLength(1));
   });
 
+  test('a game that asks for a slideup is skipped, and says so', () {
+    // The backend sends 2 or 3 for a game. A slideup has no surface that hosts
+    // one, so drawing it there left an invisible overlay up for good, with
+    // every later message waiting behind it.
+    final lines = <String>[];
+    final original = debugPrint;
+    debugPrint = (String? message, {int? wrapWidth}) => lines.add(message ?? '');
+    addTearDown(() => debugPrint = original);
+
+    final entry = wheelEntry.replaceFirst('"messageType": 2', '"messageType": 1');
+
+    expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
+    expect(lines.where((l) => l.contains('game:9645') && l.contains('slideup')),
+        isNotEmpty);
+  });
+
   test('a game with Any conditions is kept and fires on either one', () {
     final entry = wheelEntry.replaceFirst(
       '"trigger": { "type": "session_start", "repeatable": true }',

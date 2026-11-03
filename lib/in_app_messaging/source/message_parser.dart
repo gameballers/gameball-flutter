@@ -427,6 +427,15 @@ GameballInAppMessage? _parseMessage(
     return null; // already logged
   }
 
+  // A game opens as a modal or fullscreen, the only surfaces that host one; the
+  // backend sends 2 or 3 for a game. In a slideup it would never report itself
+  // drawn, leaving an invisible overlay up with every later message behind it.
+  if (widget != null && type == GameballMessageType.slideup) {
+    iamLog('campaign $label skipped: a game opens as a modal (messageType 2) '
+        'or fullscreen (3), and this one asks for a slideup (1)');
+    return null;
+  }
+
   // No message id exists in this contract, so one is derived. It appears only in
   // local diagnostics; telemetry correlates on campaignId and dispatchId. A
   // game is named by its game id: its campaignId and variationId are 0 on
