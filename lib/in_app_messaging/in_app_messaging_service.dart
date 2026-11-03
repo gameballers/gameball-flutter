@@ -806,8 +806,10 @@ class InAppMessagingService {
 
     final runnerUp = selectCampaign(
       occurrence: occurrence,
+      // By key, not campaignId: every game arrives with campaignId 0, so the
+      // bare number would rule out every other game along with the winner.
       campaigns: displayable
-          .where((candidate) => candidate.campaignId != winner.campaignId)
+          .where((candidate) => candidate.key != winner.key)
           .toList(growable: false),
       capState: capBefore,
       now: _clock(),

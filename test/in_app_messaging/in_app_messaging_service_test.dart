@@ -669,6 +669,25 @@ void main() {
       expect(h.service.pendingCampaign, isNull);
     });
 
+    test('the second of two games on one trigger waits behind the first',
+        () async {
+      final h = build(campaigns: [
+        gameCampaign(),
+        gameCampaign(gameCampaignId: 9702),
+      ]);
+      h.source.cooldown = Duration.zero;
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      expect(h.service.pendingCampaign?.key, const CampaignKey.game(9702),
+          reason: 'every game arrives with campaignId 0, so telling the '
+              'runner-up from the winner by it ruled out every other game');
+
+      h.presenter.dismiss();
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
+    });
+
     test('a deferred winner is not displaced by its own runner-up', () async {
       final h = build(campaigns: [
         campaign('high',
