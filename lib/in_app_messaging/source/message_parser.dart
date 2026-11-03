@@ -129,7 +129,7 @@ InAppMessageCampaign? _parseCampaign(Map<String, dynamic> json) {
     return null;
   }
   final name = _asString(json['name']);
-  final label = name == null ? '$campaignId' : '$campaignId ($name)';
+  final label = _entryLabel(json, campaignId, name);
 
   // Anything but the one mode we know how to render. Checked before the message,
   // because a future mode would make every field below mean something else.
@@ -173,6 +173,20 @@ InAppMessageCampaign? _parseCampaign(Map<String, dynamic> json) {
         ? Duration(seconds: minIntervalSeconds)
         : null,
   );
+}
+
+/// What to call an entry in a log line, in the form its campaign key takes:
+/// `message:2215`, or `game:9645` — never its campaignId, which is 0 on every
+/// game. Read before the entry is known to be valid, so it tolerates missing
+/// fields rather than relying on them.
+String _entryLabel(Map<String, dynamic> json, int campaignId, String? name) {
+  final id = switch (_asInt(json['campaignType']) ?? _outboundCampaignType) {
+    _outboundCampaignType => 'message:$campaignId',
+    _gameCampaignType => 'game:${_asInt(json['gameCampaignId']) ?? '?'}',
+    // An unrecognised kind is skipped, and naming it a message would be wrong.
+    _ => '$campaignId',
+  };
+  return name == null ? id : '$id ($name)';
 }
 
 GameballMessageTrigger? _parseTrigger(Object? json, String label) {
@@ -376,11 +390,6 @@ GameballInAppMessage? _parseMessage(
       ? json['locale'] as Map<String, dynamic>
       : const <String, dynamic>{};
 
-  // No message id exists in this contract, so one is derived. It appears only in
-  // local diagnostics; telemetry correlates on campaignId and dispatchId.
-  final variationId = _asInt(json['variationId']);
-  final id = variationId == null ? '$campaignId' : '$campaignId/$variationId';
-
   final typeNumber = _asInt(json['messageType']);
   final type = switch (typeNumber) {
     _slideupMessageType => GameballMessageType.slideup,
@@ -417,6 +426,15 @@ GameballInAppMessage? _parseMessage(
   if (campaignType == _gameCampaignType && widget == null) {
     return null; // already logged
   }
+
+  // No message id exists in this contract, so one is derived. It appears only in
+  // local diagnostics; telemetry correlates on campaignId and dispatchId. A
+  // game is named by its game id: its campaignId and variationId are 0 on
+  // every game entry, which would make every game "0/0".
+  final variationId = _asInt(json['variationId']);
+  final id = widget != null
+      ? 'game:${widget.gameCampaignId}'
+      : (variationId == null ? '$campaignId' : '$campaignId/$variationId');
 
   final hasHeader = header != null && header.isNotEmpty;
   final hasBody = body != null && body.isNotEmpty;

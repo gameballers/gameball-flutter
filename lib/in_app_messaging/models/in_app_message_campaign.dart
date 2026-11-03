@@ -98,5 +98,8 @@ class InAppMessageCampaign {
   }
 
   /// What to call this campaign in a log line.
-  String get label => name == null ? '$campaignId' : '$campaignId ($name)';
+  ///
+  /// The [key], not [campaignId], which is 0 on every game and so names none
+  /// of them.
+  String get label => name == null ? '$key' : '$key ($name)';
 }

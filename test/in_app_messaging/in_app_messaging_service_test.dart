@@ -688,6 +688,32 @@ void main() {
       expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
     });
 
+    test('the log names each game by its game id, never as campaign 0',
+        () async {
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => lines.add(message ?? '');
+      addTearDown(() => debugPrint = original);
+
+      final h = build(campaigns: [
+        gameCampaign(),
+        gameCampaign(gameCampaignId: 9702),
+      ]);
+      h.source.cooldown = Duration.zero;
+      await h.service.start(customerId: 'c1');
+
+      expect(lines.where((l) => l.contains('"0"')), isEmpty,
+          reason: 'campaignId is 0 on every game, so it says nothing');
+      expect(
+          lines.where((l) =>
+              l.contains('deferred') &&
+              l.contains('game:9702') &&
+              l.contains('game:9645')),
+          isNotEmpty,
+          reason: 'the line that parks the runner-up names both games');
+    });
+
     test('a deferred winner is not displaced by its own runner-up', () async {
       final h = build(campaigns: [
         campaign('high',

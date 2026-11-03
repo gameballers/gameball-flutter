@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
@@ -32,6 +33,30 @@ void main() {
   test('a game entry is identified by its game id, never by campaignId 0', () {
     final campaign = parseSyncResponse(sync(wheelEntry)).campaigns.single;
     expect(campaign.key.id, 9645);
+  });
+
+  test('a game is named by its game id wherever it is logged', () {
+    final campaign = parseSyncResponse(sync(wheelEntry)).campaigns.single;
+
+    expect(campaign.label, 'game:9645 (Spin the Wheel)');
+    expect(campaign.message.id, 'game:9645',
+        reason: 'derived from campaignId and variationId, every game was '
+            '"0/0"');
+  });
+
+  test('a game the parser skips is named by its game id', () {
+    final lines = <String>[];
+    final original = debugPrint;
+    debugPrint = (String? message, {int? wrapWidth}) => lines.add(message ?? '');
+    addTearDown(() => debugPrint = original);
+
+    parseSyncResponse(sync(wheelEntry.replaceFirst(
+      '"trigger": { "type": "session_start", "repeatable": true }',
+      '"trigger": { "type": "screen", "name": "cart", "repeatable": true }',
+    )));
+
+    expect(lines.where((l) => l.contains('game:9645')), isNotEmpty);
+    expect(lines.where((l) => l.contains('campaign 0')), isEmpty);
   });
 
   test('an unknown campaignType is skipped, not coerced', () {

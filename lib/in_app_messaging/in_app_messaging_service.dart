@@ -682,11 +682,11 @@ class InAppMessagingService {
           .prefetch(campaign.message)
           .timeout(prefetchTimeout);
     } on TimeoutException {
-      iamLog('campaign "${campaign.campaignId}" artwork did not load within '
+      iamLog('campaign ${campaign.key} artwork did not load within '
           '${prefetchTimeout.inMilliseconds}ms');
       return false;
     } catch (error) {
-      iamLog('campaign "${campaign.campaignId}" artwork failed ($error)');
+      iamLog('campaign ${campaign.key} artwork failed ($error)');
       return false;
     }
   }
@@ -741,13 +741,12 @@ class InAppMessagingService {
       final held = _gameHeldBack(candidate);
       if (!_artworkReady.contains(candidate.key)) {
         notReady.add(candidate);
-        iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
+        iamLog('campaign ${candidate.key} passed over: artwork not '
             'ready');
       } else if (held != null) {
         // Not "not ready" — it will never be ready from here. Dropped rather
         // than deferred: the next live sync is what makes it openable again.
-        iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
-            'skipped: $held');
+        iamLog('campaign ${candidate.key} skipped: $held');
       } else {
         displayable.add(candidate);
       }
@@ -776,7 +775,7 @@ class InAppMessagingService {
 
     switch (_decide(campaign.message)) {
       case GameballDisplayDecision.discard:
-        iamLog('campaign "${campaign.campaignId}" discarded by beforeDisplay');
+        iamLog('campaign ${campaign.key} discarded by beforeDisplay');
       case GameballDisplayDecision.later:
         _defer(campaign, 'the host asked to display it later');
       case GameballDisplayDecision.show:
@@ -818,7 +817,7 @@ class InAppMessagingService {
     );
     if (runnerUp == null) return;
 
-    _defer(runnerUp, 'campaign "${winner.campaignId}" took this trigger first');
+    _defer(runnerUp, 'campaign ${winner.key} took this trigger first');
   }
 
   GameballDisplayDecision _decide(GameballInAppMessage message) {
@@ -872,11 +871,11 @@ class InAppMessagingService {
         message = substituteInto(message, values);
       }
     } on TimeoutException {
-      iamLog('personalisation for campaign "${campaign.campaignId}" did not '
+      iamLog('personalisation for campaign ${campaign.key} did not '
           'arrive within ${variableTimeout.inMilliseconds}ms; displaying the '
           'text from the last sync');
     } catch (error) {
-      iamLog('personalisation for campaign "${campaign.campaignId}" failed '
+      iamLog('personalisation for campaign ${campaign.key} failed '
           '($error); displaying the text from the last sync');
     } finally {
       _presentationInFlight = false;
@@ -891,7 +890,7 @@ class InAppMessagingService {
     // Re-checked rather than trusted: the screen can change during the await,
     // and the host can log out.
     if (!isStarted) {
-      iamLog('campaign "${campaign.campaignId}" abandoned: messaging stopped '
+      iamLog('campaign ${campaign.key} abandoned: messaging stopped '
           'while its personalisation was resolving');
       return;
     }
@@ -954,10 +953,10 @@ class InAppMessagingService {
         if (widget == null) return;
         // Logged either way. This is the only visibility into whether the widget
         // talks to us at all, which the dismissal counter turns on.
-        iamLog('game ${widget.gameCampaignId} reported $event');
+        iamLog('campaign ${campaign.key} reported $event');
         if (event['type'] == _gameCompletedEvent) {
           _playedSinceSync.add(campaign.key);
-          iamLog('game ${widget.gameCampaignId} was played; it is not offered '
+          iamLog('campaign ${campaign.key} was played; it is not offered '
               'again until the next sync rechecks it');
         }
         try {
@@ -993,12 +992,11 @@ class InAppMessagingService {
 
   void _defer(InAppMessageCampaign campaign, String reason) {
     final displaced = _pending;
-    if (displaced != null && displaced.campaignId != campaign.campaignId) {
-      iamLog(
-          'pending campaign "${displaced.campaignId}" displaced by "${campaign.campaignId}"');
+    if (displaced != null && displaced.key != campaign.key) {
+      iamLog('pending campaign ${displaced.key} displaced by ${campaign.key}');
     }
     _pending = campaign;
-    iamLog('campaign "${campaign.campaignId}" deferred: $reason');
+    iamLog('campaign ${campaign.key} deferred: $reason');
   }
 
   /// Builds and records one analytics event for [campaign].
@@ -1049,13 +1047,13 @@ class InAppMessagingService {
     // campaign has ended it or ruled this customer out of it.
     final campaign = _latestVersionOf(waiting);
     if (campaign == null) {
-      iamLog('pending campaign "${waiting.campaignId}" dropped: the latest '
+      iamLog('pending campaign ${waiting.key} dropped: the latest '
           'sync no longer carries it');
       return;
     }
     // Checked at selection, which for a campaign that waited was a while ago.
     if (campaign.hasExpiredAt(_clock())) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it expired '
+      iamLog('pending campaign ${campaign.key} dropped: it expired '
           'while it waited');
       return;
     }
@@ -1064,8 +1062,7 @@ class InAppMessagingService {
     // played before its turn comes.
     final held = _gameHeldBack(campaign);
     if (held != null) {
-      iamLog('pending game campaign ${campaign.message.widget!.gameCampaignId} '
-          'dropped: $held');
+      iamLog('pending campaign ${campaign.key} dropped: $held');
       return;
     }
 
@@ -1079,7 +1076,7 @@ class InAppMessagingService {
       capState: capState,
       now: _clock(),
     )) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it may not '
+      iamLog('pending campaign ${campaign.key} dropped: it may not '
           'display again yet');
       return;
     }
@@ -1097,7 +1094,7 @@ class InAppMessagingService {
     // as a non sequitur to whatever it was answering.
     final quiet = _quietHours;
     if (quiet != null && quiet.contains(_clock())) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it is now '
+      iamLog('pending campaign ${campaign.key} dropped: it is now '
           'inside the quiet-hours window');
       return;
     }
