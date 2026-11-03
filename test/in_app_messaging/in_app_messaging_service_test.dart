@@ -270,16 +270,24 @@ String labelOf(int campaignId) => _idsByLabel.entries
         orElse: () => MapEntry('#$campaignId', campaignId))
     .key;
 
-/// A session-start game campaign, for the telemetry guard.
+/// A game campaign, session-start and repeatable unless told otherwise.
 ///
 /// campaignId is 0 exactly as a real game entry arrives; its identity comes
 /// from gameCampaignId.
-InAppMessageCampaign gameCampaign({int gameCampaignId = 9645}) =>
+InAppMessageCampaign gameCampaign({
+  int gameCampaignId = 9645,
+  GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
+  bool repeatable = true,
+  Duration? minInterval,
+  DateTime? expiresAt,
+}) =>
     InAppMessageCampaign(
       campaignId: 0,
-      trigger: const GameballSessionStartTrigger(),
+      trigger: trigger,
       priority: 0,
-      repeatable: true,
+      repeatable: repeatable,
+      minInterval: minInterval,
+      expiresAt: expiresAt,
       message: GameballInAppMessage(
         id: 'game_$gameCampaignId',
         type: GameballMessageType.modal,
@@ -2275,6 +2283,89 @@ void main() {
       expect(h.presenter.shownBodies, ['You have 1,450'],
           reason: 'a message announcing a points change that quotes the old '
               'balance is the worst version of this feature');
+    });
+  });
+
+  group('game campaigns follow the message frequency rules', () {
+    // A game has no frequency rules of its own: no delay, no dismissal limit and
+    // no default interval. It is held by exactly what holds a message.
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('a non-repeatable game opens once ever', () async {
+      final h = build(campaigns: [gameCampaign(repeatable: false)]);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'a new session with a live sync is still not a second time');
+    });
+
+    test('a repeatable game waits out its own minimum interval', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: spin, minInterval: const Duration(minutes: 10)),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'well past the cooldown, but inside its own interval');
+
+      h.setNow(t0.add(const Duration(minutes: 10)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('a repeatable game with no interval is held only by the cooldown',
+        () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(seconds: 10)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'the account cooldown applies to games too');
+
+      h.setNow(t0.add(const Duration(seconds: 30)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645'],
+          reason: 'minIntervalSeconds is null on a game entry, and there is no '
+              'game default standing in for it');
+    });
+
+    test('the cooldown runs between a message and a game', () async {
+      final h = build(campaigns: [
+        campaign('welcome'),
+        gameCampaign(trigger: spin),
+      ]);
+      await h.service.start(customerId: 'c1'); // the message shows at t0
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(seconds: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['msg_welcome']);
+    });
+
+    test('quiet hours hold a game back', () async {
+      final h = build(campaigns: [gameCampaign()]);
+      h.source.quietHours =
+          const GameballQuietHours(startMinute: 22 * 60, endMinute: 8 * 60);
+      h.setNow(DateTime(2026, 8, 24, 23, 30));
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
     });
   });
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
+import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
 String sync(String entries) => '{"cooldownSeconds":30,"messages":[$entries]}';
@@ -124,5 +125,37 @@ void main() {
 
   test('a modal game is kept', () {
     expect(parseSyncResponse(sync(wheelEntry)).campaigns, hasLength(1));
+  });
+
+  group('a game reads its repeat rule from its trigger, as a message does', () {
+    InAppMessageCampaign withTrigger(String trigger) =>
+        parseSyncResponse(sync(wheelEntry.replaceFirst(
+          '"trigger": { "type": "session_start", "repeatable": true }',
+          '"trigger": $trigger',
+        ))).campaigns.single;
+
+    test('repeatable with a minimum interval', () {
+      final game = withTrigger('{ "type": "session_start", "repeatable": true, '
+          '"minIntervalSeconds": 120 }');
+
+      expect(game.repeatable, isTrue);
+      expect(game.minInterval, const Duration(seconds: 120));
+    });
+
+    test('a null interval is none, not a game default', () {
+      // What every game entry carries today.
+      final game = withTrigger('{ "type": "session_start", "repeatable": true, '
+          '"minIntervalSeconds": null }');
+
+      expect(game.repeatable, isTrue);
+      expect(game.minInterval, isNull);
+    });
+
+    test('not repeatable is once ever', () {
+      final game =
+          withTrigger('{ "type": "session_start", "repeatable": false }');
+
+      expect(game.repeatable, isFalse);
+    });
   });
 }
