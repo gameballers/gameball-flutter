@@ -2480,4 +2480,60 @@ void main() {
       expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
     });
   });
+
+  group('a game opens only from this session\'s sync', () {
+    test('not from the last session\'s set when this one\'s sync failed',
+        () async {
+      final h = build(campaigns: [gameCampaign()]);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'the set was confirmed a session ago; nothing has said the '
+              'game is still playable since, so it is no fresher than a cache');
+    });
+
+    test('nor on an event in that session', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: const GameballCustomEventTrigger('spin')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('the next sync that answers opens it again', () async {
+      final h = build(campaigns: [gameCampaign()]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      h.source.throwOnFetch = null;
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 10)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+  });
 }

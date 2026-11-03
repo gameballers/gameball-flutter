@@ -246,14 +246,16 @@ class InAppMessagingService {
   /// campaign was passed over and why.
   Set<CampaignKey> _artworkReady = const <CampaignKey>{};
 
-  /// Whether the held campaigns came from the cache rather than a live sync.
+  /// Whether the held campaigns were not confirmed by this session's sync:
+  /// read from the cache, or kept from an earlier session because the re-sync
+  /// failed.
   ///
-  /// Only games care. A message carries its own content, so a cached one is
-  /// still correct; a game carries a pointer and fetches its content live, so a
-  /// cached entry is a promise this SDK cannot keep — the campaign may have
+  /// Only games care. A message carries its own content, so an old one is still
+  /// correct; a game carries a pointer and fetches its content live, so an
+  /// unconfirmed entry is a promise this SDK cannot keep — the campaign may have
   /// ended, and the widget would answer "this campaign is not available" to a
   /// customer who never asked for it.
-  bool _campaignsFromCache = false;
+  bool _campaignsUnconfirmed = false;
 
   /// Games the customer finished playing since the last successful sync.
   ///
@@ -575,7 +577,7 @@ class InAppMessagingService {
       _cooldown = result.cooldown;
       _quietHours = result.quietHours;
       synced = true;
-      _campaignsFromCache = false;
+      _campaignsUnconfirmed = false;
       // The server has rechecked every game it sent, played or not, so the
       // ones held back since the last sync are its call again.
       _playedSinceSync.clear();
@@ -591,14 +593,22 @@ class InAppMessagingService {
     }
 
     final cached = await persisted;
-    if (!synced && cached != null) {
-      _campaigns = cached.campaigns;
-      _cooldown = cached.cooldown;
-      // Taken from the cache too. The window is on the payload, so a failed
-      // sync must not become a way to message somebody at 3am.
-      _quietHours = cached.quietHours;
-      _campaignsFromCache = true;
-      iamLog('falling back to ${_campaigns.length} cached campaign(s)');
+    if (!synced) {
+      // Whatever is held from here on — the cache, or the last session's set
+      // when this one's sync failed — was not confirmed by this session's
+      // sync. Messages may still show from it; games may not.
+      _campaignsUnconfirmed = true;
+      if (cached != null) {
+        _campaigns = cached.campaigns;
+        _cooldown = cached.cooldown;
+        // Taken from the cache too. The window is on the payload, so a failed
+        // sync must not become a way to message somebody at 3am.
+        _quietHours = cached.quietHours;
+        iamLog('falling back to ${_campaigns.length} cached campaign(s)');
+      } else if (_campaigns.isNotEmpty) {
+        iamLog('keeping the ${_campaigns.length} campaign(s) from the last '
+            'sync; games among them stay closed until a sync confirms them');
+      }
     }
 
     await _prefetchArtwork();
@@ -732,12 +742,12 @@ class InAppMessagingService {
         notReady.add(candidate);
         iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
             'ready');
-      } else if (_campaignsFromCache && candidate.message.isWidget) {
+      } else if (_campaignsUnconfirmed && candidate.message.isWidget) {
         // Not "not ready" — it will never be ready from here. Dropped rather
         // than deferred: the next live sync is what makes it openable again.
         iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
-            'skipped: the campaign set came from the cache, and a game must be '
-            'confirmed live before it is opened');
+            'skipped: this session\'s sync did not confirm it, and a game must '
+            'be confirmed live before it is opened');
       } else if (_playedSinceSync.contains(candidate.key)) {
         iamLog('game campaign ${candidate.message.widget!.gameCampaignId} '
             'skipped: it was played this session, and the next sync decides '
