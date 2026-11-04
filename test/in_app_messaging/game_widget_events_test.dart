@@ -20,4 +20,15 @@ void main() {
       expect(decodeWidgetEvent(bad), isNull, reason: bad);
     }
   });
+
+  test('the readiness poller posts its verdict, not a trace of every sample',
+      () {
+    final script = widgetReadinessScript(readyTimeout: widgetReadyTimeout);
+
+    expect(script, isNot(contains('GBIamTrace')),
+        reason: 'a log line per 250ms sample floods the console for the whole '
+            'load of every game');
+    expect(script, contains("GBIamReady.postMessage('ready')"));
+    expect(script, contains("GBIamReady.postMessage('timeout')"));
+  });
 }

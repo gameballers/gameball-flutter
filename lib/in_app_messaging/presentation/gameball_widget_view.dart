@@ -42,147 +42,17 @@ const Duration _readyPollPeriod = Duration(milliseconds: 250);
 /// catching the page mid-write.
 const int _stableSamplesRequired = 3;
 
-/// A reward campaign in a WebView, which reports when it is actually drawn.
+/// The script that bridges the widget's events and reports when it has drawn.
 ///
-/// **Its own controller, deliberately.** `showProfile` builds a controller of
-/// its own in `gameball_sdk.dart`, and this does not share it: the two have
-/// different channel names, different lifetimes and different close semantics,
-/// and every integration already shipped depends on that one behaving exactly
-/// as it does. Extracting the common bridge is worth doing once this is proven,
-/// not while it is being proven.
+/// [readyTimeout] bounds the poller from the page's side too, so it stops
+/// sampling once the message has been given up on.
 ///
-/// The readiness contract is what this widget exists for. The page fires
-/// `onPageFinished` two to three seconds before the wheel is drawn — the widget
-/// renders after its own fetches resolve — so mounting on page-load alone puts
-/// a skeleton in front of the customer every time. Worse, the content lives in
-/// `about:srcdoc` iframes, so a readiness check that only reads the top document
-/// sits at ~98 nodes and never fires at all.
-class GameballWidgetView extends StatefulWidget {
-  const GameballWidgetView({
-    super.key,
-    required this.url,
-    required this.onReady,
-    required this.onFailed,
-    required this.onCloseRequested,
-    this.onEvent,
-    this.readyTimeout = widgetReadyTimeout,
-  });
-
-  /// The fully composed widget URL. Built by the SDK from its own state, never
-  /// carried on the campaign.
-  final String url;
-
-  /// Fires once, when the widget has finished drawing. The presenter counts the
-  /// impression here rather than at mount.
-  final VoidCallback onReady;
-
-  /// Fires once when the widget never became ready, so the caller can take the
-  /// message away without ever having shown it.
-  final VoidCallback onFailed;
-
-  /// The widget asked to be closed, via `window.GameballWidget.closeWidget()`.
-  final VoidCallback onCloseRequested;
-
-  /// Events the widget posts on `window.WidgetEvent.postEvent` — game
-  /// completion, most usefully.
-  ///
-  /// Nothing arrived on this bridge during the load in any probe run, which is
-  /// why readiness is detected from the DOM instead. It is wired anyway because
-  /// the widget does use it after the game is played.
-  final void Function(String raw)? onEvent;
-
-  final Duration readyTimeout;
-
-  @override
-  State<GameballWidgetView> createState() => _GameballWidgetViewState();
-}
-
-class _GameballWidgetViewState extends State<GameballWidgetView> {
-  late final WebViewController _controller;
-  Timer? _timeout;
-  bool _settled = false;
-
-  /// DIAGNOSTIC: measures the load so trace lines can be lined up against
-  /// screenshots.
-  final Stopwatch _clock = Stopwatch();
-
-  @override
-  void initState() {
-    super.initState();
-    _clock.start();
-    _controller = WebViewController();
-    _controller
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
-      ..addJavaScriptChannel('GBIamReady',
-          onMessageReceived: (m) => _finish(ready: m.message == 'ready'))
-      // DIAGNOSTIC (poc/iam-widget-campaign): every readiness sample, so the
-      // gate's view of the page can be lined up against what was on screen.
-      ..addJavaScriptChannel('GBIamTrace',
-          onMessageReceived: (m) =>
-              iamLog('widget ${_clock.elapsedMilliseconds}ms ${m.message}'))
-      ..addJavaScriptChannel('GBIamClose',
-          onMessageReceived: (_) => widget.onCloseRequested())
-      ..addJavaScriptChannel('GBIamEvent',
-          onMessageReceived: (m) => widget.onEvent?.call(m.message))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) {
-            iamLog('widget ${_clock.elapsedMilliseconds}ms onPageFinished');
-            _install();
-          },
-          onWebResourceError: (e) {
-            // The wheel's own sub-resources fail routinely and harmlessly; only
-            // the main frame failing means there is nothing to show.
-            if (e.isForMainFrame ?? false) {
-              iamLog('widget failed to load (${e.description})');
-              _finish(ready: false);
-            }
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
-
-    // Belt and braces: if the page never reaches onPageFinished, nothing would
-    // ever install the poller and the message would hang invisible forever.
-    _timeout = Timer(widget.readyTimeout, () => _finish(ready: false));
-  }
-
-  @override
-  void dispose() {
-    _timeout?.cancel();
-    super.dispose();
-  }
-
-  /// Reports the outcome exactly once.
-  void _finish({required bool ready}) {
-    if (_settled) return;
-    _settled = true;
-    _timeout?.cancel();
-    if (!mounted) return;
-    iamLog('widget ${_clock.elapsedMilliseconds}ms settled ready=$ready');
-    if (ready) {
-      widget.onReady();
-    } else {
-      iamLog('widget did not become ready within '
-          '${widget.readyTimeout.inSeconds}s; taking the message away unshown');
-      widget.onFailed();
-    }
-  }
-
-  /// Installs the bridges and the readiness poller.
-  ///
-  /// Everything runs across frames. The widget draws inside `about:srcdoc`
-  /// iframes, which inherit the parent's origin and so stay reachable; a frame
-  /// that throws is skipped rather than retried.
-  ///
-  /// Readiness is "the DOM stopped changing, and there is something in it".
-  /// Deliberately content-agnostic: keying off a selector would couple this SDK
-  /// to the widget's markup and break silently the next time the web team
-  /// renames a class.
-  void _install() {
-    final timeoutMs = widget.readyTimeout.inMilliseconds;
-    _controller.runJavaScript('''
+/// Top-level, and visible to tests, so what the page is asked to run can be
+/// read without a WebView.
+@visibleForTesting
+String widgetReadinessScript({required Duration readyTimeout}) {
+  final timeoutMs = readyTimeout.inMilliseconds;
+  return '''
       (function () {
         if (window.__gbIamWatching) return;
         window.__gbIamWatching = true;
@@ -266,10 +136,6 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
         function tick() {
           var fp = fingerprint();
           if (fp.key === last) stable++; else { stable = 0; last = fp.key; }
-          try {
-            GBIamTrace.postMessage(
-              'key=' + fp.key + ' drawn=' + fp.drawn + ' stable=' + stable);
-          } catch (e) {}
 
           if (fp.drawn && stable >= $_stableSamplesRequired) {
             try { GBIamReady.postMessage('ready'); } catch (e) {}
@@ -283,7 +149,144 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
         }
         setTimeout(tick, ${_readyPollPeriod.inMilliseconds});
       })();
-    ''');
+    ''';
+}
+
+/// A reward campaign in a WebView, which reports when it is actually drawn.
+///
+/// **Its own controller, deliberately.** `showProfile` builds a controller of
+/// its own in `gameball_sdk.dart`, and this does not share it: the two have
+/// different channel names, different lifetimes and different close semantics,
+/// and every integration already shipped depends on that one behaving exactly
+/// as it does. Extracting the common bridge is worth doing once this is proven,
+/// not while it is being proven.
+///
+/// The readiness contract is what this widget exists for. The page fires
+/// `onPageFinished` two to three seconds before the wheel is drawn — the widget
+/// renders after its own fetches resolve — so mounting on page-load alone puts
+/// a skeleton in front of the customer every time. Worse, the content lives in
+/// `about:srcdoc` iframes, so a readiness check that only reads the top document
+/// sits at ~98 nodes and never fires at all.
+class GameballWidgetView extends StatefulWidget {
+  const GameballWidgetView({
+    super.key,
+    required this.url,
+    required this.onReady,
+    required this.onFailed,
+    required this.onCloseRequested,
+    this.onEvent,
+    this.readyTimeout = widgetReadyTimeout,
+  });
+
+  /// The fully composed widget URL. Built by the SDK from its own state, never
+  /// carried on the campaign.
+  final String url;
+
+  /// Fires once, when the widget has finished drawing. The presenter counts the
+  /// impression here rather than at mount.
+  final VoidCallback onReady;
+
+  /// Fires once when the widget never became ready, so the caller can take the
+  /// message away without ever having shown it.
+  final VoidCallback onFailed;
+
+  /// The widget asked to be closed, via `window.GameballWidget.closeWidget()`.
+  final VoidCallback onCloseRequested;
+
+  /// Events the widget posts on `window.WidgetEvent.postEvent` — game
+  /// completion, most usefully.
+  ///
+  /// Nothing arrived on this bridge during the load in any probe run, which is
+  /// why readiness is detected from the DOM instead. It is wired anyway because
+  /// the widget does use it after the game is played.
+  final void Function(String raw)? onEvent;
+
+  final Duration readyTimeout;
+
+  @override
+  State<GameballWidgetView> createState() => _GameballWidgetViewState();
+}
+
+class _GameballWidgetViewState extends State<GameballWidgetView> {
+  late final WebViewController _controller;
+  Timer? _timeout;
+  bool _settled = false;
+
+  /// Times the load, so the log says how long a game took to draw.
+  final Stopwatch _clock = Stopwatch();
+
+  @override
+  void initState() {
+    super.initState();
+    _clock.start();
+    _controller = WebViewController();
+    _controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0x00000000))
+      ..addJavaScriptChannel('GBIamReady',
+          onMessageReceived: (m) => _finish(ready: m.message == 'ready'))
+      ..addJavaScriptChannel('GBIamClose',
+          onMessageReceived: (_) => widget.onCloseRequested())
+      ..addJavaScriptChannel('GBIamEvent',
+          onMessageReceived: (m) => widget.onEvent?.call(m.message))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            iamLog('widget ${_clock.elapsedMilliseconds}ms onPageFinished');
+            _install();
+          },
+          onWebResourceError: (e) {
+            // The wheel's own sub-resources fail routinely and harmlessly; only
+            // the main frame failing means there is nothing to show.
+            if (e.isForMainFrame ?? false) {
+              iamLog('widget failed to load (${e.description})');
+              _finish(ready: false);
+            }
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(widget.url));
+
+    // Belt and braces: if the page never reaches onPageFinished, nothing would
+    // ever install the poller and the message would hang invisible forever.
+    _timeout = Timer(widget.readyTimeout, () => _finish(ready: false));
+  }
+
+  @override
+  void dispose() {
+    _timeout?.cancel();
+    super.dispose();
+  }
+
+  /// Reports the outcome exactly once.
+  void _finish({required bool ready}) {
+    if (_settled) return;
+    _settled = true;
+    _timeout?.cancel();
+    if (!mounted) return;
+    iamLog('widget ${_clock.elapsedMilliseconds}ms settled ready=$ready');
+    if (ready) {
+      widget.onReady();
+    } else {
+      iamLog('widget did not become ready within '
+          '${widget.readyTimeout.inSeconds}s; taking the message away unshown');
+      widget.onFailed();
+    }
+  }
+
+  /// Installs the bridges and the readiness poller.
+  ///
+  /// Everything runs across frames. The widget draws inside `about:srcdoc`
+  /// iframes, which inherit the parent's origin and so stay reachable; a frame
+  /// that throws is skipped rather than retried.
+  ///
+  /// Readiness is "the DOM stopped changing, and there is something in it".
+  /// Deliberately content-agnostic: keying off a selector would couple this SDK
+  /// to the widget's markup and break silently the next time the web team
+  /// renames a class.
+  void _install() {
+    _controller.runJavaScript(
+        widgetReadinessScript(readyTimeout: widget.readyTimeout));
   }
 
   @override
