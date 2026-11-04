@@ -841,7 +841,8 @@ void main() {
     });
 
     test('an Any trigger matches when one of its filters passes', () {
-      const trigger = GameballCustomEventTrigger('cart', matchAny: true, filters: [
+      const trigger =
+          GameballCustomEventTrigger('cart', matchAny: true, filters: [
         GameballPropertyFilter(
           property: 'tier',
           operator: GameballFilterOperator.equals,
