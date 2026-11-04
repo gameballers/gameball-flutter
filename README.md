@@ -331,7 +331,7 @@ GameballApp.getInstance().sendEvent(
 );
 ```
 
-A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
+A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. When a campaign has several conditions, the dashboard sets whether all of them must match or any one of them is enough. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
 
 Whether a matching campaign actually appears also depends on its frequency cap, the minimum interval between any two displays, its expiry and its priority — all set in the dashboard.
 
@@ -341,7 +341,14 @@ A campaign the merchant set to open itself over your app — a spin the wheel, a
 
 The campaign *is* the content. There is no headline or button to style — the SDK opens the game itself in a card over your app, and shows the card only once the game has finished drawing, so your customer never sees a loading state.
 
-A game campaign can be authored as a modal — a centred card over the screen the customer was on — or fullscreen, where it fills the screen inside the safe area so nothing sits under the notch or the home indicator.
+A game campaign can be authored as a modal — a centred card over the screen the customer was on — or fullscreen, where it fills the screen inside the safe area so nothing sits under the notch or the home indicator. Either way the SDK draws its own close button over the game, and a modal game also closes when the customer taps outside it.
+
+**When a game appears** follows the same rules as a message. It fires on session start or on a custom event, with the same metadata conditions — all of them, or any one. It shows as often as its repeat setting and minimum interval allow, never sooner than the account's cooldown after any other in-app display, and never during quiet hours. It opens as soon as its trigger fires: there is no delay and no dismissal limit.
+
+Two rules are specific to games, because a game carries no content of its own and Gameball decides whether the customer may still play it:
+
+- **After a play**, that game is not offered again until the next successful sync — the next session start — when Gameball rechecks whether the customer can play again.
+- **Only a live sync opens a game.** A game is never opened from the offline cache, nor from the last session's campaigns when this session's sync failed. One waiting for its turn, behind another message or the Gameball widget, is rechecked before it opens and dropped if it has ended or the latest sync no longer carries it.
 
 One limit in this release: **screen triggers do not fire on mobile.** Use a session-start or custom-event trigger instead. A screen-triggered campaign is skipped with a `[GameballIAM]` log naming it, so one that does not appear can be diagnosed from the console.
 

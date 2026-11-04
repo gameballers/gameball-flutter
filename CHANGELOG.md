@@ -11,6 +11,11 @@ All notable changes to the Gameball Flutter SDK are documented here.
 ### ✨ Added
 - 🎡 **Game campaigns**: a spin the wheel, quiz or scratch and win the merchant set to open over your app arrives in the same sync as in-app messages and displays through the same overlay. **Nothing to integrate** — a host already calling `startInAppMessaging` gets them
 - 🧩 **The campaign is the content**: there is no headline or button to style. The SDK opens the game itself in a card, and shows the card only once the game has finished drawing, so the customer never sees a loading state
+- 🖥️ **Modal and fullscreen**: a game opens in a centred card or fills the screen. The fullscreen composition insets its content into the safe area, so the campaign's own controls and footer stay clear of the notch and the home indicator, while the surface behind still runs edge to edge. A game entry that asks for a slideup is skipped with a log
+- ✖️ **Close button**: the SDK draws its own close button over the game, and a modal game also closes when the customer taps outside it. The game can close itself too
+- 🔁 **The message frequency rules**: a game shows exactly as often as a message would — its repeat setting and minimum interval from the dashboard, the account's cooldown between any two in-app displays (messages and games alike), and quiet hours. There is no delay before it opens and no dismissal limit. When two campaigns fire on one trigger, the second waits its turn behind the first, two games included
+- 🏁 **After a play**: once the customer has played a game, it is not offered again until the next successful sync, when Gameball rechecks whether they may play again
+- 📡 **Opened only from this session's sync**: a game is never opened from the offline cache, nor from the last session's campaigns when this session's sync failed — it carries no content of its own, so only a live sync can say it is still playable. A game waiting for its turn is rechecked before it opens
 - 🎮 **Game events**: `onGameEvent` on `startInAppMessaging` reports what a campaign posts — most usefully that the customer played it
 - 🛡️ **Unknown kinds are skipped, never guessed at.** An entry whose `campaignType` or game type this version does not recognise is dropped with a log naming it, so a future kind degrades to silence rather than to a wrong display
 
@@ -18,10 +23,10 @@ All notable changes to the Gameball Flutter SDK are documented here.
 - 🔑 **Display history is keyed by campaign kind and id.** Challenge ids and message campaign ids are separate sequences that overlap numerically, and every game entry arrives with `campaignId: 0` — so a bare number can no longer identify a campaign. Histories written by earlier releases are migrated on read; nothing is lost and no campaign re-shows
 - 📊 **Game campaigns report no in-app messaging telemetry.** Engagement is recorded through the normal challenge flow when the customer plays. Their display history is still kept, so a once-ever game stays once-ever
 
-- 🖥️ **Modal and fullscreen**: a game opens in a centred card or fills the screen. The fullscreen composition insets its content into the safe area, so the campaign's own controls and footer stay clear of the notch and the home indicator, while the surface behind still runs edge to edge
-
 ### 🐛 Fixed
 - 🌐 **In-app messaging always loaded the production widget.** `showProfile` accepts a `widgetUrlPrefix` per call, but a campaign opened by a message has no caller to take one from — so a host pointed at a non-production environment got it for the profile widget and production for its campaigns. That renders as "this campaign is not available", which is indistinguishable from a campaign that does not exist. `GameballConfig.widgetUrlPrefix` now sets the host once, for both
+- 🔀 **"Any" event conditions**: a campaign whose metadata filters are joined by Any (`OR`) now shows when at least one of them matches. It used to be skipped altogether, and an operator sent as a number was read as All
+- ⏳ **A message waiting for its turn is rechecked before it shows**: one that has passed its end date, or that the latest sync no longer carries, is dropped instead of shown
 
 ### ⚠️ Not yet supported
 - 📱 **Screen triggers do not fire on mobile.** Use a session-start or custom-event trigger. A screen-triggered campaign is logged by name, so one that does not appear can be diagnosed from the console
