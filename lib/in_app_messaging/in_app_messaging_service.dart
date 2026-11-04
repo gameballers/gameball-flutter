@@ -739,7 +739,11 @@ class InAppMessagingService {
     final notReady = <InAppMessageCampaign>[];
     for (final candidate in _campaigns) {
       final held = _gameHeldBack(candidate);
-      if (!_artworkReady.contains(candidate.key)) {
+      // A game has no artwork to wait for. The ready set is only filled once the
+      // whole sync's warm-up has finished, so without this a trigger in the
+      // seconds after a sync passed every game over as "not ready" and lost it.
+      if (!candidate.message.isWidget &&
+          !_artworkReady.contains(candidate.key)) {
         notReady.add(candidate);
         iamLog('campaign ${candidate.key} passed over: artwork not '
             'ready');
@@ -1065,7 +1069,7 @@ class InAppMessagingService {
           'it a type this SDK version does not render');
       return;
     }
-    if (!_artworkReady.contains(campaign.key)) {
+    if (!campaign.message.isWidget && !_artworkReady.contains(campaign.key)) {
       iamLog('pending campaign ${campaign.key} dropped: its artwork from the '
           'latest sync is not ready');
       return;

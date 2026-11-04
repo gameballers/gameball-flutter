@@ -2418,6 +2418,43 @@ void main() {
     });
   });
 
+  group('a game does not wait for message artwork', () {
+    // Found on a device: an event a few seconds after a sync passed every game
+    // over as "artwork not ready" while the sync's message images loaded, and
+    // the trigger was lost. A game has no artwork.
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('an event during the artwork warm-up opens its game', () async {
+      final h = build(
+        campaigns: [campaign('a'), gameCampaign(trigger: spin)],
+        prefetchTimeout: const Duration(minutes: 5),
+      );
+      h.prefetcher.hanging.add('msg_a');
+      unawaited(h.service.start(customerId: 'c1'));
+      await pumpEventQueue();
+
+      h.service.onCustomEvent('spin');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+    });
+
+    test('a message is still held until its artwork is ready', () async {
+      final h = build(
+        campaigns: [campaign('a', trigger: spin)],
+        prefetchTimeout: const Duration(minutes: 5),
+      );
+      h.prefetcher.hanging.add('msg_a');
+      unawaited(h.service.start(customerId: 'c1'));
+      await pumpEventQueue();
+
+      h.service.onCustomEvent('spin');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+  });
+
   group('a played game waits for the next sync', () {
     // What the widget posts once a game is finished. Its campaignType is the
     // widget's own name for the game, which is not the sync's ("wheel"), so
