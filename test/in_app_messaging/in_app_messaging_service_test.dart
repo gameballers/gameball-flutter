@@ -280,6 +280,7 @@ InAppMessageCampaign gameCampaign({
   bool repeatable = true,
   Duration? minInterval,
   DateTime? expiresAt,
+  GameballMessageType type = GameballMessageType.modal,
 }) =>
     InAppMessageCampaign(
       campaignId: 0,
@@ -290,7 +291,7 @@ InAppMessageCampaign gameCampaign({
       expiresAt: expiresAt,
       message: GameballInAppMessage(
         id: 'game_$gameCampaignId',
-        type: GameballMessageType.modal,
+        type: type,
         widget: GameballWidgetContent(
           gameCampaignId: gameCampaignId,
           gameCampaignType: 'wheel',
@@ -2663,6 +2664,40 @@ void main() {
       expect(h.presenter.shownMessageIds, isEmpty,
           reason: 'it waited through a session boundary, and the sync that '
               'should have confirmed it did not answer');
+    });
+
+    test('a latest version it cannot draw is dropped, not handed over',
+        () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      h.source.campaigns = [
+        gameCampaign(trigger: spin, type: GameballMessageType.unsupported),
+      ];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'selection never offers an unsupported type, and the '
+              'presenter refuses a game it has no surface for — so handing '
+              'one over would only be refused again on every frame');
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('a latest version whose artwork did not load is dropped', () async {
+      final h = await parked(
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+        'promo',
+      );
+
+      // The new session's sync warms artwork again, and this time it fails.
+      h.prefetcher.failing.add('msg_promo');
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'it would paint a hole where its image belongs and count an '
+              'impression for it, which is what passing it over at selection '
+              'prevents');
     });
 
     test('a game the latest sync still carries opens', () async {

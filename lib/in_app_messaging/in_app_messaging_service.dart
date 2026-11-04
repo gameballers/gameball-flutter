@@ -1057,6 +1057,19 @@ class InAppMessagingService {
           'while it waited');
       return;
     }
+    // The latest version is what will be drawn, so it has to pass what made
+    // the parked one drawable: a type this SDK renders, and artwork that has
+    // loaded. Neither is a given after a sync that edited the campaign.
+    if (campaign.message.type == GameballMessageType.unsupported) {
+      iamLog('pending campaign ${campaign.key} dropped: the latest sync gives '
+          'it a type this SDK version does not render');
+      return;
+    }
+    if (!_artworkReady.contains(campaign.key)) {
+      iamLog('pending campaign ${campaign.key} dropped: its artwork from the '
+          'latest sync is not ready');
+      return;
+    }
     // The same holds that keep a game from being selected. A game can also
     // wait behind itself — its trigger fired again while it was open — and be
     // played before its turn comes.
