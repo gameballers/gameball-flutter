@@ -935,10 +935,18 @@ class GameballApp extends StatelessWidget {
     // Logged because it is otherwise invisible: a campaign that opens on "this
     // campaign is not available" looks identical whether the id is wrong, the
     // customer cannot play it, or the host is pointed at a different widget
-    // environment than its api key belongs to.
-    iamLog('opening widget $url');
+    // environment than its api key belongs to. Logged without the credentials:
+    // the host and openDetail are what diagnose that, and a log line gets
+    // pasted into tickets and screenshots.
+    iamLog('opening widget ${_redactCredentials(url)}');
     return url;
   }
+
+  /// [url] with the api key and the session token masked, for a log line.
+  static String _redactCredentials(String url) => url.replaceAllMapped(
+        RegExp(r'([?&](?:apiKey|sessionToken)=)[^&#]*'),
+        (match) => '${match[1]}<redacted>',
+      );
 
   /// Builds the URL for the Gameball profile widget.
   ///
