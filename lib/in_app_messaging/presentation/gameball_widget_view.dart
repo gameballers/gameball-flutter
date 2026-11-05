@@ -196,9 +196,9 @@ class GameballWidgetView extends StatefulWidget {
   /// Events the widget posts on `window.WidgetEvent.postEvent` — game
   /// completion, most usefully.
   ///
-  /// Nothing arrived on this bridge during the load in any probe run, which is
-  /// why readiness is detected from the DOM instead. It is wired anyway because
-  /// the widget does use it after the game is played.
+  /// `gameReady` arrives here too, and settles the view before it is passed
+  /// on. Widgets that predate it post nothing during the load, which is why the
+  /// readiness poller stays as the fallback.
   final void Function(String raw)? onEvent;
 
   final Duration readyTimeout;
@@ -228,7 +228,7 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
       ..addJavaScriptChannel('GBIamClose',
           onMessageReceived: (_) => widget.onCloseRequested())
       ..addJavaScriptChannel('GBIamEvent',
-          onMessageReceived: (m) => widget.onEvent?.call(m.message))
+          onMessageReceived: (m) => _receiveEvent(m.message))
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
@@ -258,8 +258,36 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
     super.dispose();
   }
 
-  /// Reports the outcome exactly once.
-  void _finish({required bool ready}) {
+  /// An event the page posted through `WidgetEvent.postEvent`. Every one goes
+  /// on to the host; `gameReady` also settles this view.
+  ///
+  /// `gameReady` is the page saying the game is on screen: the answer the
+  /// readiness poller can only guess at, and never reaches for a game drawn on
+  /// a canvas with little text. With `playable: false` the page is showing
+  /// "already played", "not available" or an error in the game's place, which
+  /// is never put over the app unasked.
+  void _receiveEvent(String raw) {
+    final event = decodeWidgetEvent(raw);
+    if (event?['type'] == 'gameReady') _pageIsReady(event?['metadata']);
+    widget.onEvent?.call(raw);
+  }
+
+  /// Settles on the page's word. Only an explicit `playable: false` holds the
+  /// game back.
+  void _pageIsReady(Object? metadata) {
+    final said = metadata is Map ? metadata : const <String, dynamic>{};
+    if (said['playable'] != false) {
+      _finish(ready: true);
+      return;
+    }
+    final reason = said['reason'] ?? 'no reason given';
+    _finish(
+        ready: false, failure: 'says the game cannot be played now ($reason)');
+  }
+
+  /// Reports the outcome exactly once. [failure] says why a message is taken
+  /// away when it is not that the widget ran out of time.
+  void _finish({required bool ready, String? failure}) {
     if (_settled) return;
     _settled = true;
     _timeout?.cancel();
@@ -268,8 +296,10 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
     if (ready) {
       widget.onReady();
     } else {
-      iamLog('widget did not become ready within '
-          '${widget.readyTimeout.inSeconds}s; taking the message away unshown');
+      iamLog(failure != null
+          ? 'widget $failure; taking the message away unshown'
+          : 'widget did not become ready within '
+              '${widget.readyTimeout.inSeconds}s; taking the message away unshown');
       widget.onFailed();
     }
   }
@@ -284,6 +314,15 @@ class _GameballWidgetViewState extends State<GameballWidgetView> {
   /// Deliberately content-agnostic: keying off a selector would couple this SDK
   /// to the widget's markup and break silently the next time the web team
   /// renames a class.
+  ///
+  /// **The fallback, not the first word.** A widget that posts `gameReady` says
+  /// itself when the game is on screen, and whichever comes first settles the
+  /// view. The poller is for widgets that predate that event, and it can miss:
+  /// a game drawn on a canvas with under 40 characters of text (a scratch card
+  /// whose title has no translation in the customer's language, measured at
+  /// `6/323/2/0/36`) never passes it. It also installs the `WidgetEvent` shim
+  /// the event arrives through, so the page keeps offering the event until the
+  /// shim is there.
   void _install() {
     _controller.runJavaScript(
         widgetReadinessScript(readyTimeout: widget.readyTimeout));
