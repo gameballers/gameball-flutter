@@ -4,7 +4,13 @@ const integrationsUrlV4_1 = "/api/v4.1/integrations";
 const initializeCustomerEndpoint = "/customers";
 const sendEventEndpoint = "/events";
 const mobileLogsPath = "/api/v4.0/integrations/mobile/logs";
-const pushClickEndpoint = "/mobile/push-click";
+
+// Taps, swipe-aways and influenced opens of Gameball pushes. Pinned to v4.0 and
+// deliberately *not* built with getIntegrationsUrl() (v4.1 with a session
+// token), the same as the other SDKs: the click token already names the customer.
+// It replaces /mobile/push-click: a backend without push-engagement answers 404
+// instead of counting another kind of engagement as a click.
+const pushEngagementPath = "$integrationsUrlV4_0/mobile/push-engagement";
 
 const inAppMessageEventsPath =
     "/api/v4.0/integrations/mobile/in-app-messages/events";
