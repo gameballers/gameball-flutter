@@ -17,8 +17,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import 'models/requests/customer_attributes.dart';
+import 'engagement/engagement.dart';
 import 'in_app_messaging/analytics/batched_message_analytics.dart';
 import 'in_app_messaging/analytics/message_analytics.dart';
 import 'in_app_messaging/evaluation/frequency_cap.dart';
@@ -39,7 +41,8 @@ import 'models/requests/initialize_customer_request.dart';
 import 'models/requests/show_profile_request.dart';
 import 'models/requests/gameball_config.dart';
 import 'network/models/callbacks.dart';
-import 'network/request_calls/report_push_click_request.dart';
+import 'models/enums/push_engagement_type.dart';
+import 'network/request_calls/report_push_engagement_request.dart';
 import 'network/request_calls/send_event_request.dart';
 
 import 'network/utils/constants.dart';
@@ -89,6 +92,64 @@ class GameballApp extends StatelessWidget {
   /// sessions. Null for any client that never opts in.
   static _GameballLifecycleObserver? _lifecycleObserver;
 
+  /// Push taps, app opens, push arrivals and influenced opens. Created on first
+  /// use, so [handlePushReceived] works in firebase_messaging's background
+  /// isolate without [init].
+  static Engagement? _engagement;
+  static Engagement get _engagementSignals {
+    final engagement = _engagement ??= Engagement();
+    engagement.send ??= _reportPushEngagement;
+    return engagement;
+  }
+
+  /// Replaces the engagement signals. Tests only — never set this in an app.
+  /// Without its own sender it reports through the SDK, like the real one.
+  @visibleForTesting
+  static set debugEngagement(Engagement? engagement) {
+    engagement?.send ??= _reportPushEngagement;
+    _engagement = engagement;
+  }
+
+  /// Replaces the HTTP client for push-engagement reports. Tests only — never
+  /// set this in an app.
+  @visibleForTesting
+  static http.Client? debugHttpClient;
+
+  /// Reports one engagement with a Gameball push (a tap or an influenced open)
+  /// to the push-engagement endpoint. One attempt; completes with an error when
+  /// the SDK isn't initialised or the backend doesn't accept it.
+  static Future<void> _reportPushEngagement(
+      PushEngagementType type, String clickToken, int occurredAt) async {
+    if (isNullOrEmpty(_apiKey)) {
+      throw Exception('API key is not initialized. Call init() first');
+    }
+    await reportPushEngagementRequest(
+      clickToken: clickToken,
+      type: type,
+      occurredAt: occurredAt,
+      apiKey: _apiKey,
+      lang: handleLanguage(_lang, _customerPreferredLanguage),
+      customApiPrefix: _apiPrefix,
+      sessionToken: _sessionToken,
+      client: debugHttpClient,
+    );
+  }
+
+  /// Watches the app lifecycle for both app opens and in-app messaging sessions.
+  /// Registered once, from [init] or [startInAppMessaging].
+  static void _ensureLifecycleObserver() {
+    if (_lifecycleObserver != null) return;
+    final binding = WidgetsFlutterBinding.ensureInitialized();
+    final observer = _GameballLifecycleObserver();
+    _lifecycleObserver = observer;
+    binding.addObserver(observer);
+    // init usually runs with the app already on screen, so no resume follows:
+    // that first moment in the foreground is the cold open
+    if (binding.lifecycleState == AppLifecycleState.resumed) {
+      _engagementSignals.appOpens.onForeground();
+    }
+  }
+
   /// Retrieves the singleton instance of the GameballApp class.
   ///
   /// Creates a new instance if it doesn't exist and returns it.
@@ -113,6 +174,13 @@ class GameballApp extends StatelessWidget {
     _widgetUrlPrefix = config.widgetUrlPrefix;
 
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
+
+    // App opens and influenced opens start here; no integrator code needed
+    try {
+      _ensureLifecycleObserver();
+    } catch (error) {
+      debugPrint('GameballApp could not watch app opens: $error');
+    }
   }
 
   /// Changes the SDK's global language on demand, without re-calling [init]. Affects everything
@@ -177,9 +245,17 @@ class GameballApp extends StatelessWidget {
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
 
-    SharedPreferences.getInstance()
-        .then((prefs) => prefs.setString(_customerIdKey, request.customerId))
-        .catchError((_) => false);
+    SharedPreferences.getInstance().then((prefs) {
+      // Another customer's pushes must never credit this customer's opens
+      if (prefs.getString(_customerIdKey) != request.customerId) {
+        try {
+          _engagementSignals.onCustomerChanged();
+        } catch (error) {
+          debugPrint('GameballApp could not clear received pushes: $error');
+        }
+      }
+      return prefs.setString(_customerIdKey, request.customerId);
+    }).catchError((_) => false);
 
     // Store customer preferred language for widget display
     final preferredLanguage = request.customerAttributes?.preferredLanguage;
@@ -412,13 +488,9 @@ class GameballApp extends StatelessWidget {
     );
 
     // Watch the app lifecycle so a resume after the session timeout starts a new
-    // session and fires session_start again. Registered once, and only for hosts
-    // that opted in, so a client who never starts messaging gains no observer.
-    if (_lifecycleObserver == null) {
-      final observer = _GameballLifecycleObserver();
-      _lifecycleObserver = observer;
-      WidgetsBinding.instance.addObserver(observer);
-    }
+    // session and fires session_start again. Usually already registered by init
+    // for app opens; the in-app messaging hooks stay idle until this point.
+    _ensureLifecycleObserver();
 
     service.start(
       customerId: customerId,
@@ -585,8 +657,15 @@ class GameballApp extends StatelessWidget {
   /// `RemoteMessage.data` from `onMessageOpenedApp` / `getInitialMessage`).
   ///
   /// Returns `true` when the notification is a Gameball one. When it also
-  /// carries a click token, the tap is reported to Gameball to count the
-  /// campaign click; the optional `callback` receives that report's result.
+  /// carries a click token, the tap is reported to Gameball's push-engagement
+  /// endpoint as a click, to count the campaign click; the optional `callback`
+  /// receives that report's result.
+  ///
+  /// Each tap is counted once per app run (by `gbClickToken`, else the message
+  /// id), so calling this from both `getInitialMessage` and `onMessageOpenedApp`
+  /// is safe: a repeat returns `true` and reports nothing. An open caused by a
+  /// Gameball tap is a click, never an influenced open, even when an older
+  /// untapped push is saved.
   ///
   /// Arguments:
   ///   - `payload`: The notification's data payload.
@@ -595,7 +674,8 @@ class GameballApp extends StatelessWidget {
   ///                     If provided, overrides the global sessionToken.
   ///                     If not provided, nullifies the global sessionToken.
   bool handlePushClick(Map<String, dynamic> payload, {HandlePushClickCallback? callback, String? sessionToken}) {
-    if (!(payload['isGB']?.toString().toLowerCase() == 'true')) {
+    final push = GameballPushPayload.from(payload);
+    if (push == null) {
       return false;
     }
 
@@ -603,6 +683,18 @@ class GameballApp extends StatelessWidget {
 
     // Override or nullify sessionToken based on parameter
     _sessionToken = sessionToken;
+
+    // When the SDK handles the tap: the click's occurredAt
+    var occurredAt = DateTime.now().millisecondsSinceEpoch;
+
+    // The same tap seen twice is counted and reported once
+    try {
+      final engagement = _engagementSignals;
+      occurredAt = engagement.now();
+      if (!engagement.onTap(push)) return true;
+    } catch (error) {
+      debugPrint('GameballApp could not record a push tap: $error');
+    }
 
     if (isNullOrEmpty(_apiKey)) {
       callback?.call(null, Exception('API key is not initialized. Call init() first'));
@@ -613,13 +705,37 @@ class GameballApp extends StatelessWidget {
       return true;
     }
 
-    final language = handleLanguage(_lang, _customerPreferredLanguage);
-    reportPushClickRequest(token!, _apiKey, language, customApiPrefix: _apiPrefix, sessionToken: _sessionToken).then((response) {
+    _reportPushEngagement(PushEngagementType.clicked, token!, occurredAt).then((_) {
       callback?.call(true, null);
     }).catchError((e) {
       callback?.call(false, e is Exception ? e : Exception(e.toString()));
     });
     return true;
+  }
+
+  /// Records that a Gameball push reached the device, so opening the app soon
+  /// after (without tapping it) counts as an influenced open.
+  ///
+  /// Call it with `RemoteMessage.data` from both firebase_messaging's
+  /// `onBackgroundMessage` handler and `FirebaseMessaging.onMessage`, and pass
+  /// `RemoteMessage.sentTime` as [sentTime]. Await it in the background handler:
+  /// the push is saved to storage before the future completes.
+  ///
+  /// Works without [init] — it only needs storage — so it is safe in the
+  /// background isolate. Only logged for now; nothing is sent to Gameball.
+  ///
+  /// Returns `true` when the push is a Gameball one (`isGB` is `"true"`),
+  /// `false` for any other push, which is ignored. Never throws.
+  Future<bool> handlePushReceived(Map<String, dynamic> payload, {int? sentTime}) async {
+    try {
+      final push = GameballPushPayload.from(payload);
+      if (push == null) return false;
+      await _engagementSignals.onReceived(push, sentTime: sentTime);
+      return true;
+    } catch (error) {
+      debugPrint('GameballApp could not handle a received push: $error');
+      return false;
+    }
   }
 
   /// Displays the Gameball profile in a bottom sheet.
@@ -1008,15 +1124,34 @@ class GameballApp extends StatelessWidget {
   }
 }
 
-/// Turns app lifecycle changes into session boundaries for in-app messaging.
+/// Turns app lifecycle changes into app opens and into session boundaries for
+/// in-app messaging.
 ///
 /// Separate from [GameballApp] because that class is a `StatelessWidget` and
-/// cannot mix in [WidgetsBindingObserver]. Registered only once a host opts into
-/// in-app messaging, so a client that never calls `startInAppMessaging` pays
-/// nothing.
+/// cannot mix in [WidgetsBindingObserver]. Registered from `init` (app opens)
+/// or `startInAppMessaging`; the in-app messaging hooks no-op until it starts.
 class _GameballLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Leaving: hidden, then paused. Coming back: hidden, inactive (visible),
+    // then resumed once the app has focus. inactive while on screen (a dialog,
+    // the notification shade) is not away, so it never ends an open.
+    try {
+      final appOpens = GameballApp._engagementSignals.appOpens;
+      switch (state) {
+        case AppLifecycleState.resumed:
+          appOpens.onForeground();
+        case AppLifecycleState.inactive:
+          appOpens.onVisibleAgain();
+        case AppLifecycleState.hidden:
+        case AppLifecycleState.paused:
+        case AppLifecycleState.detached:
+          appOpens.onBackground();
+      }
+    } catch (error) {
+      debugPrint('GameballApp could not track an app open: $error');
+    }
+
     switch (state) {
       case AppLifecycleState.resumed:
         GameballApp.notifyAppResumed();
