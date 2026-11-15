@@ -152,6 +152,37 @@ void main() {
     });
   });
 
+  group('anyFilterMatches', () {
+    const properties = <String, Object>{'price': 189.0, 'tier': 'gold'};
+
+    test('an empty list matches anything', () {
+      expect(anyFilterMatches(const <GameballPropertyFilter>[], properties),
+          isTrue,
+          reason: 'a campaign with no conditions has none to fail, whichever '
+              'way they would have been joined');
+    });
+
+    test('one passing filter is enough', () {
+      expect(
+        anyFilterMatches([
+          filter('price', GameballFilterOperator.lessThan, 100),
+          filter('tier', GameballFilterOperator.equals, 'gold'),
+        ], properties),
+        isTrue,
+      );
+    });
+
+    test('fails only when every filter fails', () {
+      expect(
+        anyFilterMatches([
+          filter('price', GameballFilterOperator.lessThan, 100),
+          filter('tier', GameballFilterOperator.equals, 'silver'),
+        ], properties),
+        isFalse,
+      );
+    });
+  });
+
   group('between', () {
     test('matches inside an inclusive "min,max" range as the dashboard sends it',
         () {

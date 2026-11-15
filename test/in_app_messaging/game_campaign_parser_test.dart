@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message_campaign.dart';
+import 'package:gameball_sdk/in_app_messaging/models/message_trigger.dart';
 import 'package:gameball_sdk/in_app_messaging/source/message_parser.dart';
 
 String sync(String entries) => '{"cooldownSeconds":30,"messages":[$entries]}';
@@ -166,6 +167,36 @@ void main() {
     expect(parseSyncResponse(sync(entry)).campaigns, isEmpty);
     expect(lines.where((l) => l.contains('game:9645') && l.contains('slideup')),
         isNotEmpty);
+  });
+
+  test('a game with Any conditions is kept and fires on either one', () {
+    final entry = wheelEntry.replaceFirst(
+      '"trigger": { "type": "session_start", "repeatable": true }',
+      '"trigger": { "type": "event", "name": "purchase", "repeatable": true, '
+          '"metadataLogicalOperator": "OR", "metadataFilters": ['
+          '{ "metadataId": 1, "name": "price", "operator": "Greater", "value": 100 },'
+          '{ "metadataId": 2, "name": "productId", "operator": "Equals", "value": "sku-1" }'
+          '] }',
+    );
+    final game = parseSyncResponse(sync(entry)).campaigns.single;
+
+    expect(
+      triggerMatches(
+        game.trigger,
+        GameballCustomEventOccurrence.purchase(
+            productId: 'sku-1', price: 20, currency: 'EGP'),
+      ),
+      isTrue,
+      reason: 'the product matches even though the price does not',
+    );
+    expect(
+      triggerMatches(
+        game.trigger,
+        GameballCustomEventOccurrence.purchase(
+            productId: 'sku-2', price: 20, currency: 'EGP'),
+      ),
+      isFalse,
+    );
   });
 
   group('a game reads its repeat rule from its trigger, as a message does', () {

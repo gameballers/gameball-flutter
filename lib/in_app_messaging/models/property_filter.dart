@@ -132,3 +132,21 @@ bool allFiltersMatch(
   }
   return true;
 }
+
+/// Whether at least one filter in [filters] is satisfied — the dashboard's
+/// "Any" condition.
+///
+/// An empty list matches anything, as it does for [allFiltersMatch]. Read
+/// literally, "any of none" is false; but a campaign with no conditions has
+/// none to fail, and how its absent conditions would have been joined must
+/// not decide whether it shows.
+bool anyFilterMatches(
+  List<GameballPropertyFilter> filters,
+  Map<String, Object> properties,
+) {
+  if (filters.isEmpty) return true;
+  for (final filter in filters) {
+    if (filter.matches(properties)) return true;
+  }
+  return false;
+}
