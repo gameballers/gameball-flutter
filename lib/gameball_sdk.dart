@@ -58,6 +58,10 @@ class GameballApp extends StatelessWidget {
   static String? _customerPreferredLanguage;
   static String? _apiPrefix;
   static String? _sessionToken;
+
+  /// The widget host to load, when the host configured a non-production one.
+  /// Applies to the profile widget and to any campaign a message opens.
+  static String? _widgetUrlPrefix;
   static VoidCallback? _dismissActiveWidget;
   static const String _customerIdKey = 'gameball_customer_id';
 
@@ -106,6 +110,7 @@ class GameballApp extends StatelessWidget {
     _apiKey = config.apiKey;
     _apiPrefix = config.apiPrefix;
     _sessionToken = config.sessionToken;
+    _widgetUrlPrefix = config.widgetUrlPrefix;
 
     GameballLogger.instance.configure(apiKey: _apiKey, lang: _lang, apiPrefix: _apiPrefix);
   }
@@ -348,6 +353,7 @@ class GameballApp extends StatelessWidget {
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
     GameballOnNavigate? onNavigate,
+    GameballOnGameEvent? onGameEvent,
     Duration sessionTimeout = defaultSessionTimeout,
   }) {
     if (isNullOrEmpty(_apiKey)) {
@@ -377,7 +383,8 @@ class GameballApp extends StatelessWidget {
 
     final service = _inAppMessaging ??= InAppMessagingService(
       source: debugMessageSource ?? HttpMessageSource(_syncInAppMessages),
-      presenter: OverlayPresenter(navigatorKey),
+      presenter: OverlayPresenter(navigatorKey,
+          widgetUrlBuilder: _buildInAppWidgetUrl),
       // Persisted, both of them: the backend's contract requires that a
       // non-repeatable campaign never shows again "locally too", and that a
       // failed sync falls back to the previous cache. Neither survives a restart
@@ -417,6 +424,7 @@ class GameballApp extends StatelessWidget {
       customerId: customerId,
       beforeDisplay: beforeDisplay,
       onAction: onAction,
+      onGameEvent: onGameEvent,
     );
   }
 
@@ -705,7 +713,9 @@ class GameballApp extends StatelessWidget {
     final Uri? target = Uri.tryParse(url);
     if (target == null || target.host.isEmpty) return false;
 
-    final String widgetHost = Uri.parse(request.widgetUrlPrefix ?? widgetBaseUrl).host;
+    final String widgetHost =
+        Uri.parse(request.widgetUrlPrefix ?? _widgetUrlPrefix ?? widgetBaseUrl)
+            .host;
     return target.host != widgetHost;
   }
 
@@ -899,6 +909,45 @@ class GameballApp extends StatelessWidget {
     });
   }
 
+  /// Builds the widget URL for an in-app reward campaign.
+  ///
+  /// Reuses [_buildWidgetUrl] through a synthesised request rather than
+  /// composing a second URL by hand, so the two can never drift — and without
+  /// touching `showProfile`'s own path, which every shipped integration
+  /// depends on.
+  ///
+  /// The campaign supplies only [openDetail]. Everything identifying — api key,
+  /// customer, locale, platform, session token — comes from SDK state, which is
+  /// why the campaign payload never carries a URL.
+  ///
+  /// Navigation is hidden: the message is a card showing one reward campaign,
+  /// not the profile, so the widget's own chrome would offer a way out of the
+  /// thing the customer was just handed.
+  String _buildInAppWidgetUrl(String openDetail) {
+    final url = _buildWidgetUrl(
+      ShowProfileRequestBuilder()
+          .customerId(_inAppMessagingCustomerId)
+          .openDetail(openDetail)
+          .hideNavigation(true)
+          .build(),
+      handleLanguage(_lang, _customerPreferredLanguage),
+    );
+    // Logged because it is otherwise invisible: a campaign that opens on "this
+    // campaign is not available" looks identical whether the id is wrong, the
+    // customer cannot play it, or the host is pointed at a different widget
+    // environment than its api key belongs to. Logged without the credentials:
+    // the host and openDetail are what diagnose that, and a log line gets
+    // pasted into tickets and screenshots.
+    iamLog('opening widget ${_redactCredentials(url)}');
+    return url;
+  }
+
+  /// [url] with the api key and the session token masked, for a log line.
+  static String _redactCredentials(String url) => url.replaceAllMapped(
+        RegExp(r'([?&](?:apiKey|sessionToken)=)[^&#]*'),
+        (match) => '${match[1]}<redacted>',
+      );
+
   /// Builds the URL for the Gameball profile widget.
   ///
   /// Constructs the URL based on the ShowProfileRequest parameters and SDK configuration.
@@ -907,7 +956,12 @@ class GameballApp extends StatelessWidget {
   ///   - `request`: The ShowProfileRequest containing widget configuration parameters.
   ///   - `language`: The resolved widget language (see handleLanguage).
   String _buildWidgetUrl(ShowProfileRequest request, String language) {
-    String widgetUrl = '${request.widgetUrlPrefix ?? widgetBaseUrl}?lang=$language';
+    // Per call, then the SDK's configuration, then production. The per-call
+    // value stays an override rather than the only way to set this, so a host
+    // aimed at a non-production environment cannot end up aimed there for its
+    // profile widget and at production for a campaign a message opens.
+    final prefix = request.widgetUrlPrefix ?? _widgetUrlPrefix ?? widgetBaseUrl;
+    String widgetUrl = '$prefix?lang=$language';
 
     widgetUrl += '&apiKey=${Uri.encodeComponent(_apiKey)}';
 

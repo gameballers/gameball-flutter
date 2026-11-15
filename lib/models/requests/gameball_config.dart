@@ -32,6 +32,18 @@ class GameballConfig {
   @JsonKey(name: "sessionToken")
   final String? sessionToken;
 
+  /// The widget host to load, when it is not the production one (optional).
+  ///
+  /// Applies to everything the SDK opens in a webview — the profile widget and
+  /// any campaign a message opens. Set it once here rather than per call: a host
+  /// pointed at a non-production environment is pointed there for everything,
+  /// and the two cannot silently disagree.
+  ///
+  /// `ShowProfileRequest.widgetUrlPrefix` still overrides this for one
+  /// presentation.
+  @JsonKey(name: "widgetUrlPrefix")
+  final String? widgetUrlPrefix;
+
   /// Private constructor for creating GameballConfig instances.
   /// Use [GameballConfigBuilder] to create instances of this class.
   const GameballConfig._({
@@ -41,6 +53,7 @@ class GameballConfig {
     this.shop,
     this.apiPrefix,
     this.sessionToken,
+    this.widgetUrlPrefix,
   });
 
 
@@ -57,6 +70,7 @@ class GameballConfig {
         shop: json['shop'] as String?,
         apiPrefix: json['apiPrefix'] as String?,
         sessionToken: json['sessionToken'] as String?,
+        widgetUrlPrefix: json['widgetUrlPrefix'] as String?,
       );
 }
 
@@ -70,6 +84,7 @@ class GameballConfigBuilder {
   String? _shop;
   String? _apiPrefix;
   String? _sessionToken;
+  String? _widgetUrlPrefix;
 
   /// Set the required API key.
   GameballConfigBuilder apiKey(String apiKey) {
@@ -107,6 +122,14 @@ class GameballConfigBuilder {
     return this;
   }
 
+  /// Set the optional widget host, for a non-production environment.
+  ///
+  /// Applies to the profile widget and to any campaign a message opens.
+  GameballConfigBuilder widgetUrlPrefix(String? widgetUrlPrefix) {
+    _widgetUrlPrefix = widgetUrlPrefix;
+    return this;
+  }
+
   /// Build the final immutable [GameballConfig] instance.
   GameballConfig build() {
     if (_apiKey == null || _apiKey!.isEmpty) {
@@ -122,6 +145,7 @@ class GameballConfigBuilder {
       shop: _shop,
       apiPrefix: _apiPrefix,
       sessionToken: _sessionToken,
+      widgetUrlPrefix: _widgetUrlPrefix,
     );
   }
 }

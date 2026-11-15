@@ -402,6 +402,65 @@ void main() {
       expect(app().pendingInAppMessageCampaign, isNull);
     });
   });
+
+  group('the widget url a game opens', () {
+    const wheel = '''
+{
+  "cooldownSeconds": 30,
+  "messages": [
+    {
+      "campaignType": 2, "campaignId": 0, "variationId": 0, "dispatchId": null,
+      "name": "Spin the Wheel", "priority": 0, "messageType": 2,
+      "trigger": { "type": "session_start", "repeatable": true },
+      "content": null, "locale": null, "localeCode": null,
+      "expiresAt": null, "isTest": false,
+      "gameCampaignId": 9645, "gameCampaignType": "wheel"
+    }
+  ]
+}
+''';
+
+    testWidgets('is logged without the api key or the session token',
+        (tester) async {
+      GameballApp.debugMessageSource = _OneCampaign(wheel);
+      app().init(GameballConfigBuilder()
+          .apiKey('secret-api-key')
+          .lang('en')
+          .sessionToken('secret-session-token')
+          .build());
+      final key = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Scaffold(body: Text('host screen')),
+      ));
+
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => lines.add(message ?? '');
+      try {
+        app().startInAppMessaging(customerId: 'customer-1', navigatorKey: key);
+        // Runs the sync and the session-start evaluation without drawing a
+        // frame. The url is composed and logged when the game is presented,
+        // and a frame would then mount its WebView, which a widget test has
+        // no platform for.
+        await tester.idle();
+        app().stopInAppMessaging();
+      } finally {
+        // In the body, not a tear-down: a widget test checks it is restored
+        // before tear-downs run.
+        debugPrint = original;
+      }
+
+      final opening = lines.where((l) => l.contains('opening widget'));
+      expect(opening, hasLength(1),
+          reason: 'the line stays: it is how a wrong environment or id shows');
+      expect(opening.single, contains('details_wheel_9645'));
+      expect(lines.where((l) => l.contains('secret-api-key')), isEmpty,
+          reason: 'a debug log ends up in tickets and screenshots');
+      expect(lines.where((l) => l.contains('secret-session-token')), isEmpty);
+    });
+  });
 }
 
 /// The stub's cart campaign listens for `add_to_cart` and filters on `productId`.

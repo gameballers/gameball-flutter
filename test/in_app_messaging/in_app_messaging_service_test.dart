@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gameball_sdk/in_app_messaging/models/campaign_key.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_analytics.dart';
 import 'package:gameball_sdk/in_app_messaging/analytics/message_event.dart';
 import 'package:gameball_sdk/in_app_messaging/evaluation/frequency_cap.dart';
@@ -64,26 +65,26 @@ class SlowFrequencyCap implements FrequencyCap {
   SlowFrequencyCap({required this.delay, required this.stored});
 
   final Duration delay;
-  final Map<int, DateTime> stored;
+  final Map<CampaignKey, DateTime> stored;
 
-  Map<int, DateTime> _loaded = <int, DateTime>{};
+  Map<CampaignKey, DateTime> _loaded = <CampaignKey, DateTime>{};
 
   @override
   Future<void> load(String customerId) async {
     await Future<void>.delayed(delay);
-    _loaded = Map<int, DateTime>.of(stored);
+    _loaded = Map<CampaignKey, DateTime>.of(stored);
   }
 
   @override
   CapState snapshot() => CapState(
-        lastDisplayByCampaign: Map<int, DateTime>.unmodifiable(_loaded),
+        lastDisplayByCampaign: Map<CampaignKey, DateTime>.unmodifiable(_loaded),
         lastDisplayAt: _loaded.values.isEmpty
             ? null
             : _loaded.values.reduce((a, b) => a.isAfter(b) ? a : b),
       );
 
   @override
-  void recordDisplay(int campaignId, DateTime at) => _loaded[campaignId] = at;
+  void recordDisplay(CampaignKey campaign, DateTime at) => _loaded[campaign] = at;
 }
 
 class FakePresenter implements GameballMessagePresenter {
@@ -98,6 +99,10 @@ class FakePresenter implements GameballMessagePresenter {
   VoidCallback? _onDismissed;
   void Function(GameballMessageButton)? _onButtonPressed;
   VoidCallback? _onMessagePressed;
+  void Function(Map<String, dynamic>)? _onWidgetEvent;
+
+  /// Fires what a reward campaign's widget would have posted.
+  void emitWidgetEvent(Map<String, dynamic> event) => _onWidgetEvent?.call(event);
 
   @override
   bool get isShowing => _showing;
@@ -109,10 +114,12 @@ class FakePresenter implements GameballMessagePresenter {
     required void Function(GameballMessageButton button) onButtonPressed,
     required VoidCallback onMessagePressed,
     required VoidCallback onDismissed,
+    void Function(Map<String, dynamic> event)? onWidgetEvent,
   }) {
     if (!available || _showing) return false;
     _showing = true;
     _onDismissed = onDismissed;
+    _onWidgetEvent = onWidgetEvent;
     _onButtonPressed = onButtonPressed;
     _onMessagePressed = onMessagePressed;
     shownMessageIds.add(message.id);
@@ -263,6 +270,35 @@ String labelOf(int campaignId) => _idsByLabel.entries
         orElse: () => MapEntry('#$campaignId', campaignId))
     .key;
 
+/// A game campaign, session-start and repeatable unless told otherwise.
+///
+/// campaignId is 0 exactly as a real game entry arrives; its identity comes
+/// from gameCampaignId.
+InAppMessageCampaign gameCampaign({
+  int gameCampaignId = 9645,
+  GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
+  bool repeatable = true,
+  Duration? minInterval,
+  DateTime? expiresAt,
+  GameballMessageType type = GameballMessageType.modal,
+}) =>
+    InAppMessageCampaign(
+      campaignId: 0,
+      trigger: trigger,
+      priority: 0,
+      repeatable: repeatable,
+      minInterval: minInterval,
+      expiresAt: expiresAt,
+      message: GameballInAppMessage(
+        id: 'game_$gameCampaignId',
+        type: type,
+        widget: GameballWidgetContent(
+          gameCampaignId: gameCampaignId,
+          gameCampaignType: 'wheel',
+        ),
+      ),
+    );
+
 InAppMessageCampaign campaign(
   String label, {
   GameballMessageTrigger trigger = const GameballSessionStartTrigger(),
@@ -313,8 +349,8 @@ String rawSync({
 }
 ''';
 
-/// Assembles a service with controllable collaborators.
-({
+/// A service and its controllable collaborators, as [build] assembles them.
+typedef Harness = ({
   InAppMessagingService service,
   FakeSource source,
   FakePresenter presenter,
@@ -328,7 +364,10 @@ String rawSync({
   void Function(bool) setWidgetOpen,
   void Function(DateTime) setNow,
   List<(Duration, void Function())> scheduled,
-}) build({
+});
+
+/// Assembles a service with controllable collaborators.
+Harness build({
   List<InAppMessageCampaign>? campaigns,
   InMemoryCampaignCache? cache,
   Duration? prefetchTimeout,
@@ -418,13 +457,65 @@ void main() {
       expect(h.service.isStarted, isTrue);
     });
 
+    test('a game event reaches the host with the game id', () async {
+      final received = <(int, Map<String, dynamic>)>[];
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onGameEvent: (id, event) => received.add((id, event)),
+      );
+      h.presenter.emitWidgetEvent(<String, dynamic>{'type': 'game_completed'});
+
+      // Asserted part by part: Dart compares maps by identity, so a record
+      // carrying one never equals an identical-looking literal.
+      expect(received, hasLength(1));
+      expect(received.single.$1, 9645);
+      expect(received.single.$2, <String, dynamic>{'type': 'game_completed'});
+    });
+
+    test('a throwing host callback does not escape', () async {
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(
+        customerId: 'c1',
+        onGameEvent: (_, __) => throw StateError('host blew up'),
+      );
+
+      expect(
+        () => h.presenter
+            .emitWidgetEvent(<String, dynamic>{'type': 'game_completed'}),
+        returnsNormally,
+      );
+    });
+
+    test('a displayed game campaign reports nothing', () async {
+      // Contract: engagement is recorded through the challenge flow when the
+      // customer plays. An event here would attribute against campaignId 0.
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.analytics.events, isEmpty, reason: 'no telemetry for a game');
+    });
+
+    test('a displayed game campaign still records the cap', () async {
+      // Suppressing telemetry must not suppress the display history, or a
+      // once-ever game would reappear on every session.
+      final h = build(campaigns: [gameCampaign()]);
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.cap.snapshot().shownCampaigns, {const CampaignKey.game(9645)});
+    });
+
     test('logs an impression and records the cap at display', () async {
       final h = build();
 
       await h.service.start(customerId: 'c1');
 
       expect(h.analytics.impressions, ['a']);
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('a'))});
       expect(h.cap.snapshot().lastDisplayAt, t0);
     });
 
@@ -579,6 +670,51 @@ void main() {
       expect(h.service.pendingCampaign, isNull);
     });
 
+    test('the second of two games on one trigger waits behind the first',
+        () async {
+      final h = build(campaigns: [
+        gameCampaign(),
+        gameCampaign(gameCampaignId: 9702),
+      ]);
+      h.source.cooldown = Duration.zero;
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      expect(h.service.pendingCampaign?.key, const CampaignKey.game(9702),
+          reason: 'every game arrives with campaignId 0, so telling the '
+              'runner-up from the winner by it ruled out every other game');
+
+      h.presenter.dismiss();
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
+    });
+
+    test('the log names each game by its game id, never as campaign 0',
+        () async {
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => lines.add(message ?? '');
+      addTearDown(() => debugPrint = original);
+
+      final h = build(campaigns: [
+        gameCampaign(),
+        gameCampaign(gameCampaignId: 9702),
+      ]);
+      h.source.cooldown = Duration.zero;
+      await h.service.start(customerId: 'c1');
+
+      expect(lines.where((l) => l.contains('"0"')), isEmpty,
+          reason: 'campaignId is 0 on every game, so it says nothing');
+      expect(
+          lines.where((l) =>
+              l.contains('deferred') &&
+              l.contains('game:9702') &&
+              l.contains('game:9645')),
+          isNotEmpty,
+          reason: 'the line that parks the runner-up names both games');
+    });
+
     test('a deferred winner is not displaced by its own runner-up', () async {
       final h = build(campaigns: [
         campaign('high',
@@ -632,7 +768,7 @@ void main() {
       expect(h.service.pendingCampaign?.campaignId, idFor('cart'));
 
       // Another message lands while 'cart' waits, moving the floor forward.
-      h.cap.recordDisplay(idFor('other'), t0.add(const Duration(seconds: 40)));
+      h.cap.recordDisplay(CampaignKey.message(idFor('other')), t0.add(const Duration(seconds: 40)));
       h.setNow(t0.add(const Duration(seconds: 45)));
 
       h.setWidgetOpen(false);
@@ -1449,6 +1585,52 @@ void main() {
           reason: 'nothing was recorded, so the campaign is still owed');
     });
 
+    test('a game campaign is not opened from a cached set', () async {
+      // A message carries its own content, so a cached one is still correct. A
+      // game carries only a pointer and fetches its content live, so a cached
+      // entry is a promise the SDK cannot keep — the campaign may have ended,
+      // and the customer would be shown a card announcing that something they
+      // never heard of is unavailable.
+      const cachedGame = '''
+{
+  "cooldownSeconds": 30,
+  "messages": [
+    {
+      "campaignType": 2, "campaignId": 0, "variationId": 0, "dispatchId": null,
+      "name": "Spin the Wheel", "priority": 0, "messageType": 2,
+      "trigger": { "type": "session_start", "repeatable": true },
+      "content": null, "locale": null, "localeCode": null,
+      "expiresAt": null, "isTest": false,
+      "gameCampaignId": 9645, "gameCampaignType": "wheel"
+    }
+  ]
+}''';
+      final cache = InMemoryCampaignCache();
+      await cache.write('c1', cachedGame);
+      final h = build(campaigns: [campaign('a')], cache: cache);
+      h.source.throwOnFetch = StateError('offline');
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('a message still shows from a cached set', () async {
+      // The guard must be narrow. "Do not open games from cache" must not
+      // become "show nothing from cache", which would undo the offline
+      // behaviour the fallback exists for.
+      final cache = InMemoryCampaignCache();
+      await cache.write('c1', rawSync(campaignId: 4242));
+      final h = build(campaigns: [campaign('a')], cache: cache);
+      h.source.throwOnFetch = StateError('offline');
+
+      await h.service.start(customerId: 'c1');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isNotEmpty);
+    });
+
     test('a window from the cache applies when the sync failed', () async {
       final cache = InMemoryCampaignCache();
       await cache.write(
@@ -1505,8 +1687,9 @@ void main() {
         campaigns: [campaign('a')],
         frequencyCap: SlowFrequencyCap(
           delay: const Duration(milliseconds: 150),
-          stored: <int, DateTime>{
-            idFor('a'): t0.subtract(const Duration(hours: 1)),
+          stored: <CampaignKey, DateTime>{
+            CampaignKey.message(idFor('a')):
+                t0.subtract(const Duration(hours: 1)),
           },
         ),
         storeTimeout: const Duration(milliseconds: 30),
@@ -1557,7 +1740,7 @@ void main() {
     test('a new customer refetches and resets caps', () async {
       final h = build();
       await h.service.start(customerId: 'c1');
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('a')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('a'))});
 
       h.service.onCustomerChanged('c2');
       await Future<void>.delayed(Duration.zero);
@@ -1604,7 +1787,7 @@ void main() {
 
       h.service.stop();
 
-      expect(h.cap.snapshot().shownCampaignIds, isNotEmpty,
+      expect(h.cap.snapshot().shownCampaigns, isNotEmpty,
           reason: 'history belongs to the customer, not the session. Wiping it '
               'on logout would let a once-ever campaign show again the moment '
               'they log back in — and load() already discards it when a '
@@ -2002,7 +2185,7 @@ void main() {
       await h.service.start(customerId: 'c1');
       await pumpEventQueue();
 
-      expect(h.cap.snapshot().shownCampaignIds, {idFor('promo')});
+      expect(h.cap.snapshot().shownCampaigns, {CampaignKey.message(idFor('promo'))});
     });
 
     test('a new customer never inherits the previous one\'s values', () async {
@@ -2149,6 +2332,450 @@ void main() {
       expect(h.presenter.shownBodies, ['You have 1,450'],
           reason: 'a message announcing a points change that quotes the old '
               'balance is the worst version of this feature');
+    });
+  });
+
+  group('game campaigns follow the message frequency rules', () {
+    // A game has no frequency rules of its own: no delay, no dismissal limit and
+    // no default interval. It is held by exactly what holds a message.
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('a non-repeatable game opens once ever', () async {
+      final h = build(campaigns: [gameCampaign(repeatable: false)]);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'a new session with a live sync is still not a second time');
+    });
+
+    test('a repeatable game waits out its own minimum interval', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: spin, minInterval: const Duration(minutes: 10)),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'well past the cooldown, but inside its own interval');
+
+      h.setNow(t0.add(const Duration(minutes: 10)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('a repeatable game with no interval is held only by the cooldown',
+        () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(seconds: 10)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'the account cooldown applies to games too');
+
+      h.setNow(t0.add(const Duration(seconds: 30)));
+      h.service.onCustomEvent('spin');
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645'],
+          reason: 'minIntervalSeconds is null on a game entry, and there is no '
+              'game default standing in for it');
+    });
+
+    test('the cooldown runs between a message and a game', () async {
+      final h = build(campaigns: [
+        campaign('welcome'),
+        gameCampaign(trigger: spin),
+      ]);
+      await h.service.start(customerId: 'c1'); // the message shows at t0
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(seconds: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['msg_welcome']);
+    });
+
+    test('quiet hours hold a game back', () async {
+      final h = build(campaigns: [gameCampaign()]);
+      h.source.quietHours =
+          const GameballQuietHours(startMinute: 22 * 60, endMinute: 8 * 60);
+      h.setNow(DateTime(2026, 8, 24, 23, 30));
+
+      await h.service.start(customerId: 'c1');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+  });
+
+  group('a game does not wait for message artwork', () {
+    // Found on a device: an event a few seconds after a sync passed every game
+    // over as "artwork not ready" while the sync's message images loaded, and
+    // the trigger was lost. A game has no artwork.
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('an event during the artwork warm-up opens its game', () async {
+      final h = build(
+        campaigns: [campaign('a'), gameCampaign(trigger: spin)],
+        prefetchTimeout: const Duration(minutes: 5),
+      );
+      h.prefetcher.hanging.add('msg_a');
+      unawaited(h.service.start(customerId: 'c1'));
+      await pumpEventQueue();
+
+      h.service.onCustomEvent('spin');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+    });
+
+    test('a message is still held until its artwork is ready', () async {
+      final h = build(
+        campaigns: [campaign('a', trigger: spin)],
+        prefetchTimeout: const Duration(minutes: 5),
+      );
+      h.prefetcher.hanging.add('msg_a');
+      unawaited(h.service.start(customerId: 'c1'));
+      await pumpEventQueue();
+
+      h.service.onCustomEvent('spin');
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+  });
+
+  group('a played game waits for the next sync', () {
+    // What the widget posts once a game is finished. Its campaignType is the
+    // widget's own name for the game, which is not the sync's ("wheel"), so
+    // nothing may match on it.
+    final played = <String, dynamic>{
+      'type': 'gameCompleted',
+      'metadata': <String, dynamic>{
+        'campaignId': '9645',
+        'campaignType': 'spinTheWheel',
+      },
+    };
+    const spin = GameballCustomEventTrigger('spin');
+
+    test('is not offered again in the same session', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'repeatable, with no interval and past the cooldown — held '
+              'only because the customer played it, and whether they may play '
+              'again is for the server to say at the next sync');
+    });
+
+    test('is offered again once a sync has rechecked it', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('a failed sync does not release it', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'only a sync that answered has rechecked it');
+    });
+
+    test('a copy waiting behind it does not open when it closes', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      // Still playing past the cooldown, when the trigger fires again.
+      h.setNow(t0.add(const Duration(seconds: 40)));
+      h.service.onCustomEvent('spin');
+      expect(h.service.pendingCampaign?.key, const CampaignKey.game(9645));
+
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('only a completion holds it back', () async {
+      final h = build(campaigns: [gameCampaign(trigger: spin)]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(<String, dynamic>{'type': 'rewardViewed'});
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+
+    test('another game is unaffected', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: spin),
+        gameCampaign(
+          gameCampaignId: 9702,
+          trigger: const GameballCustomEventTrigger('scratch'),
+        ),
+      ]);
+      await h.service.start(customerId: 'c1');
+      h.service.onCustomEvent('spin');
+      h.presenter.emitWidgetEvent(played);
+      h.presenter.dismiss();
+
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onCustomEvent('scratch');
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9702']);
+    });
+  });
+
+  group('a game opens only from this session\'s sync', () {
+    test('not from the last session\'s set when this one\'s sync failed',
+        () async {
+      final h = build(campaigns: [gameCampaign()]);
+      await h.service.start(customerId: 'c1');
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645'],
+          reason: 'the set was confirmed a session ago; nothing has said the '
+              'game is still playable since, so it is no fresher than a cache');
+    });
+
+    test('nor on an event in that session', () async {
+      final h = build(campaigns: [
+        gameCampaign(trigger: const GameballCustomEventTrigger('spin')),
+      ]);
+      await h.service.start(customerId: 'c1');
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+      h.service.onCustomEvent('spin');
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('the next sync that answers opens it again', () async {
+      final h = build(campaigns: [gameCampaign()]);
+      await h.service.start(customerId: 'c1');
+      h.presenter.dismiss();
+
+      h.source.throwOnFetch = StateError('offline');
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 5)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      h.source.throwOnFetch = null;
+      h.service.onAppPaused();
+      h.setNow(t0.add(const Duration(minutes: 10)));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+
+      expect(h.presenter.shownMessageIds, ['game_9645', 'game_9645']);
+    });
+  });
+
+  group('a waiting campaign is rechecked before it opens', () {
+    const spin = GameballCustomEventTrigger('spin');
+
+    /// Parks [waiting] behind the open Gameball widget.
+    Future<Harness> parked(InAppMessageCampaign waiting, String event) async {
+      final h = build(campaigns: [waiting]);
+      await h.service.start(customerId: 'c1');
+      h.setWidgetOpen(true);
+      h.service.onCustomEvent(event);
+      expect(h.service.pendingCampaign?.key, waiting.key);
+      return h;
+    }
+
+    /// A new session, whose sync answers with whatever the source now holds.
+    Future<void> newSession(Harness h, Duration at) async {
+      h.service.onAppPaused();
+      h.setNow(t0.add(at));
+      h.service.onAppResumed();
+      await pumpEventQueue();
+    }
+
+    void closeWidget(Harness h) {
+      h.setWidgetOpen(false);
+      h.service.onHostWidgetClosed();
+    }
+
+    test('a game the latest sync no longer carries does not open', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      // The campaign ended, or the server ruled this customer out of it.
+      h.source.campaigns = <InAppMessageCampaign>[];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('a game past its end date does not open', () async {
+      final h = await parked(
+        gameCampaign(
+            trigger: spin, expiresAt: t0.add(const Duration(minutes: 1))),
+        'spin',
+      );
+
+      h.setNow(t0.add(const Duration(minutes: 2)));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'expiry was checked when it was selected, a while ago');
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('the latest sync\'s version of it is the one judged', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      // Still in the set, but the campaign's end date has since moved up.
+      h.source.campaigns = [
+        gameCampaign(
+            trigger: spin, expiresAt: t0.add(const Duration(minutes: 3))),
+      ];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty);
+    });
+
+    test('a game does not open once this session\'s sync has failed',
+        () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      h.source.throwOnFetch = StateError('offline');
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'it waited through a session boundary, and the sync that '
+              'should have confirmed it did not answer');
+    });
+
+    test('a latest version it cannot draw is dropped, not handed over',
+        () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      h.source.campaigns = [
+        gameCampaign(trigger: spin, type: GameballMessageType.unsupported),
+      ];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'selection never offers an unsupported type, and the '
+              'presenter refuses a game it has no surface for — so handing '
+              'one over would only be refused again on every frame');
+      expect(h.service.pendingCampaign, isNull);
+    });
+
+    test('a latest version whose artwork did not load is dropped', () async {
+      final h = await parked(
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+        'promo',
+      );
+
+      // The new session's sync warms artwork again, and this time it fails.
+      h.prefetcher.failing.add('msg_promo');
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'it would paint a hole where its image belongs and count an '
+              'impression for it, which is what passing it over at selection '
+              'prevents');
+    });
+
+    test('a game the latest sync still carries opens', () async {
+      final h = await parked(gameCampaign(trigger: spin), 'spin');
+
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, ['game_9645']);
+    });
+
+    test('a message past its expiry does not show either', () async {
+      final h = await parked(
+        campaign('promo',
+            trigger: const GameballCustomEventTrigger('promo'),
+            expiresAt: t0.add(const Duration(minutes: 1))),
+        'promo',
+      );
+
+      h.setNow(t0.add(const Duration(minutes: 2)));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'never display at or after expiresAt holds for a message '
+              'that waited, too');
+    });
+
+    test('a message the latest sync no longer carries does not show',
+        () async {
+      final h = await parked(
+        campaign('promo', trigger: const GameballCustomEventTrigger('promo')),
+        'promo',
+      );
+
+      h.source.campaigns = <InAppMessageCampaign>[];
+      await newSession(h, const Duration(minutes: 5));
+      closeWidget(h);
+
+      expect(h.presenter.shownMessageIds, isEmpty,
+          reason: 'each sync replaces what may be shown; a campaign it left '
+              'out was paused or archived');
     });
   });
 }

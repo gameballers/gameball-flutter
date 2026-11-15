@@ -224,6 +224,33 @@ void main() {
     expect(find.text('body text'), findsOneWidget);
   });
 
+  testWidgets('a game it has no surface for is refused, never left blocking',
+      (tester) async {
+    final key = await pumpHost(tester);
+    final presenter = OverlayPresenter(key,
+        widgetUrlBuilder: (openDetail) => 'https://widget.test/?$openDetail');
+    addTearDown(presenter.dismiss);
+
+    final shown = presenter.present(
+      message: const GameballInAppMessage(
+        id: 'game:9645',
+        type: GameballMessageType.slideup,
+        widget:
+            GameballWidgetContent(gameCampaignId: 9645, gameCampaignType: 'wheel'),
+      ),
+      onShown: () => fail('must not report shown'),
+      onButtonPressed: (_) {},
+      onMessagePressed: () {},
+      onDismissed: () {},
+    );
+
+    expect(shown, isFalse);
+    expect(presenter.isShowing, isFalse,
+        reason: 'only the modal and fullscreen layers report a game drawn; in '
+            'a slideup the overlay stayed up, invisible, and every later '
+            'message waited behind it for the rest of the session');
+  });
+
   group('the presenter picks a layer by type', () {
     testWidgets('a modal gets a blocking scrim', (tester) async {
       final key = GlobalKey<NavigatorState>();

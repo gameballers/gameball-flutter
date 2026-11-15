@@ -93,6 +93,20 @@ abstract final class ModalMetrics {
   /// Between buttons, and between wrapped rows of them.
   static const double buttonSpacing = 8;
 
+  /// Width divided by height for a reward-campaign card.
+  ///
+  /// Measured, not chosen. The widget sizes its wheel off the viewport width,
+  /// so a box much wider than this overflows: at 340x480 (0.71) the wheel is
+  /// fully contained, and at roughly 0.96 it clipped its own copy off the right
+  /// edge. Held a little under the measured limit for margin.
+  static const double widgetAspectRatio = 0.7;
+
+  /// The most of the screen a reward-campaign card may occupy vertically.
+  ///
+  /// The aspect bound alone would make the card as tall as the widest phone
+  /// allows, which on a small screen reaches the status bar.
+  static const double widgetMaxHeightFraction = 0.7;
+
   static const EdgeInsets buttonPadding =
       EdgeInsets.symmetric(horizontal: 20, vertical: 12);
 

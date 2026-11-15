@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/in_app_message.dart';
 import 'message_presenter.dart' show messageEntrance;
+import 'gameball_widget_view.dart';
 import 'message_view_metrics.dart';
 
 /// The fullscreen layout, covering both of its variants.
@@ -25,6 +26,10 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
     required this.onButtonPressed,
     required this.onClosePressed,
     required this.onMessagePressed,
+    this.widgetUrl,
+    this.onWidgetReady,
+    this.onWidgetFailed,
+    this.onWidgetEvent,
   });
 
   final GameballInAppMessage message;
@@ -34,6 +39,19 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
   /// Invoked when the surface itself is tapped. Only reachable when the campaign
   /// set a message-level action.
   final VoidCallback onMessagePressed;
+
+  /// The composed reward-campaign URL, for a message whose content is a widget.
+  final String? widgetUrl;
+
+  /// Fires when the widget has finished drawing. The layer is held invisible
+  /// until then, so this is also when the impression is counted.
+  final VoidCallback? onWidgetReady;
+
+  /// Fires when the widget never became ready.
+  final VoidCallback? onWidgetFailed;
+
+  /// What the widget posted on its event bridge, decoded.
+  final void Function(Map<String, dynamic> event)? onWidgetEvent;
 
   /// Whether to draw the full-bleed composition.
   ///
@@ -62,7 +80,9 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (_imageOnly)
+            if (message.isWidget)
+              _widget()
+            else if (_imageOnly)
               _fullBleedImage()
             else
               _stacked(context, theme, style),
@@ -71,6 +91,43 @@ class GameballInAppMessageFullscreen extends StatelessWidget {
               SafeArea(child: _closeButton(context, style)),
           ],
         ),
+      ),
+    );
+  }
+
+  /// The reward-campaign composition: the widget fills the screen.
+  ///
+  /// Inside a [SafeArea], like the stacked composition, so the widget's own
+  /// controls and footer are not under the notch or the home indicator. The
+  /// surface behind it still runs edge to edge — a fullscreen campaign is meant
+  /// to take over the screen, and insetting the colour as well would leave
+  /// letterbox bars the campaign never asked for.
+  ///
+  /// No aspect ratio here, unlike the modal. The modal shapes its card because a
+  /// card has a free choice of shape; the screen does not. A portrait phone is
+  /// around 0.46 wide-to-tall, comfortably inside the ratio at which the widget
+  /// starts clipping its own copy — landscape is the case that is not, and the
+  /// presenter's orientation gate is what holds a campaign back there.
+  Widget _widget() {
+    final url = widgetUrl;
+    if (url == null) {
+      // The presenter refuses to mount a widget message without a url, so this
+      // is unreachable in practice; failing visibly beats a blank screen.
+      onWidgetFailed?.call();
+      return const SizedBox.shrink();
+    }
+
+    return SafeArea(
+      child: GameballWidgetView(
+        key: const Key('gb_iam_fullscreen_widget'),
+        url: url,
+        onReady: () => onWidgetReady?.call(),
+        onFailed: () => onWidgetFailed?.call(),
+        onCloseRequested: onClosePressed,
+        onEvent: (raw) {
+          final event = decodeWidgetEvent(raw);
+          if (event != null) onWidgetEvent?.call(event);
+        },
       ),
     );
   }

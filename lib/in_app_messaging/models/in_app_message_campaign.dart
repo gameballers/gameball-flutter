@@ -1,3 +1,4 @@
+import 'campaign_key.dart';
 import 'in_app_message.dart';
 import 'message_trigger.dart';
 
@@ -83,6 +84,22 @@ class InAppMessageCampaign {
     return expiry != null && !now.isBefore(expiry);
   }
 
+  /// How this campaign is identified in display history.
+  ///
+  /// A game entry's [campaignId] is always 0, so its identity is the id of the
+  /// game it opens. Reading this rather than [campaignId] is what keeps the two
+  /// kinds from sharing cap state — challenge ids and message campaign ids are
+  /// separate sequences that overlap numerically.
+  CampaignKey get key {
+    final widget = message.widget;
+    return widget == null
+        ? CampaignKey.message(campaignId)
+        : CampaignKey.game(widget.gameCampaignId);
+  }
+
   /// What to call this campaign in a log line.
-  String get label => name == null ? '$campaignId' : '$campaignId ($name)';
+  ///
+  /// The [key], not [campaignId], which is 0 on every game and so names none
+  /// of them.
+  String get label => name == null ? '$key' : '$key ($name)';
 }

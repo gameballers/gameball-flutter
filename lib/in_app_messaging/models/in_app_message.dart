@@ -93,6 +93,37 @@ final class GameballNavigateAction extends GameballClickAction {
   final Map<String, Object>? arguments;
 }
 
+/// A reward campaign rendered as the message's own content.
+///
+/// The campaign **is** the content — there is no headline, body, image or
+/// button, because this is not a teaser that links to a game, it is the game.
+///
+/// Deliberately not a URL on the wire: one would have to carry the api key and
+/// the player id, making the payload both credential-bearing and
+/// customer-specific, and stale the moment either changed. The SDK composes the
+/// URL from state it already holds and the two fields here.
+///
+/// This is what lets a marketer trigger spin-and-win from a session start or a
+/// custom event without the host app calling `showProfile` with an openDetail.
+final class GameballWidgetContent {
+  const GameballWidgetContent({
+    required this.gameCampaignId,
+    required this.gameCampaignType,
+  });
+
+  /// The challenge to open.
+  ///
+  /// All local bookkeeping keys off this, never off the entry's `campaignId`,
+  /// which is always 0 on a game.
+  final int gameCampaignId;
+
+  /// Which game it is, as the open-details text: `wheel`, `quiz`, `scratch`…
+  final String gameCampaignType;
+
+  /// What the host widget is asked to open.
+  String get openDetail => 'details_${gameCampaignType}_$gameCampaignId';
+}
+
 /// Per-button colours. A null field means "use the host's theme".
 class GameballButtonStyle {
   const GameballButtonStyle(
@@ -188,6 +219,7 @@ class GameballInAppMessage {
     this.buttons = const <GameballMessageButton>[],
     this.extras = const <String, String>{},
     this.style = const GameballMessageStyle(),
+    this.widget,
   });
 
   final String id;
@@ -255,6 +287,17 @@ class GameballInAppMessage {
 
   final GameballMessageStyle style;
 
+  /// A reward campaign to render inside the message, instead of artwork and
+  /// copy. Null for every ordinary message.
+  ///
+  /// A message carrying this renders a live widget, so it is exempt from the
+  /// parser's "needs something to render" rule — its content arrives over the
+  /// network at display time rather than in the payload.
+  final GameballWidgetContent? widget;
+
+  /// Whether this message's content is a reward campaign rather than artwork.
+  bool get isWidget => widget != null;
+
   /// The same message with different text.
   ///
   /// Deliberately narrow rather than a general `copyWith`: personalisation is the
@@ -283,5 +326,6 @@ class GameballInAppMessage {
         buttons: buttons ?? this.buttons,
         extras: extras,
         style: style,
+        widget: widget,
       );
 }

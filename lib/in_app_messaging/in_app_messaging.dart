@@ -8,7 +8,11 @@ library;
 
 export 'iam_log.dart' show gameballInAppMessagingLogging;
 export 'in_app_messaging_service.dart'
-    show GameballBeforeDisplay, GameballDisplayDecision, GameballOnAction;
+    show
+        GameballBeforeDisplay,
+        GameballDisplayDecision,
+        GameballOnAction,
+        GameballOnGameEvent;
 export 'presentation/message_navigator.dart' show GameballOnNavigate;
 export 'models/in_app_message.dart'
     show
@@ -22,6 +26,7 @@ export 'models/in_app_message.dart'
         GameballMessageLayout,
         GameballMessageOrientation,
         GameballSlidePosition,
+        GameballWidgetContent,
         GameballNavigateAction,
         GameballOpenUrlAction,
         GameballRequestPushPermissionAction,
