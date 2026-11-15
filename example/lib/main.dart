@@ -91,6 +91,7 @@ class _MyHomePageState extends State<MyHomePage> {
         .platform("{your_platform}")
         .shop("{your_shop}")
         // .sessionToken("your-session-token") // Optional: Enable secure authentication (v3.1.0+)
+        // .widgetUrlPrefix("{your_widget_host}") // Optional: widget host for a non-production environment (v4.1.0+)
         .build();
 
     gameballApp.init(config);
@@ -134,6 +135,11 @@ class _MyHomePageState extends State<MyHomePage> {
             onAction: (message, button, action) => false,
             // Optional: route through go_router or another Navigator 2.0 router
             // onNavigate: (route, arguments) => router.push(route),
+            // Game campaigns (v4.1.0+) open over the app through this same call. Optional: see
+            // what a game campaign posts, most usefully that the customer played it
+            onGameEvent: (gameCampaignId, event) {
+              print('Game campaign $gameCampaignId posted: $event');
+            },
           );
           // On logout - dismisses any message, sends pending analytics and clears state:
           // gameballApp.stopInAppMessaging();
@@ -162,6 +168,24 @@ class _MyHomePageState extends State<MyHomePage> {
           // (e.g. FirebaseMessaging.onMessageOpenedApp) with the notification's data payload:
           // final isGameball = gameballApp.handlePushClick(message.data, callback: (reported, error) {
           //   print(error == null ? 'Click reported: $reported' : 'Click report failed: $error');
+          // });
+          // As of v4.1.0 a tap counts once, so calling it from both getInitialMessage and
+          // onMessageOpenedApp is safe.
+
+          // Influenced opens (v4.1.0+, Android) - let the SDK see Gameball pushes as they arrive.
+          // It works without init, so it is safe in firebase_messaging's background isolate.
+          // The background handler must be a top-level function:
+          // @pragma('vm:entry-point')
+          // Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+          //   await GameballApp.getInstance().handlePushReceived(
+          //     message.data,
+          //     sentTime: message.sentTime?.millisecondsSinceEpoch,
+          //   );
+          // }
+          // FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+          // FirebaseMessaging.onMessage.listen((message) {
+          //   gameballApp.handlePushReceived(message.data,
+          //       sentTime: message.sentTime?.millisecondsSinceEpoch);
           // });
 
           // Guest Mode Example (v3.1.1+) - Show widget without customer ID

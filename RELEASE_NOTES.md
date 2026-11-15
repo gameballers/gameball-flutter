@@ -4,149 +4,101 @@ This file contains detailed release notes for the latest version. For complete v
 
 ---
 
-## Latest Release: v4.0.0
+## Latest Release: v4.1.0
 
-**Release Date**: 2026-10-22
-**Version**: 4.0.0
-**Type**: Major Release
+**Release Date**: 2026-11-19
+**Version**: 4.1.0
+**Type**: Minor Release
 
 ---
 
-## 🎉 What's New
+## 📱 What's New
 
-v4.0.0 raises the minimum supported versions to **iOS 15.0** and **Android API 24 (Android 7.0)**, and adds **in-app messaging**: campaigns authored in the Gameball dashboard, displayed inside your app. It is opt-in — an app that upgrades without calling `startInAppMessaging` behaves exactly as it did on v3.3.1. No requests, no timers, no overlay and no stored state exist until you opt in.
+v4.1.0 brings **game campaigns** to in-app messaging, shows campaigns when **any of their conditions** match, and reports **influenced opens** of Gameball pushes on Android. There are no breaking changes.
 
-- **In-app messaging**: modal, slideup and fullscreen campaigns from the Gameball dashboard, shown inside your app
-- **Triggers**: session start, and custom events filtered on their metadata
-- **Purchase logging**: `logPurchase(...)` for purchase-triggered campaigns
-- **Host control**: `beforeDisplay`, `onAction`, `onNavigate` and the `onInAppMessage` stream
-- **Raised minimums**: iOS 15.0+ and Android API 24+ (Android 7.0)
+- **Game campaigns**: a spin the wheel, quiz or scratch and win opens itself over your app on its in-app messaging trigger
+- **Any of the conditions**: a campaign set to match any of its event conditions shows when one of them matches
+- **Influenced opens**: `handlePushReceived(payload, {sentTime})` reports app opens that a push led to without being tapped (Android)
+- **Push taps counted once**: `handlePushClick` reports to the new `push-engagement` endpoint, once per tap
+- **Widget host on the configuration**: `GameballConfig.widgetUrlPrefix` for the profile widget and game campaigns
+- **Game events**: `onGameEvent` on `startInAppMessaging` reports what a campaign posts
 
 ---
 
 ## 🚀 Key Features
 
-### 💬 Opting in
+### 🎡 Game campaigns
+
+A campaign the merchant set to open itself over your app arrives in the same sync as in-app messages and displays through the same overlay, so **there is nothing extra to integrate**:
 
 ```dart
-final navigatorKey = GlobalKey<NavigatorState>();
-
-MaterialApp(navigatorKey: navigatorKey, home: const HomeScreen());
-
 GameballApp.getInstance().startInAppMessaging(
-  customerId: 'customer-123',
+  customerId: "customer_123",
   navigatorKey: navigatorKey,
 );
 ```
 
-The navigator key is how the SDK draws above your routes, so it has to be the one your `MaterialApp` (or `CupertinoApp`) uses. Call `stopInAppMessaging()` on logout.
+The SDK opens the game itself and shows the card only once the game has finished drawing, as a centred card or fullscreen, with its own close button. Games follow the message frequency rules — the repeat setting and minimum interval, the cooldown between any two in-app displays, and quiet hours — and a game the customer has played isn't offered again until the next successful sync. A game is opened only from this session's sync, never from the offline cache, and reports no in-app messaging telemetry. `onGameEvent` reports what a campaign posts, most usefully that the customer played it.
 
-### 🖼️ Message types
+### 🔀 Any of the conditions
 
-**Modal** — a centred card over a dimmed background, with up to two buttons. Blocks the app until dismissed.
+A campaign whose metadata filters are joined by Any (`OR`) shows when at least one of them matches. Such campaigns used to be skipped.
 
-**Slideup** — a banner at the top or bottom edge. It does not block: the app stays usable underneath, it carries no buttons because the whole surface is the tap target, and it is dismissed by swiping toward its own edge.
+### 📣 Influenced opens
 
-**Fullscreen** — edge to edge, in one of two compositions. Either image over copy with the buttons below, or artwork filling the screen with the buttons floated over it. A fullscreen campaign can also insist on portrait or landscape, and waits rather than showing sideways copy nobody can read.
-
-### 🎯 Triggers
-
-**Session start** fires on launch, and again when the app returns to the foreground after more than the session timeout (30 seconds by default).
-
-**Custom events** match on the event name and, optionally, on the event's metadata:
+An influenced open is an app open that no tap caused, within 30 minutes of an untapped Gameball push arriving:
 
 ```dart
-GameballApp.getInstance().sendEvent(
-  EventBuilder()
-      .customerId('customer-123')
-      .eventName('add_to_cart')
-      .eventMetaData('productId', 'sku-001')
-      .build(),
-  (success, error) {},
-);
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await GameballApp.getInstance().handlePushReceived(
+    message.data,
+    sentTime: message.sentTime?.millisecondsSinceEpoch,
+  );
+}
+
+FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+FirebaseMessaging.onMessage.listen((message) {
+  GameballApp.getInstance().handlePushReceived(
+    message.data,
+    sentTime: message.sentTime?.millisecondsSinceEpoch,
+  );
+});
 ```
 
-A campaign targeting `add_to_cart` can filter on `productId`, using equality, ordering or contains comparisons. A purchase logged through `logPurchase` arrives as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are all available to filters — so "any purchase" and "a purchase over 100" are the same trigger, filtered differently.
+`handlePushReceived` works without `init`, so it runs in the background isolate. Influenced opens are reported on Android only: on iOS, Dart doesn't run for alert pushes that arrive in the background. Swipe-aways aren't reported.
 
-### 🚦 What controls whether a message actually shows
+### 👆 Push taps counted once
 
-Per-campaign frequency caps, which survive a restart. A minimum interval between any two displays, set by the backend rather than hardcoded. Campaign expiry. Priority order when more than one campaign matches. And a message that cannot be drawn right now — because your own Gameball widget is open, or another message is showing — waits instead of being lost.
+`handlePushClick(payload, {callback, sessionToken})` now reports to `push-engagement`, which replaces `push-click`, and counts a tap once per app run, so calling it from both `getInitialMessage` and `onMessageOpenedApp` is safe. Taps and influenced opens stay on v4.0 when a session token is set.
 
-### 📊 Analytics
+### 🌐 Widget host on the configuration
 
-Impressions, clicks and dismissals are reported automatically. A button tap is a click carrying the button's id. Events are batched rather than sent one at a time, and the buffer is written to device storage after every change, so an impression logged a second before a force-quit still arrives on the next launch.
+`GameballConfig.widgetUrlPrefix` sets the widget host once at `init`, for the profile widget and any campaign a message opens. A per-call `ShowProfileRequest.widgetUrlPrefix` still overrides it for one presentation.
 
-Artwork is loaded at sync rather than at display time, so an impression is only ever recorded for a message whose image the user could actually see.
+---
 
-### 🔤 Personalisation
+## 🐛 Fixes
 
-Campaign text can contain `{token}` placeholders. Just before a message with placeholders is shown, the SDK fetches the customer's current values and fills them in, so points balances and profile fields are current at the moment the message appears.
-
-It is bounded and never stops a message from showing: the fetch waits at most two seconds and is cached for a minute. If the values don't arrive — a timeout, no network, or an error — the placeholders are removed rather than shown as raw `{braces}`. A message with no placeholders skips the call entirely.
-
-> Requires `integrations/inapp-messages/variables` to be enabled for your account. Until then, placeholders are removed from the text.
-
-### 🛒 Purchase logging
-
-```dart
-GameballApp.getInstance().logPurchase(
-  customerId: 'customer-123',
-  productId: 'sku-001',
-  price: 49.99,
-  currency: 'USD',
-);
-```
-
-`logPurchase` sends a `purchase` event to Gameball with `productId`, `price`, `currency` and `quantity` as metadata, so purchase-triggered campaigns can filter on them.
-
-### 🖐️ Taking control
-
-```dart
-GameballApp.getInstance().startInAppMessaging(
-  customerId: 'customer-123',
-  navigatorKey: navigatorKey,
-  // Postpone during checkout rather than interrupting it.
-  beforeDisplay: (message) => isCheckingOut
-      ? GameballDisplayDecision.later
-      : GameballDisplayDecision.show,
-  // Handle the tap yourself; return false to let the SDK act.
-  onAction: (message, button, action) => false,
-  // Route through go_router instead of named routes.
-  onNavigate: (String route, Map<String, Object>? arguments) {
-    // e.g. router.push(route);
-  },
-);
-```
-
-`onInAppMessage` is a stream of every message the SDK selects, whatever the host then decides to do with it.
-
-### ⚠️ Availability
-
-In-app messaging needs the `integrations/inapp-messages` endpoints enabled for your account. Where they aren't, the SDK records the 404 in its debug log and stays silent — nothing surfaces to your app and nothing else is affected.
+- **Game end dates**: an end date the sync sends without a time zone is read as UTC; it used to be read as device-local time, so games ended early or late by the device's UTC offset
+- **Waiting messages**: a message waiting for its turn is rechecked before it shows, and dropped if it has passed its end date or the latest sync no longer carries it
 
 ---
 
 ## ⚠️ Breaking Changes
 
-**This is a major release.** Apps targeting older OS versions must raise their minimums before upgrading.
-
-- **iOS**: minimum raised from 12.0 to **15.0**
-- **Android**: minimum raised from API 21 (Android 5.0) to **API 24 (Android 7.0)**
-
-There are no changes to the public API — every v3.x call keeps its signature and behaviour, and in-app messaging does nothing until you call `startInAppMessaging`.
+None. Every v4.0.0 call keeps its signature and behaviour.
 
 ---
 
 ## 🔄 Changes
 
-- Raised the minimum supported iOS version to 15.0 and Android version to API 24 (Android 7.0)
-- Added in-app messaging: `startInAppMessaging`, `stopInAppMessaging`, `isInAppMessagingStarted` and the `onInAppMessage` stream
-- Added modal, slideup and fullscreen messages, triggered on session start or by custom events with metadata filters
-- Added `logPurchase(...)` to send purchase events that campaigns can target
-- Added `beforeDisplay`, `onAction` and `onNavigate` hooks to control display, taps and routing
-- Added automatic impression, click and dismissal analytics, kept on the device until sent
-- Added `gameballInAppMessagingLogging` to control in-app messaging debug logs
-- The package published to pub.dev now contains only the SDK sources
+- Added game campaigns to in-app messaging, and `onGameEvent` on `startInAppMessaging`
+- Added any-condition (OR) event triggers
+- Added `handlePushReceived(payload, {sentTime})` for influenced opens (Android)
+- Added `GameballConfig.widgetUrlPrefix`
+- Changed push tap reporting to the `push-engagement` endpoint, once per tap
+- Fixed game end dates sent without a time zone, and waiting messages that had expired
 
 ---
 
@@ -158,15 +110,16 @@ There are no changes to the public API — every v3.x call keeps its signature a
 - Dart 3.4.4+
 - Android API 24+ (Android 7.0)
 - iOS 15.0+
+- For influenced opens: firebase_messaging's `onBackgroundMessage` and `onMessage` handlers
 
 ---
 
 ## 📚 Migration Support
 
-Raise your app's `minSdk` to 24 and its iOS deployment target to 15.0. No Dart code changes are required — all v3.x calls work without modification. In-app messaging is opt-in; to adopt it, pass your `MaterialApp`'s navigator key to `startInAppMessaging` and call `stopInAppMessaging()` on logout.
+No code changes are required. To report influenced opens, call `handlePushReceived` from firebase_messaging's `onBackgroundMessage` handler and `FirebaseMessaging.onMessage`.
 
 ### Migration Resources
-- **[Migration Guide](MIGRATION.md#migration-guide-v3x--v400)**: Step-by-step migration instructions
+- **[Migration Guide](MIGRATION.md#migration-guide-v40x--v410)**: Step-by-step migration instructions
 - **[README](README.md)**: Complete usage documentation with examples
 - **[Changelog](CHANGELOG.md)**: Detailed list of all changes
 
@@ -182,14 +135,14 @@ Raise your app's `minSdk` to 24 and its iOS deployment target to 15.0. No Dart c
 
 ```yaml
 dependencies:
-  gameball_sdk: ^4.0.0
+  gameball_sdk: ^4.1.0
 ```
 
 ---
 
-## Previous Release: v3.3.1
+## Previous Release: v4.0.0
 
-**Release Date**: 2026-10-19
-**Type**: Patch Release
+**Release Date**: 2026-10-22
+**Type**: Major Release
 
-Fixed the widget close button direction, `setLanguage(lang)` being outranked by an earlier preferred language, widget URL encoding, and `initializeCustomer`/`sendEvent` callback reporting; unsupported language codes now fall back to `en` and customers are always initialized as registered. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+Raised the minimum supported versions to iOS 15.0 and Android API 24 (Android 7.0), and added in-app messaging: modal, slideup and fullscreen campaigns from the Gameball dashboard, triggered on session start or by custom events, with `logPurchase(...)`, display hooks, the `onInAppMessage` stream and automatic analytics. See [CHANGELOG.md](CHANGELOG.md) for the full history.

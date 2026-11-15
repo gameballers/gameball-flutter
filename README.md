@@ -1,6 +1,6 @@
 # Gameball Flutter SDK
 
-[![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
+[![Version](https://img.shields.io/badge/version-4.1.0-blue.svg)](https://github.com/gameballers/gameball-flutter)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Flutter](https://img.shields.io/badge/Flutter-1.17%2B-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.4.4%2B-blue.svg)](https://dart.dev)
@@ -12,7 +12,8 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 - 🎯 **Customer Management** - Initialize and manage customer profiles with builder pattern
 - 📊 **Event Tracking** - Track user actions and behaviors with flexible metadata
 - 🎁 **Profile Widget** - Display customer loyalty information in customizable UI
-- 💬 **In-App Messaging** - Show dashboard-authored campaigns in your app, opt-in and additive
+- 💬 **In-App Messaging** - Show dashboard-authored campaigns and games in your app, opt-in and additive
+- 📣 **Push Engagement** - Taps and influenced opens of Gameball pushes
 - 🔧 **Modern Architecture** - Built with Flutter best practices and null safety
 - 🛡️ **Type Safety** - Compile-time validation with Dart's type system
 - ⚡ **Async/Await Ready** - Modern async architecture with proper error handling
@@ -37,7 +38,7 @@ Gameball Flutter SDK allows you to integrate customer engagement and loyalty fea
 ### pubspec.yaml
 ```yaml
 dependencies:
-  gameball_sdk: ^4.0.0
+  gameball_sdk: ^4.1.0
 ```
 
 ### Flutter CLI
@@ -63,6 +64,23 @@ final config = GameballConfigBuilder()
 
 gameballApp.init(config);
 ```
+
+### Pointing at a non-production environment
+
+`widgetUrlPrefix` sets the widget host for everything the SDK opens in a webview — the profile widget and any campaign an in-app message opens. Set it once at `init`, so the two cannot disagree:
+
+```dart
+GameballApp.getInstance().init(
+  GameballConfigBuilder()
+      .apiKey("YOUR_API_KEY")
+      .lang("en")
+      .apiPrefix("https://api.alpha.gameball.app")
+      .widgetUrlPrefix("https://m.gameball.app/alpha")
+      .build(),
+);
+```
+
+Omit it for production. `ShowProfileRequest.widgetUrlPrefix` still overrides it for a single presentation.
 
 ### 2. Initialize Customer
 ```dart
@@ -269,6 +287,41 @@ FirebaseMessaging.onMessageOpenedApp.listen((message) {
 
 It returns `true` when the notification is a Gameball one; the tap is reported to Gameball when the payload carries a click token. An optional `sessionToken` parameter overrides the global session token for this request.
 
+As of v4.1.0, a tap is counted once per app run (by `gbClickToken`, else the message id), so calling `handlePushClick` from both `getInitialMessage` and `onMessageOpenedApp` is safe: a repeat returns `true` and reports nothing.
+
+### Influenced Opens (v4.1.0+)
+
+An influenced open is an app open that no tap caused, within 30 minutes of an untapped Gameball push arriving. To report them, let the SDK see Gameball pushes as they arrive, from both firebase_messaging handlers:
+
+```dart
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Await it: the push is saved before the future completes
+  await GameballApp.getInstance().handlePushReceived(
+    message.data,
+    sentTime: message.sentTime?.millisecondsSinceEpoch,
+  );
+}
+
+// During app start-up, after Firebase.initializeApp()
+FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+FirebaseMessaging.onMessage.listen((message) {
+  GameballApp.getInstance().handlePushReceived(
+    message.data,
+    sentTime: message.sentTime?.millisecondsSinceEpoch,
+  );
+});
+```
+
+| | |
+|---|---|
+| **Without `init`** | `handlePushReceived` only needs storage, so it works in the background isolate before `init` has run. It returns `true` for a Gameball push and ignores any other. It never throws |
+| **App opens** | From `init` on, the SDK watches the app lifecycle: the first open in a process is cold, and a return after more than 30 seconds away is warm |
+| **Counting** | The most recent untapped push that arrived within 30 minutes of an open is credited, decided about 10 seconds after the open so a late tap still wins. A tapped push, and the open its tap causes, never count. A switch to another customer clears the saved pushes |
+| **Reporting** | Taps and influenced opens are each sent once, with no retry, to the v4.0 endpoint even when a session token is set. A push without a click token can't be reported |
+| **Platforms** | Android only. On iOS, Dart doesn't run for alert pushes that arrive in the background, so influenced opens aren't reported there. Swipe-aways aren't reported on either platform |
+| **Diagnostics** | Each signal is logged as `GameballApp engagement push_received`, `push_click`, `app_open` or `influenced_open` |
+
 ## In-App Messaging (v4.0.0+)
 
 Displays campaigns you author in the Gameball dashboard — modals, slideup banners and fullscreen posters — inside your app.
@@ -314,9 +367,38 @@ GameballApp.getInstance().sendEvent(
 );
 ```
 
-A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
+A campaign on `add_to_cart` can require `productId` to equal `sku-001`, or `price` to be above a number, and so on. When a campaign has several conditions, the dashboard sets whether all of them must match or any one of them is enough. A purchase logged through `logPurchase` reaches campaigns as an event named `purchase` whose `productId`, `price`, `currency` and `quantity` are available to filters.
 
 Whether a matching campaign actually appears also depends on its frequency cap, the minimum interval between any two displays, its expiry and its priority — all set in the dashboard.
+
+### Game campaigns (v4.1.0+)
+
+A campaign the merchant set to open itself over your app — a spin the wheel, a quiz, a scratch and win. It arrives in the same sync as in-app messages and displays through the same overlay, so **there is nothing extra to integrate**: if you already call `startInAppMessaging`, game campaigns work.
+
+The campaign *is* the content. There is no headline or button to style — the SDK opens the game itself in a card over your app, and shows the card only once the game has finished drawing, so your customer never sees a loading state.
+
+A game campaign can be authored as a modal — a centred card over the screen the customer was on — or fullscreen, where it fills the screen inside the safe area so nothing sits under the notch or the home indicator. Either way the SDK draws its own close button over the game, and a modal game also closes when the customer taps outside it.
+
+**When a game appears** follows the same rules as a message. It fires on session start or on a custom event, with the same metadata conditions — all of them, or any one. It shows as often as its repeat setting and minimum interval allow, never sooner than the account's cooldown after any other in-app display, and never during quiet hours. It opens as soon as its trigger fires: there is no delay and no dismissal limit.
+
+Two rules are specific to games, because a game carries no content of its own and Gameball decides whether the customer may still play it:
+
+- **After a play**, that game is not offered again until the next successful sync — the next session start — when Gameball rechecks whether the customer can play again.
+- **Only a live sync opens a game.** A game is never opened from the offline cache, nor from the last session's campaigns when this session's sync failed. One waiting for its turn, behind another message or the Gameball widget, is rechecked before it opens and dropped if it has ended or the latest sync no longer carries it.
+
+One limit in this release: **screen triggers do not fire on mobile.** Use a session-start or custom-event trigger instead. A screen-triggered campaign is skipped with a `[GameballIAM]` log naming it, so one that does not appear can be diagnosed from the console.
+
+Game campaigns report no in-app messaging telemetry — engagement is recorded through the normal challenge flow when the customer plays. To be told when that happens:
+
+```dart
+GameballApp.getInstance().startInAppMessaging(
+  customerId: "customer_123",
+  navigatorKey: navigatorKey,
+  onGameEvent: (gameCampaignId, event) {
+    debugPrint("campaign $gameCampaignId reported $event");
+  },
+);
+```
 
 ### Controlling display
 
@@ -369,7 +451,8 @@ The SDK provides the following public methods:
 - `showProfile(context, request, {sessionToken})` - Show profile widget with ShowProfileRequest
 - `hideProfile()` - Dismiss the currently shown profile widget (no-op when nothing is shown)
 - `setLanguage(lang)` - Change the SDK's global language on demand without re-calling `init`
-- `handlePushClick(payload, {callback, sessionToken})` - Report a tap on a Gameball push notification for click tracking
+- `handlePushClick(payload, {callback, sessionToken})` - Report a tap on a Gameball push notification for click tracking; a tap counts once (v4.1.0+)
+- `handlePushReceived(payload, {sentTime})` - Save a Gameball push as it arrives, for influenced opens; works without `init` (v4.1.0+)
 - `logPurchase(...)` - Report a purchase, which in-app messaging campaigns can target and filter on
 - `startInAppMessaging(customerId:, navigatorKey:, ...)` - Opt in to in-app messaging
 - `stopInAppMessaging()` - Stop it and clear state; call on logout
@@ -437,8 +520,9 @@ Configuration object for initializing the Gameball SDK.
 | `lang` | String | ✅ | Language code (e.g., "en", "ar") |
 | `platform` | String | ❌ | Platform identifier |
 | `shop` | String | ❌ | Shop identifier |
-| `sessionToken` | String | ❌ | Session Token for secure authentication (enables automatic v4.1 endpoint routing) |
+| `sessionToken` | String | ❌ | Session Token for secure authentication (enables automatic v4.1 endpoint routing; push engagement stays on v4.0) |
 | `apiPrefix` | String | ❌ | Custom API prefix |
+| `widgetUrlPrefix` | String | ❌ | Widget host, for a non-production environment. Applies to the profile widget and to any campaign an in-app message opens; a per-call `ShowProfileRequest.widgetUrlPrefix` still overrides it (v4.1.0+) |
 
 **Validation Rules:**
 - `apiKey` cannot be null or empty
@@ -451,6 +535,7 @@ Configuration object for initializing the Gameball SDK.
 - `shop(String shop)` - Sets the shop identifier
 - `sessionToken(String sessionToken)` - Sets Session Token for secure authentication
 - `apiPrefix(String apiPrefix)` - Sets custom API prefix
+- `widgetUrlPrefix(String widgetUrlPrefix)` - Sets the widget host (v4.1.0+)
 
 **Example:**
 ```dart
@@ -749,6 +834,8 @@ final request = InitializeCustomerRequestBuilder()
     .build();
 ```
 
+To count taps on Gameball pushes, see [Push Click Tracking](#push-click-tracking-v330); to report influenced opens, see [Influenced Opens](#influenced-opens-v410).
+
 ### Error Handling
 ```dart
 try {
@@ -794,6 +881,8 @@ Enable Flutter's debug logging to see detailed SDK operation logs:
 ```dart
 flutter run --verbose
 ```
+
+Push engagement signals are logged as `GameballApp engagement <name> key=value ...` (v4.1.0+).
 
 In-app messaging logs why a campaign was shown or skipped. These logs are on in debug builds and off in release builds; to turn them on in a release build while reproducing an issue:
 ```dart
