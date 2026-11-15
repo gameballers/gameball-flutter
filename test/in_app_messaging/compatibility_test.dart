@@ -67,7 +67,8 @@ void main() {
 
       expect(escaped, isEmpty,
           reason: 'a failed send must reach the callback, not escape the zone');
-      expect(reportedSuccess, isFalse);
+      // A failure reports no success (the SDK passes null since 0b611c3) and hands over the error
+      expect(reportedSuccess, isNot(isTrue));
       expect(reportedError.toString(), contains('Failed to send event'));
       expect(app().isInAppMessagingStarted, isFalse,
           reason: 'the additive hook must never start the module');
