@@ -1,6 +1,6 @@
 # Gameball Flutter SDK Example
 
-This is a demo application showcasing the Gameball Flutter SDK v4.0.0 with builder pattern architecture.
+This is a demo application showcasing the Gameball Flutter SDK v4.1.0 with builder pattern architecture.
 
 ## Features Demonstrated
 
@@ -14,6 +14,8 @@ This is a demo application showcasing the Gameball Flutter SDK v4.0.0 with build
 - **Push Click Tracking** - report taps on Gameball push notifications (v3.3.0+)
 - **In-App Messaging** - display dashboard campaigns with `startInAppMessaging`, observe them on `onInAppMessage` and stop on logout (v4.0.0+)
 - **Purchase Logging** - send purchase events with `logPurchase` for purchase-triggered campaigns (v4.0.0+)
+- **Game Campaigns** - games open over the app through `startInAppMessaging`; `onGameEvent` reports what they post (v4.1.0+)
+- **Influenced Opens** - `handlePushReceived` from firebase_messaging's handlers, shown commented in `main.dart` (v4.1.0+, Android)
 - **Session Token Authentication** (optional, v3.1.0+)
 - **Push Notifications** setup (Firebase & Huawei)
 
