@@ -530,6 +530,15 @@ void main() {
       expect(campaign.expiresAt!.isUtc, isTrue);
     });
 
+    test('reads a timestamp without a zone as UTC, not device time', () {
+      // A game's end date arrives like this. Read as device time, the game
+      // ended early (or late) by the device's UTC offset.
+      final campaign =
+          one(minimal(extras: '"expiresAt": "2026-11-04T13:42:00",'))!;
+
+      expect(campaign.expiresAt, DateTime.utc(2026, 11, 4, 13, 42));
+    });
+
     test('normalises a zoned timestamp to UTC', () {
       final campaign =
           one(minimal(extras: '"expiresAt": "2026-09-30T23:59:59+02:00",'))!;

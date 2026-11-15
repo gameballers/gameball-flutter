@@ -715,11 +715,20 @@ List<GameballMessageButton> _parseButtons(
   return buttons;
 }
 
+/// A date and time that ends without a zone designator: "2026-11-04T13:42:00".
+final RegExp _timeWithoutZone = RegExp(r'T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$');
+
 /// Parses an ISO-8601 instant, normalised to UTC.
+///
+/// The sync's stamps are UTC. A game's end date arrives without a zone
+/// designator, and [DateTime.tryParse] reads that as device-local time, which
+/// ended games early (or late) by the device's UTC offset. It is read as UTC, as
+/// Android reads it.
 DateTime? _parseUtcTimestamp(Object? value, String label) {
   final raw = _asString(value);
   if (raw == null || raw.isEmpty) return null;
-  final parsed = DateTime.tryParse(raw);
+  final parsed =
+      DateTime.tryParse(_timeWithoutZone.hasMatch(raw) ? '${raw}Z' : raw);
   if (parsed == null) {
     iamLog('campaign $label: ignoring unparseable timestamp "$raw"');
     return null;
