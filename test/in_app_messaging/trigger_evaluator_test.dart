@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gameball_sdk/in_app_messaging/models/campaign_key.dart';
 import 'package:gameball_sdk/in_app_messaging/evaluation/frequency_cap.dart';
 import 'package:gameball_sdk/in_app_messaging/evaluation/trigger_evaluator.dart';
 import 'package:gameball_sdk/in_app_messaging/models/in_app_message.dart';
@@ -51,7 +52,7 @@ const CapState emptyCaps = CapState();
 CapState shown(List<String> labels, {DateTime? at, bool withCooldown = false}) {
   final when = at ?? t0;
   return CapState(
-    lastDisplayByCampaign: {for (final l in labels) idFor(l): when},
+    lastDisplayByCampaign: {for (final l in labels) CampaignKey.message(idFor(l)): when},
     lastDisplayAt: withCooldown ? when : null,
   );
 }
@@ -361,7 +362,7 @@ void main() {
           repeatable: true, minInterval: const Duration(seconds: 5));
       // Another campaign displayed much more recently.
       final history = CapState(
-        lastDisplayByCampaign: {idFor('quick'): t0},
+        lastDisplayByCampaign: {CampaignKey.message(idFor('quick')): t0},
         lastDisplayAt: t0.add(const Duration(minutes: 10)),
       );
 

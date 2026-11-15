@@ -10,6 +10,7 @@ import 'evaluation/frequency_cap.dart';
 import 'evaluation/trigger_evaluator.dart';
 import 'iam_log.dart';
 import 'models/gameball_audience.dart';
+import 'models/campaign_key.dart';
 import 'models/in_app_message.dart';
 import 'models/in_app_message_campaign.dart';
 import 'models/message_trigger.dart';
@@ -59,6 +60,16 @@ typedef PushPermissionRequester = Future<bool> Function();
 ///
 /// Return false to take over the action entirely — useful when the host needs
 /// to route a click through its own analytics or navigation stack.
+/// A game campaign reported something — most usefully that it was played.
+///
+/// [gameCampaignId] is the challenge the event came from. [event] is whatever
+/// the widget posted, decoded; the SDK does not interpret its shape, because
+/// the payload is the widget's contract with the merchant, not with this SDK.
+typedef GameballOnGameEvent = void Function(
+  int gameCampaignId,
+  Map<String, dynamic> event,
+);
+
 typedef GameballOnAction = bool Function(
   GameballInAppMessage message,
   GameballMessageButton? button,
@@ -125,6 +136,13 @@ const Duration defaultArtworkRetryInterval = Duration(seconds: 30);
 /// too tight on a real cold start — the platform channel is at its slowest
 /// exactly when the first session-start message is being decided.
 const Duration defaultHistoryTimeout = Duration(seconds: 5);
+
+/// The `type` a game's widget posts once the customer has played it.
+///
+/// Matched on the type alone. The payload's `campaignType` is the widget's own
+/// name for the game (`spinTheWheel`), not the sync's (`wheel`), so it cannot
+/// identify the entry — the game that posted it is the one on screen.
+const String _gameCompletedEvent = 'gameCompleted';
 
 /// Wires fetching, evaluation, deferral, display and analytics together.
 ///
@@ -211,6 +229,7 @@ class InAppMessagingService {
   GameballAudience? _audience;
   GameballBeforeDisplay? _beforeDisplay;
   GameballOnAction? _onAction;
+  GameballOnGameEvent? _onGameEvent;
   List<InAppMessageCampaign> _campaigns = const <InAppMessageCampaign>[];
 
   /// When artwork was last attempted, so a failure is not cached for the whole
@@ -225,7 +244,27 @@ class InAppMessagingService {
   /// Held beside [_campaigns] rather than filtering them, so the list stays a
   /// faithful record of what the backend sent and the diagnostics can say which
   /// campaign was passed over and why.
-  Set<int> _artworkReady = const <int>{};
+  Set<CampaignKey> _artworkReady = const <CampaignKey>{};
+
+  /// Whether the held campaigns were not confirmed by this session's sync:
+  /// read from the cache, or kept from an earlier session because the re-sync
+  /// failed.
+  ///
+  /// Only games care. A message carries its own content, so an old one is still
+  /// correct; a game carries a pointer and fetches its content live, so an
+  /// unconfirmed entry is a promise this SDK cannot keep — the campaign may have
+  /// ended, and the widget would answer "this campaign is not available" to a
+  /// customer who never asked for it.
+  bool _campaignsUnconfirmed = false;
+
+  /// Games the customer finished playing since the last successful sync.
+  ///
+  /// Not offered again until the next one. Whether the customer may play again
+  /// is the server's call — it rechecks eligibility at every sync, and a game in
+  /// the list is one it has said is playable now — so before that answer the
+  /// SDK would be guessing, and a wrong guess opens a game that says it cannot
+  /// be played.
+  final Set<CampaignKey> _playedSinceSync = <CampaignKey>{};
 
   /// Minimum gap between any two displays, as the last sync reported it.
   Duration _cooldown = defaultDisplayCooldown;
@@ -290,6 +329,7 @@ class InAppMessagingService {
     required String customerId,
     GameballBeforeDisplay? beforeDisplay,
     GameballOnAction? onAction,
+    GameballOnGameEvent? onGameEvent,
   }) async {
     final current = _audience;
     if (current is CustomerAudience && current.customerId == customerId) {
@@ -299,6 +339,7 @@ class InAppMessagingService {
 
     _beforeDisplay = beforeDisplay;
     _onAction = onAction;
+    _onGameEvent = onGameEvent;
     _resetFor(CustomerAudience(customerId));
     await _syncAndEvaluateSessionStart(loadPersisted: true);
   }
@@ -311,7 +352,8 @@ class InAppMessagingService {
     _floorRetry?.cancel();
     _floorRetry = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _artworkReady = const <int>{};
+    _artworkReady = const <CampaignKey>{};
+    _playedSinceSync.clear();
     _presentationInFlight = false;
     _variables.clear();
     _audience = null;
@@ -445,8 +487,9 @@ class InAppMessagingService {
     _floorRetry?.cancel();
     _floorRetry = null;
     _campaigns = const <InAppMessageCampaign>[];
-    _artworkReady = const <int>{};
+    _artworkReady = const <CampaignKey>{};
     _artworkCheckedAt = null;
+    _playedSinceSync.clear();
     _quietHours = null;
     _presentationInFlight = false;
     _variables.clear();
@@ -534,6 +577,10 @@ class InAppMessagingService {
       _cooldown = result.cooldown;
       _quietHours = result.quietHours;
       synced = true;
+      _campaignsUnconfirmed = false;
+      // The server has rechecked every game it sent, played or not, so the
+      // ones held back since the last sync are its call again.
+      _playedSinceSync.clear();
       iamLog('synced ${_campaigns.length} campaign(s), '
           'cooldown ${_cooldown.inSeconds}s');
 
@@ -546,13 +593,22 @@ class InAppMessagingService {
     }
 
     final cached = await persisted;
-    if (!synced && cached != null) {
-      _campaigns = cached.campaigns;
-      _cooldown = cached.cooldown;
-      // Taken from the cache too. The window is on the payload, so a failed
-      // sync must not become a way to message somebody at 3am.
-      _quietHours = cached.quietHours;
-      iamLog('falling back to ${_campaigns.length} cached campaign(s)');
+    if (!synced) {
+      // Whatever is held from here on — the cache, or the last session's set
+      // when this one's sync failed — was not confirmed by this session's
+      // sync. Messages may still show from it; games may not.
+      _campaignsUnconfirmed = true;
+      if (cached != null) {
+        _campaigns = cached.campaigns;
+        _cooldown = cached.cooldown;
+        // Taken from the cache too. The window is on the payload, so a failed
+        // sync must not become a way to message somebody at 3am.
+        _quietHours = cached.quietHours;
+        iamLog('falling back to ${_campaigns.length} cached campaign(s)');
+      } else if (_campaigns.isNotEmpty) {
+        iamLog('keeping the ${_campaigns.length} campaign(s) from the last '
+            'sync; games among them stay closed until a sync confirms them');
+      }
     }
 
     await _prefetchArtwork();
@@ -595,7 +651,7 @@ class InAppMessagingService {
     final campaigns = _campaigns;
     _artworkCheckedAt = _clock();
     if (campaigns.isEmpty) {
-      _artworkReady = const <int>{};
+      _artworkReady = const <CampaignKey>{};
       return;
     }
 
@@ -604,9 +660,9 @@ class InAppMessagingService {
     // honest cost of the set.
     final ready = await Future.wait(campaigns.map(_isArtworkReady));
 
-    _artworkReady = <int>{
+    _artworkReady = <CampaignKey>{
       for (var i = 0; i < campaigns.length; i++)
-        if (ready[i]) campaigns[i].campaignId,
+        if (ready[i]) campaigns[i].key,
     };
 
     // Logged only when it actually cost something. This sits on the path to the
@@ -626,11 +682,11 @@ class InAppMessagingService {
           .prefetch(campaign.message)
           .timeout(prefetchTimeout);
     } on TimeoutException {
-      iamLog('campaign "${campaign.campaignId}" artwork did not load within '
+      iamLog('campaign ${campaign.key} artwork did not load within '
           '${prefetchTimeout.inMilliseconds}ms');
       return false;
     } catch (error) {
-      iamLog('campaign "${campaign.campaignId}" artwork failed ($error)');
+      iamLog('campaign ${campaign.key} artwork failed ($error)');
       return false;
     }
   }
@@ -656,13 +712,13 @@ class InAppMessagingService {
   Future<void> _refreshArtwork(List<InAppMessageCampaign> notReady) async {
     try {
       final ready = await Future.wait(notReady.map(_isArtworkReady));
-      final recovered = <int>{
+      final recovered = <CampaignKey>{
         for (var i = 0; i < notReady.length; i++)
-          if (ready[i]) notReady[i].campaignId,
+          if (ready[i]) notReady[i].key,
       };
       if (recovered.isEmpty) return;
 
-      _artworkReady = <int>{..._artworkReady, ...recovered};
+      _artworkReady = <CampaignKey>{..._artworkReady, ...recovered};
       iamLog('artwork for ${recovered.length} campaign(s) loaded on retry; '
           'they can display again for the rest of this session');
     } finally {
@@ -682,12 +738,21 @@ class InAppMessagingService {
     final displayable = <InAppMessageCampaign>[];
     final notReady = <InAppMessageCampaign>[];
     for (final candidate in _campaigns) {
-      if (_artworkReady.contains(candidate.campaignId)) {
-        displayable.add(candidate);
-      } else {
+      final held = _gameHeldBack(candidate);
+      // A game has no artwork to wait for. The ready set is only filled once the
+      // whole sync's warm-up has finished, so without this a trigger in the
+      // seconds after a sync passed every game over as "not ready" and lost it.
+      if (!candidate.message.isWidget &&
+          !_artworkReady.contains(candidate.key)) {
         notReady.add(candidate);
-        iamLog('campaign "${candidate.campaignId}" passed over: artwork not '
+        iamLog('campaign ${candidate.key} passed over: artwork not '
             'ready');
+      } else if (held != null) {
+        // Not "not ready" — it will never be ready from here. Dropped rather
+        // than deferred: the next live sync is what makes it openable again.
+        iamLog('campaign ${candidate.key} skipped: $held');
+      } else {
+        displayable.add(candidate);
       }
     }
 
@@ -714,7 +779,7 @@ class InAppMessagingService {
 
     switch (_decide(campaign.message)) {
       case GameballDisplayDecision.discard:
-        iamLog('campaign "${campaign.campaignId}" discarded by beforeDisplay');
+        iamLog('campaign ${campaign.key} discarded by beforeDisplay');
       case GameballDisplayDecision.later:
         _defer(campaign, 'the host asked to display it later');
       case GameballDisplayDecision.show:
@@ -744,8 +809,10 @@ class InAppMessagingService {
 
     final runnerUp = selectCampaign(
       occurrence: occurrence,
+      // By key, not campaignId: every game arrives with campaignId 0, so the
+      // bare number would rule out every other game along with the winner.
       campaigns: displayable
-          .where((candidate) => candidate.campaignId != winner.campaignId)
+          .where((candidate) => candidate.key != winner.key)
           .toList(growable: false),
       capState: capBefore,
       now: _clock(),
@@ -754,7 +821,7 @@ class InAppMessagingService {
     );
     if (runnerUp == null) return;
 
-    _defer(runnerUp, 'campaign "${winner.campaignId}" took this trigger first');
+    _defer(runnerUp, 'campaign ${winner.key} took this trigger first');
   }
 
   GameballDisplayDecision _decide(GameballInAppMessage message) {
@@ -808,11 +875,11 @@ class InAppMessagingService {
         message = substituteInto(message, values);
       }
     } on TimeoutException {
-      iamLog('personalisation for campaign "${campaign.campaignId}" did not '
+      iamLog('personalisation for campaign ${campaign.key} did not '
           'arrive within ${variableTimeout.inMilliseconds}ms; displaying the '
           'text from the last sync');
     } catch (error) {
-      iamLog('personalisation for campaign "${campaign.campaignId}" failed '
+      iamLog('personalisation for campaign ${campaign.key} failed '
           '($error); displaying the text from the last sync');
     } finally {
       _presentationInFlight = false;
@@ -827,7 +894,7 @@ class InAppMessagingService {
     // Re-checked rather than trusted: the screen can change during the await,
     // and the host can log out.
     if (!isStarted) {
-      iamLog('campaign "${campaign.campaignId}" abandoned: messaging stopped '
+      iamLog('campaign ${campaign.key} abandoned: messaging stopped '
           'while its personalisation was resolving');
       return;
     }
@@ -861,7 +928,7 @@ class InAppMessagingService {
         shown = true;
         // Recorded at impression, never at selection, so a deferred or
         // suppressed message does not burn its slot.
-        _cap.recordDisplay(campaign.campaignId, _clock());
+        _cap.recordDisplay(campaign.key, _clock());
         _logEvent(campaign, GameballMessageEventType.impression);
       },
       onButtonPressed: (button) {
@@ -884,6 +951,24 @@ class InAppMessagingService {
         _logEvent(campaign, GameballMessageEventType.click,
             url: _urlOf(action));
         _act(campaign.message, null, action);
+      },
+      onWidgetEvent: (event) {
+        final widget = campaign.message.widget;
+        if (widget == null) return;
+        // Logged either way. This is the only visibility into whether the widget
+        // talks to us at all, which the dismissal counter turns on.
+        iamLog('campaign ${campaign.key} reported $event');
+        if (event['type'] == _gameCompletedEvent) {
+          _playedSinceSync.add(campaign.key);
+          iamLog('campaign ${campaign.key} was played; it is not offered '
+              'again until the next sync rechecks it');
+        }
+        try {
+          _onGameEvent?.call(widget.gameCampaignId, event);
+        } catch (error) {
+          // A throwing host callback must not escape into presentation.
+          iamLog('onGameEvent threw ($error)');
+        }
       },
       onDismissed: () {
         // Without this event "shown and ignored" would be invisible in
@@ -911,12 +996,11 @@ class InAppMessagingService {
 
   void _defer(InAppMessageCampaign campaign, String reason) {
     final displaced = _pending;
-    if (displaced != null && displaced.campaignId != campaign.campaignId) {
-      iamLog(
-          'pending campaign "${displaced.campaignId}" displaced by "${campaign.campaignId}"');
+    if (displaced != null && displaced.key != campaign.key) {
+      iamLog('pending campaign ${displaced.key} displaced by ${campaign.key}');
     }
     _pending = campaign;
-    iamLog('campaign "${campaign.campaignId}" deferred: $reason');
+    iamLog('campaign ${campaign.key} deferred: $reason');
   }
 
   /// Builds and records one analytics event for [campaign].
@@ -933,6 +1017,13 @@ class InAppMessagingService {
     // A dashboard test send displays normally and reports nothing, so a
     // marketer's testing never reaches campaign statistics.
     if (campaign.isTest) return;
+
+    // A game campaign is not a message campaign. Engagement is recorded through
+    // the challenge flow when the customer plays it, and an event sent here
+    // would attribute against a campaign id that is not a message — campaignId
+    // is 0 on every game entry. The display history is still recorded; only the
+    // reporting stops.
+    if (campaign.message.isWidget) return;
 
     _analytics.log(GameballMessageEvent(
       type: type,
@@ -951,9 +1042,46 @@ class InAppMessagingService {
       action is GameballOpenUrlAction ? action.url : null;
 
   void _retryPending() {
-    final campaign = _pending;
-    if (campaign == null) return;
+    final waiting = _pending;
+    if (waiting == null) return;
     _pending = null;
+
+    // Judged as the latest sync describes it, not as it was when parked. Each
+    // sync replaces what may be shown, so one that no longer carries the
+    // campaign has ended it or ruled this customer out of it.
+    final campaign = _latestVersionOf(waiting);
+    if (campaign == null) {
+      iamLog('pending campaign ${waiting.key} dropped: the latest '
+          'sync no longer carries it');
+      return;
+    }
+    // Checked at selection, which for a campaign that waited was a while ago.
+    if (campaign.hasExpiredAt(_clock())) {
+      iamLog('pending campaign ${campaign.key} dropped: it expired '
+          'while it waited');
+      return;
+    }
+    // The latest version is what will be drawn, so it has to pass what made
+    // the parked one drawable: a type this SDK renders, and artwork that has
+    // loaded. Neither is a given after a sync that edited the campaign.
+    if (campaign.message.type == GameballMessageType.unsupported) {
+      iamLog('pending campaign ${campaign.key} dropped: the latest sync gives '
+          'it a type this SDK version does not render');
+      return;
+    }
+    if (!campaign.message.isWidget && !_artworkReady.contains(campaign.key)) {
+      iamLog('pending campaign ${campaign.key} dropped: its artwork from the '
+          'latest sync is not ready');
+      return;
+    }
+    // The same holds that keep a game from being selected. A game can also
+    // wait behind itself — its trigger fired again while it was open — and be
+    // played before its turn comes.
+    final held = _gameHeldBack(campaign);
+    if (held != null) {
+      iamLog('pending campaign ${campaign.key} dropped: $held');
+      return;
+    }
 
     final capState = _cap.snapshot();
     // Asked as "may it display now", not "has it ever displayed". A repeatable
@@ -965,7 +1093,7 @@ class InAppMessagingService {
       capState: capState,
       now: _clock(),
     )) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it may not '
+      iamLog('pending campaign ${campaign.key} dropped: it may not '
           'display again yet');
       return;
     }
@@ -983,12 +1111,45 @@ class InAppMessagingService {
     // as a non sequitur to whatever it was answering.
     final quiet = _quietHours;
     if (quiet != null && quiet.contains(_clock())) {
-      iamLog('pending campaign "${campaign.campaignId}" dropped: it is now '
+      iamLog('pending campaign ${campaign.key} dropped: it is now '
           'inside the quiet-hours window');
       return;
     }
 
     _tryPresent(campaign);
+  }
+
+  /// [campaign] as the latest sync describes it, or null when that sync no
+  /// longer carries it.
+  InAppMessageCampaign? _latestVersionOf(InAppMessageCampaign campaign) {
+    for (final candidate in _campaigns) {
+      if (candidate.key == campaign.key) return candidate;
+    }
+    return null;
+  }
+
+  /// Why [campaign] must not open now although its display rules allow it, or
+  /// null when it may. Always null for a message.
+  ///
+  /// A message carries its own content; a game is a pointer to something live,
+  /// and whether the customer may still play it is the server's call, made at
+  /// each sync. So a game opens only from a set this session's sync confirmed,
+  /// and not again once played until the next sync has rechecked it.
+  ///
+  /// One answer for both ways a game reaches the screen — selected for a
+  /// trigger, or retried after waiting — so a parked game cannot slip past a
+  /// hold that would have stopped it being selected.
+  String? _gameHeldBack(InAppMessageCampaign campaign) {
+    if (!campaign.message.isWidget) return null;
+    if (_campaignsUnconfirmed) {
+      return 'this session\'s sync did not confirm it, and a game must be '
+          'confirmed live before it is opened';
+    }
+    if (_playedSinceSync.contains(campaign.key)) {
+      return 'it was played this session, and the next sync decides whether '
+          'it may be played again';
+    }
+    return null;
   }
 
   /// Retries [_pending] the moment the display floor lapses.
